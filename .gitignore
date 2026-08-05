@@ -1,0 +1,8 @@
+﻿__pycache__/
+*.pyc
+.venv/
+venv/
+third_party/try/
+*.overlay/
+.tmp/
+.DS_Store
