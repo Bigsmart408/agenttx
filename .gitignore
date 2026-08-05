@@ -1,4 +1,4 @@
-﻿__pycache__/
+__pycache__/
 *.pyc
 .venv/
 venv/
@@ -6,3 +6,9 @@ third_party/try/
 *.overlay/
 .tmp/
 .DS_Store
+# AgentTX sessions / scratch (VM only)
+/tmp/agenttx-*
+agenttx-sess-*/
+agenttx-itest-*/
+experiments/results/*.raw
+*.trace

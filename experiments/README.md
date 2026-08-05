@@ -14,3 +14,15 @@ Baselines measured: `bare`, `per_call_try`, `session_try`.
 Temps live under `/tmp/agenttx-*` and are deleted by the script.
 Only curated CSVs under `experiments/results/` are kept for analysis.
 Do not push until explicitly requested.
+
+
+## Step 2 — shared overlay + ledger
+
+```bash
+cd /home/bfq/agenttx
+PYTHONPATH=src python3 experiments/scripts/test_ledger.py
+PYTHONPATH=src python3 experiments/scripts/demo_trajectory.py
+PYTHONPATH=src python3 experiments/scripts/bench_shared_overlay.py 20 3
+```
+
+Compares `per_call_try` vs `shared_overlay` (`try -N` reuse + effect ledger).
