@@ -1,0 +1,4 @@
+mode,n_calls,repeats,total_s_mean,total_s_stdev,per_call_s_mean
+bare,5,1,0.007606,0.000000,0.001521
+per_call_try,5,1,0.787118,0.000000,0.157424
+session_try,5,1,0.159506,0.000000,0.031901
