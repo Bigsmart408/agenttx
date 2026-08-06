@@ -80,7 +80,7 @@ class Ledger:
         step = Step(step_id=len(self.steps), tool_name=tool_name, effects=list(effects))
         written = self._writer_index()
         for e in step.effects:
-            if e.kind == EffectKind.READ and e.path in written:
+            if e.kind in (EffectKind.READ, EffectKind.NEGATIVE) and e.path in written:
                 step.parents.add(written[e.path])
             if e.kind in (EffectKind.WRITE, EffectKind.DELETE) and e.path in written:
                 step.parents.add(written[e.path])

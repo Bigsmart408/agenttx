@@ -58,3 +58,24 @@ def test_failed_metadata_replace_preserves_previous_session(
     assert json.loads(meta.read_text(encoding="utf-8"))["ledger"]["steps"] == []
     assert list(session.glob(".agenttx.json.*.tmp")) == []
     tx.close(destroy=True)
+
+
+def test_trace_mode_survives_session_reload(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    session = tmp_path / "session"
+    workspace.mkdir()
+
+    tx = AgentTX.begin(
+        workdir=workspace,
+        session_dir=session,
+        trace_reads=False,
+    )
+    tx.close(destroy=False)
+
+    resumed = AgentTX.load(session)
+    try:
+        assert resumed.trace_reads is False
+        assert resumed.pool is not None
+        assert resumed.pool.trace_reads is False
+    finally:
+        resumed.close(destroy=True)

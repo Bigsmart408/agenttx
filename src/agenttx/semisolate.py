@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Sequence
 from .effects import SummaryEntry, diff_summaries, parse_try_summary
 from .ledger import Effect, EffectKind
 from .layers import LayerStore
+from .trace import parse_strace_effects
 
 _WHITEOUT_DIGEST = "<agenttx:whiteout>"
 
@@ -35,6 +36,7 @@ class SharedSemisolate:
     try_bin: Path = field(default_factory=_default_try_bin)
     sandbox_dir: Optional[Path] = None
     hide_network: bool = False
+    trace_reads: bool = True
     _owns_sandbox: bool = False
     _step_count: int = 0
     _closed: bool = False
@@ -45,6 +47,11 @@ class SharedSemisolate:
     def __post_init__(self) -> None:
         self.workspace = Path(self.workspace).resolve()
         self.try_bin = Path(self.try_bin)
+        if self.trace_reads and shutil.which("strace") is None:
+            raise RuntimeError(
+                "automatic dependency tracing requires strace; "
+                "construct SharedSemisolate(trace_reads=False) to opt out"
+            )
         if self.sandbox_dir is None:
             self.sandbox_dir = Path(tempfile.mkdtemp(prefix="agenttx-sandbox-", dir="/tmp"))
             self._owns_sandbox = True
@@ -96,6 +103,14 @@ class SharedSemisolate:
                 mode = entry_stat.st_mode
                 rel = entry.relative_to(upper)
                 logical = Path("/" + rel.as_posix())
+
+                # Read tracing writes an internal raw log into /tmp inside the
+                # overlay. Ignore crash leftovers and never expose them as effects.
+                if (
+                    rel.parent == Path("tmp")
+                    and entry.name.startswith(".agenttx-strace-")
+                ):
+                    continue
 
                 # OverlayFS uses character devices as whiteouts on this VM. Some
                 # union implementations use .wh.<name> files instead.
@@ -164,12 +179,54 @@ class SharedSemisolate:
         if self.hide_network:
             flags.insert(0, "-x")
         script = self._write_cmd_script(argv)
+        command = ["bash", str(script)]
+        trace_upper: Optional[Path] = None
+        if self.trace_reads:
+            strace_bin = shutil.which("strace")
+            assert strace_bin is not None  # validated during initialization
+            session_token = hashlib.sha256(
+                str(self.sandbox_dir).encode("utf-8")
+            ).hexdigest()[:12]
+            trace_name = (
+                f".agenttx-strace-{session_token}-{os.getpid()}-"
+                f"{self._step_count}.raw"
+            )
+            trace_logical = Path("/tmp") / trace_name
+            trace_upper = self.sandbox_dir / "upperdir" / "tmp" / trace_name
+            command = [
+                strace_bin,
+                "-yy",
+                "-f",
+                "-s",
+                "4096",
+                "--seccomp-bpf",
+                "--trace=%file,process",
+                "-o",
+                str(trace_logical),
+                *command,
+            ]
+
         t0 = time.perf_counter()
         try:
-            cp = self._run_try([*flags, "--", "bash", str(script)], cwd=self.workspace)
+            cp = self._run_try([*flags, "--", *command], cwd=self.workspace)
         finally:
             shutil.rmtree(script.parent, ignore_errors=True)
         duration = time.perf_counter() - t0
+
+        trace_effects: List[Effect] = []
+        if trace_upper is not None:
+            try:
+                if not trace_upper.is_file():
+                    raise RuntimeError(
+                        "strace did not produce the expected dependency log"
+                    )
+                trace_effects = parse_strace_effects(
+                    trace_upper.read_text(encoding="utf-8", errors="replace"),
+                    self.workspace,
+                )
+            finally:
+                trace_upper.unlink(missing_ok=True)
+
         # Digests alone detect writes/deletes without a second try summary process.
         dig_after = self.upperdir_digests()
         self._cached_digests = dig_after
@@ -181,7 +238,9 @@ class SharedSemisolate:
         for path in dig_before:
             if path not in dig_after:
                 effects_by_path[path] = Effect(path=path, kind=EffectKind.DELETE)
-        effects = [effects_by_path[path] for path in sorted(effects_by_path)]
+        effects = trace_effects + [
+            effects_by_path[path] for path in sorted(effects_by_path)
+        ]
         # Keep cached summary lazily empty; refresh only on explicit commit/status.
         after = dict(self._cached_summary)
         idx = self._step_count

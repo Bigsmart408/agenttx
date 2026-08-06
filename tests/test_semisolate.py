@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+import agenttx.semisolate as semisolate_module
 from agenttx.semisolate import SharedSemisolate
 
 
@@ -26,3 +27,21 @@ def test_include_patterns_are_exact_suffixes_and_include_parents(tmp_path: Path)
     assert all(pattern.endswith("$") for pattern in patterns)
     assert any(r"data\.txt$" in pattern for pattern in patterns)
     assert not any("sibling" in pattern for pattern in patterns)
+
+
+def test_read_tracing_fails_closed_when_strace_is_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(semisolate_module.shutil, "which", lambda _: None)
+    with pytest.raises(RuntimeError, match="requires strace"):
+        SharedSemisolate(
+            workspace=tmp_path,
+            sandbox_dir=tmp_path / "traced-session",
+        )
+
+    pool = SharedSemisolate(
+        workspace=tmp_path,
+        sandbox_dir=tmp_path / "untraced-session",
+        trace_reads=False,
+    )
+    pool.close(destroy=True)

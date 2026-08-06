@@ -71,6 +71,7 @@ class AgentTX:
     history: List[ToolCallRecord] = field(default_factory=list)
     pool: Optional[SharedSemisolate] = None
     hide_network: bool = False
+    trace_reads: bool = True
     _meta_path: Optional[Path] = None
 
     def __post_init__(self) -> None:
@@ -82,18 +83,25 @@ class AgentTX:
         workdir: Optional[Path] = None,
         session_dir: Optional[Path] = None,
         hide_network: bool = False,
+        trace_reads: bool = True,
     ) -> "AgentTX":
         workdir = Path(workdir).resolve() if workdir else Path.cwd()
         pool = SharedSemisolate(
             workspace=workdir,
             sandbox_dir=session_dir,
             hide_network=hide_network,
+            trace_reads=trace_reads,
         )
         # if caller passed session_dir, SharedSemisolate should not destroy foreign dirs? 
         # mark ownership: if session_dir provided, still allow destroy on close(destroy=True)
         if session_dir is not None:
             pool._owns_sandbox = True
-        tx = cls(workspace=workdir, pool=pool, hide_network=hide_network)
+        tx = cls(
+            workspace=workdir,
+            pool=pool,
+            hide_network=hide_network,
+            trace_reads=trace_reads,
+        )
         tx._persist()
         return tx
 
@@ -108,11 +116,13 @@ class AgentTX:
             workspace=Path(data["workspace"]),
             ledger=Ledger.from_dict(data.get("ledger", {})),
             hide_network=bool(data.get("hide_network", False)),
+            trace_reads=bool(data.get("trace_reads", True)),
         )
         tx.pool = SharedSemisolate(
             workspace=tx.workspace,
             sandbox_dir=session_dir,
             hide_network=tx.hide_network,
+            trace_reads=tx.trace_reads,
         )
         tx.pool._owns_sandbox = True
         # Layer snapshots are keyed by ledger step id. Resume at the next id so
@@ -130,6 +140,7 @@ class AgentTX:
         payload = {
             "workspace": str(self.workspace),
             "hide_network": self.hide_network,
+            "trace_reads": self.trace_reads,
             "ledger": self.ledger.to_dict(),
         }
         _atomic_write_json(meta, payload)
@@ -137,7 +148,11 @@ class AgentTX:
 
     def start(self) -> None:
         if self.pool is None:
-            self.pool = SharedSemisolate(workspace=self.workspace, hide_network=self.hide_network)
+            self.pool = SharedSemisolate(
+                workspace=self.workspace,
+                hide_network=self.hide_network,
+                trace_reads=self.trace_reads,
+            )
 
     def run_tool(
         self,
@@ -258,6 +273,7 @@ class AgentTX:
             "workspace": str(self.workspace),
             "session_dir": str(self.pool.session_dir) if self.pool else None,
             "hide_network": self.hide_network,
+            "trace_reads": self.trace_reads,
             "steps": len(self.ledger.steps),
             "committed_frontier": self.ledger.committed_frontier,
         }

@@ -29,6 +29,13 @@ def test_temporal_vs_causal():
     assert led.causal_dependents(0) == [0, 2]
 
 
+def test_negative_lookup_depends_on_prior_delete():
+    led = Ledger()
+    deleted = led.add_step("delete", [Effect("/gone", EffectKind.DELETE)])
+    lookup = led.add_step("lookup", [Effect("/gone", EffectKind.NEGATIVE)])
+    assert lookup.parents == {deleted.step_id}
+
+
 def test_frontier_blocks_rollback():
     led = Ledger()
     led.add_step("w1", [Effect("/a", EffectKind.WRITE)])

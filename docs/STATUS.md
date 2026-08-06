@@ -9,13 +9,14 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 - Design notes in `docs/problem.md`, `docs/architecture.md`.
 
 ### Runtime (v0)
-- **Effect ledger** with read/write/delete representation, dependency edges, cascade / temporal rollback, and a commit frontier. Filesystem writes/deletes are captured automatically; reads still require explicit hints.
+- **Effect ledger** with automatically captured workspace reads, negative lookups, writes, and deletes; dependency edges; cascade / temporal rollback; and a commit frontier.
 - **Shared semisolate** pool (`try -N`) with upperdir digests + interactive `try commit` auto-confirm.
 - **Surgical rollback** via per-step upperdir snapshots (`layers.py`).
 - **True path-selective commit** from the ledger frontier using anchored `try -I` filters; overlapping later writes fail closed.
 - OverlayFS character-device and `.wh.*` **whiteouts are recorded as delete effects**.
 - Metadata-aware fingerprints record repeated `chmod`/`chown`/`touch`, empty directories, renames, and symlink changes.
 - Session resume preserves monotonically increasing snapshot ids; `agenttx.json` uses same-directory atomic replace with file and directory `fsync`.
+- Automatic strace-based dependency capture records successful workspace reads and ENOENT/ENOTDIR negative lookups; tracing is default-on and fails closed unless explicitly disabled.
 - **Coding harness** + commit **policy** (allow/deny, ignore caches).
 - **LLM tool agent** (`scripts/agenttx-agent`) with OpenAI-compatible / DeepSeek config in `~/.agenttx_llm.env` (not in git).
 
@@ -26,6 +27,7 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 | Shared overlay + ledger works | Step 2 | `shared_overlay_n20.csv`, ledger JSON |
 | Surgical cascade rollback | Step 3 demo + suite | `demo_surgical_rollback.py`, `evidence_suite.*` |
 | Native frontier-selective commit | Step 5 + real-try integration | `test_runtime_integration.py`, `evidence_suite.*` |
+| Automatic read/negative dependencies | Step 7 + real-strace integration | `test_trace.py`, `trace_overhead.{csv,md}` |
 | Long coding traj under AgentTX | Step 4 | `long_trajectory.csv` |
 | Live DeepSeek speculative edit + policy commit | live demo | `live_agent_ledger.json` |
 | AgentTX-LLM vs Aider refactor | compare bench | `refactor_agent_compare.{csv,md}` |
@@ -53,12 +55,12 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 ## Remaining / open
 
 ### High priority (systems)
-1. **Automatic read and negative-lookup tracing** - filesystem writes/deletes are observed, but read dependencies currently require extra_reads; causal rollback is therefore incomplete by default.
-2. **Causal (not only temporal) rollback as default API** - causal_dependents exists; runtime still uses temporal cascade_rollback_targets.
-3. **Same-path historical commit reconstruction** - path-selective partial commit currently fails closed if a later step rewrote a selected path; snapshots could materialize the earlier version safely.
-4. **Crash-atomic filesystem commit** - metadata persistence is atomic, but a crash during multi-path host materialization can still expose a partially committed frontier; add a WAL/recovery protocol.
-5. **Scalable snapshots** - rollback snapshots still copy the accumulated upperdir, so storage and latency grow with speculative state.
-6. **Lower overlay overhead** - shared pool remains substantially slower than bare execution on the evidence trajectory; explore a longer-lived mount or alternative layering design.
+1. **Causal (not only temporal) rollback as default API** - causal_dependents exists and now receives automatic read/negative edges; runtime still uses temporal cascade_rollback_targets.
+2. **Same-path historical commit reconstruction** - path-selective partial commit currently fails closed if a later step rewrote a selected path; snapshots could materialize the earlier version safely.
+3. **Crash-atomic filesystem commit** - metadata persistence is atomic, but a crash during multi-path host materialization can still expose a partially committed frontier; add a WAL/recovery protocol.
+4. **Scalable snapshots** - rollback snapshots still copy the accumulated upperdir, so storage and latency grow with speculative state.
+5. **Lower overlay overhead** - shared pool remains substantially slower than bare execution on the evidence trajectory; explore a longer-lived mount or alternative layering design.
+6. **Trace portability and completeness** - current capture requires Linux strace, models workspace-local path syscalls, and uses exact-path dependency matching; unsupported syscalls and hierarchical aliasing need a formal coverage story.
 7. **Non-filesystem effects** - network/cloud side effects (currently coarse hide_network only).
 
 ### Evaluation gaps

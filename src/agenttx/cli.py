@@ -15,6 +15,7 @@ def cmd_begin(args: argparse.Namespace) -> int:
     tx = AgentTXRuntime.begin(
         workdir=Path(args.workdir).resolve() if args.workdir else Path.cwd(),
         hide_network=args.no_network,
+        trace_reads=not args.no_trace_reads,
     )
     print(json.dumps(tx.status(), indent=2))
     print(tx.pool.session_dir)
@@ -88,6 +89,11 @@ def build_parser() -> argparse.ArgumentParser:
     b = sp.add_parser("begin", help="start a trajectory session")
     b.add_argument("--workdir", default=None)
     b.add_argument("--no-network", action="store_true")
+    b.add_argument(
+        "--no-trace-reads",
+        action="store_true",
+        help="disable automatic workspace read/negative-lookup tracing",
+    )
     b.set_defaults(func=cmd_begin)
 
     r = sp.add_parser("run", help="run one tool call inside the session")

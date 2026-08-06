@@ -46,3 +46,14 @@ PYTHONPATH=src:. python3 experiments/scripts/bench_scaling.py
 Results: `experiments/results/evidence_suite.*`, `experiments/results/scaling_curve.*`.
 See also `docs/STATUS.md` for completed vs remaining.
 
+
+
+## Step 7 ? automatic dependency-tracing overhead
+
+```bash
+PYTHONPATH=src:. python3 experiments/scripts/bench_trace_overhead.py -n 10 --repeats 3
+```
+
+Compares the same shared AgentTX no-op trajectory with automatic workspace
+read/negative tracing disabled and enabled. Results are written to
+`experiments/results/trace_overhead.{csv,md}`.
