@@ -1,12 +1,15 @@
 """Shared/incremental semisolate pool backed by binpash/try -N DIR."""
 from __future__ import annotations
-import hashlib, shlex, shutil, subprocess, tempfile, time
+import hashlib, os, re, shlex, shutil, stat, subprocess, tempfile, time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 from .effects import SummaryEntry, diff_summaries, parse_try_summary
 from .ledger import Effect, EffectKind
 from .layers import LayerStore
+
+_WHITEOUT_DIGEST = "<agenttx:whiteout>"
+
 
 def _default_try_bin() -> Path:
     root = Path(__file__).resolve().parents[2]
@@ -80,12 +83,22 @@ class SharedSemisolate:
         out: Dict[str, str] = {}
         if not upper.exists():
             return out
-        for f in upper.rglob("*"):
-            if not f.is_file() or f.name.startswith(".wh."):
-                continue
-            abs_path = "/" + f.relative_to(upper).as_posix()
+        for entry in upper.rglob("*"):
             try:
-                out[abs_path] = hashlib.sha256(f.read_bytes()).hexdigest()
+                mode = entry.lstat().st_mode
+                rel = entry.relative_to(upper)
+                # OverlayFS uses character devices as whiteouts on this VM. Some
+                # union implementations use .wh.<name> files instead.
+                if entry.name.startswith(".wh."):
+                    rel = rel.with_name(entry.name[4:])
+                    out["/" + rel.as_posix()] = _WHITEOUT_DIGEST
+                elif stat.S_ISCHR(mode):
+                    out["/" + rel.as_posix()] = _WHITEOUT_DIGEST
+                elif stat.S_ISLNK(mode):
+                    target = os.readlink(str(entry)).encode("utf-8", "surrogateescape")
+                    out["/" + rel.as_posix()] = hashlib.sha256(b"link\0" + target).hexdigest()
+                elif stat.S_ISREG(mode):
+                    out["/" + rel.as_posix()] = hashlib.sha256(entry.read_bytes()).hexdigest()
             except OSError:
                 continue
         return out
@@ -123,13 +136,15 @@ class SharedSemisolate:
         # Digests alone detect writes/deletes without a second try summary process.
         dig_after = self.upperdir_digests()
         self._cached_digests = dig_after
-        effects = []
+        effects_by_path = {}
         for path, h in dig_after.items():
             if dig_before.get(path) != h:
-                effects.append(Effect(path=path, kind=EffectKind.WRITE))
+                kind = EffectKind.DELETE if h == _WHITEOUT_DIGEST else EffectKind.WRITE
+                effects_by_path[path] = Effect(path=path, kind=kind)
         for path in dig_before:
             if path not in dig_after:
-                effects.append(Effect(path=path, kind=EffectKind.DELETE))
+                effects_by_path[path] = Effect(path=path, kind=EffectKind.DELETE)
+        effects = [effects_by_path[path] for path in sorted(effects_by_path)]
         # Keep cached summary lazily empty; refresh only on explicit commit/status.
         after = dict(self._cached_summary)
         idx = self._step_count
@@ -139,11 +154,38 @@ class SharedSemisolate:
     def step_effects(self, result: StepResult) -> List[Effect]:
         return list(result.effects)
 
-    def commit(self) -> subprocess.CompletedProcess:
-        """Commit overlay to host. try commit prompts; auto-confirm with y."""
+    def _include_patterns(self, paths: Sequence[str]) -> List[str]:
+        """Build exact suffix regexes for try's upperdir `find` output."""
+        patterns = set()
+        for raw_path in paths:
+            if "\n" in raw_path or "\r" in raw_path:
+                raise ValueError("commit paths cannot contain newlines")
+            path = Path(raw_path)
+            if not path.is_absolute():
+                raise ValueError(f"commit path must be absolute: {raw_path}")
+            if path == path.parent:
+                raise ValueError("refusing to selectively commit the filesystem root")
+            # Include exact parents so a newly-created directory can be
+            # materialized without accidentally including sibling changes.
+            current = path
+            while current != current.parent:
+                patterns.add(re.escape(str(current)) + "$")
+                if current == self.workspace:
+                    break
+                current = current.parent
+        return sorted(patterns, key=lambda pattern: (pattern.count("/"), pattern))
+
+    def commit(self, paths: Optional[Sequence[str]] = None) -> subprocess.CompletedProcess:
+        """Commit all effects, or only exact ledger-selected paths, to the host."""
         assert self.sandbox_dir is not None
-        cmd = [str(self.try_bin), "commit", str(self.sandbox_dir)]
-        return subprocess.run(
+        if paths is not None and not paths:
+            return subprocess.CompletedProcess([], 0, "", "")
+        cmd = [str(self.try_bin)]
+        if paths is not None:
+            for pattern in self._include_patterns(paths):
+                cmd.extend(["-I", pattern])
+        cmd.extend(["commit", str(self.sandbox_dir)])
+        cp = subprocess.run(
             cmd,
             cwd=str(self.workspace),
             text=True,
@@ -152,6 +194,10 @@ class SharedSemisolate:
             stderr=subprocess.PIPE,
             check=False,
         )
+        if cp.returncode == 0:
+            self._cached_summary = {}
+            self._cached_digests = self.upperdir_digests()
+        return cp
 
     def reset(self) -> None:
         """Hard reset overlay (legacy). Prefer rollback_steps for surgical restore."""

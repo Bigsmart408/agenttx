@@ -1,4 +1,4 @@
-﻿# AgentTX
+# AgentTX
 
 Transactional side-effect control for multi-step agentic workflows.
 
@@ -29,9 +29,7 @@ speculative execution, and cascade rollback / selective commit.
 
 ## Status
 
-Scaffold for OSDI-oriented systems work (Problem A).
-
-## Status
+Working v0 prototype for OSDI-oriented systems work (Problem A), including a causal ledger, shared semisolate, surgical temporal rollback, and path-selective commit.
 
 See [`docs/STATUS.md`](docs/STATUS.md) for completed work, evidence artifacts, and remaining gaps.
 

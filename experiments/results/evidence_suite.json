@@ -2,7 +2,7 @@
   {
     "exp": "cascade_rollback",
     "ok": true,
-    "wall_s": 1.1081894380040467,
+    "wall_s": 1.1750004019995686,
     "aborted": [
       1,
       2,
@@ -30,7 +30,7 @@
   {
     "exp": "selective_commit_via_rollback",
     "ok": true,
-    "wall_s": 0.8877445660036756,
+    "wall_s": 0.9623290589952376,
     "aborted": [
       2,
       3
@@ -44,21 +44,21 @@
     "detail": "rollback(2)+commit keeps keep0/1 only"
   },
   {
-    "exp": "naive_frontier_commit_gap",
+    "exp": "frontier_selective_commit",
     "ok": true,
-    "wall_s": 0.7447069949994329,
-    "fs_selective": false,
+    "wall_s": 0.8232103680056753,
+    "fs_selective": true,
     "host_after_commit": {
       "keep0.txt": true,
       "keep1.txt": true,
-      "drop2.txt": true
+      "later2.txt": false
     },
-    "detail": "GAP: commit(1) still writes drop2 (full overlay commit)"
+    "detail": "commit(1) writes keep0/1 while later2 remains speculative"
   },
   {
     "exp": "host_pollution_vs_bare",
     "ok": true,
-    "wall_s": 1.3036950399982743,
+    "wall_s": 1.3677295870002126,
     "bare_polluted_mid_traj": true,
     "agenttx_polluted_mid_traj": false,
     "agenttx_polluted_before_commit": false,
@@ -68,7 +68,7 @@
   {
     "exp": "mistake_recovery",
     "ok": true,
-    "wall_s": 2.334275572997285,
+    "wall_s": 2.660600496994448,
     "bad_test_rc": 1,
     "good_test_rc": 0,
     "host_saw_bug_before_rollback": false,
@@ -85,9 +85,9 @@
   {
     "exp": "policy_blocks_dangerous_commit",
     "ok": true,
-    "wall_s": 0.5466972720023477,
+    "wall_s": 0.5575688560056733,
     "commit_blocked": true,
-    "block_reason": "commit blocked by policy: /tmp/agenttx-ev-pol-9qma6xak/ws/secrets/key.pem (denied by deny_globs)",
+    "block_reason": "commit blocked by policy: /tmp/agenttx-ev-pol-ttvf2i6z/ws/secrets/key.pem (denied by deny_globs)",
     "host_had_secret_when_blocked": false,
     "host_ok_after_selective_commit": true,
     "host_secret_after_selective_commit": false,
@@ -97,7 +97,7 @@
     "exp": "isolation_matrix",
     "mode": "bare",
     "repeats": 2,
-    "wall_s_mean": 0.7989760409982409,
+    "wall_s_mean": 0.9737105559979682,
     "failures_mean": 0.0,
     "host_polluted_before_commit_rate": 1.0,
     "ok": true,
@@ -107,7 +107,7 @@
     "exp": "isolation_matrix",
     "mode": "agenttx",
     "repeats": 2,
-    "wall_s_mean": 5.921143037994625,
+    "wall_s_mean": 6.388230785501946,
     "failures_mean": 0.0,
     "host_polluted_before_commit_rate": 0.0,
     "ok": true,

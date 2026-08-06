@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence
 
 from .effects import effects_from_paths
-from .ledger import Effect, Ledger
+from .ledger import Effect, EffectKind, Ledger
 from .semisolate import SharedSemisolate
 
 
@@ -138,10 +138,14 @@ class AgentTX:
     def rollback_from(self, step_id: Optional[int] = None) -> List[int]:
         if not self.ledger.steps:
             return []
+        active = [
+            s.step_id
+            for s in self.ledger.steps
+            if s.step_id > self.ledger.committed_frontier and s.status != "rolled_back"
+        ]
+        if not active:
+            return []
         if step_id is None:
-            active = [s.step_id for s in self.ledger.steps if s.status != "rolled_back"]
-            if not active:
-                return []
             step_id = max(active)
         targets = self.ledger.cascade_rollback_targets(step_id)
         self.ledger.mark_rolled_back(targets)
@@ -153,15 +157,63 @@ class AgentTX:
     def rollback(self, step_id: Optional[int] = None) -> List[int]:
         return self.rollback_from(step_id)
 
+    @staticmethod
+    def _paths_overlap(left: str, right: str) -> bool:
+        left = left.rstrip("/") or "/"
+        right = right.rstrip("/") or "/"
+        return (
+            left == right
+            or left.startswith(right + "/")
+            or right.startswith(left + "/")
+        )
+
+    def _commit_paths(self, up_to: int) -> List[str]:
+        selected = set()
+        later = set()
+        for step in self.ledger.steps:
+            if step.status == "rolled_back" or step.step_id <= self.ledger.committed_frontier:
+                continue
+            target = selected if step.step_id <= up_to else later
+            for effect in step.effects:
+                if effect.kind in (EffectKind.WRITE, EffectKind.DELETE):
+                    target.add(effect.path)
+
+        conflicts = sorted(
+            (path, later_path)
+            for path in selected
+            for later_path in later
+            if self._paths_overlap(path, later_path)
+        )
+        if conflicts:
+            details = ", ".join(f"{a} <> {b}" for a, b in conflicts[:8])
+            raise ValueError(
+                "partial commit crosses later writes to the same path; "
+                f"roll back or include those steps first: {details}"
+            )
+        return sorted(selected)
+
     def commit_frontier(self, up_to: Optional[int] = None) -> int:
+        if up_to is not None and (up_to < 0 or up_to >= len(self.ledger.steps)):
+            raise ValueError(f"invalid commit frontier {up_to}")
         if not self.ledger.steps:
             return self.ledger.committed_frontier
+        active = [
+            s.step_id
+            for s in self.ledger.steps
+            if s.step_id > self.ledger.committed_frontier and s.status != "rolled_back"
+        ]
+        if not active:
+            return self.ledger.committed_frontier
         if up_to is None:
-            up_to = max(s.step_id for s in self.ledger.steps if s.status != "rolled_back")
+            up_to = max(active)
+        if up_to <= self.ledger.committed_frontier:
+            return self.ledger.committed_frontier
+        paths = self._commit_paths(up_to)
         assert self.pool is not None
-        cp = self.pool.commit()
-        if cp.returncode != 0:
-            raise RuntimeError(f"try commit failed: {cp.stderr}")
+        if paths:
+            cp = self.pool.commit(paths=paths)
+            if cp.returncode != 0:
+                raise RuntimeError(f"try commit failed: {cp.stderr}")
         self.ledger.advance_frontier(up_to)
         self._persist()
         return self.ledger.committed_frontier

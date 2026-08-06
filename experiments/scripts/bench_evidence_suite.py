@@ -123,9 +123,9 @@ def exp_selective_commit_via_rollback() -> dict:
         _cleanup(scratch)
 
 
-def exp_naive_frontier_commit_gap() -> dict:
-    """Documents current gap: commit(up_to) still materializes full overlay."""
-    scratch = Path(tempfile.mkdtemp(prefix="agenttx-ev-gap-", dir="/tmp"))
+def exp_frontier_selective_commit() -> dict:
+    """Verify commit(up_to) leaves independent later paths speculative."""
+    scratch = Path(tempfile.mkdtemp(prefix="agenttx-ev-frontier-", dir="/tmp"))
     ws = scratch / "ws"
     ws.mkdir()
     t0 = time.perf_counter()
@@ -133,24 +133,21 @@ def exp_naive_frontier_commit_gap() -> dict:
         tx = AgentTX.begin(workdir=ws, session_dir=scratch / "sess")
         tx.run_tool("keep0", ["bash", "-c", "echo keep0 > keep0.txt"])
         tx.run_tool("keep1", ["bash", "-c", "echo keep1 > keep1.txt"])
-        tx.run_tool("drop2", ["bash", "-c", "echo drop2 > drop2.txt"])
-        tx.commit(1)  # ledger frontier=1, but try commit dumps whole upperdir
-        host = host_markers(ws, ["keep0.txt", "keep1.txt", "drop2.txt"])
+        tx.run_tool("later2", ["bash", "-c", "echo later2 > later2.txt"])
+        tx.commit(1)
+        host = host_markers(ws, ["keep0.txt", "keep1.txt", "later2.txt"])
         tx.close(destroy=True)
-        fs_selective = host["keep0.txt"] and host["keep1.txt"] and (not host["drop2.txt"])
-        # ok=True means we *correctly detected* the gap (FS not selective)
-        gap_confirmed = host["drop2.txt"] is True
+        fs_selective = host["keep0.txt"] and host["keep1.txt"] and not host["later2.txt"]
         return {
-            "exp": "naive_frontier_commit_gap",
-            "ok": gap_confirmed,  # evidence that gap exists (expected today)
+            "exp": "frontier_selective_commit",
+            "ok": fs_selective,
             "wall_s": time.perf_counter() - t0,
             "fs_selective": fs_selective,
             "host_after_commit": host,
-            "detail": "GAP: commit(1) still writes drop2 (full overlay commit)",
+            "detail": "commit(1) writes keep0/1 while later2 remains speculative",
         }
     finally:
         _cleanup(scratch)
-
 
 def exp_host_pollution_vs_bare() -> dict:
     """Same multi-write traj: bare pollutes immediately; agenttx only after commit."""
@@ -418,8 +415,8 @@ def main() -> int:
     rows.append(exp_selective_commit_via_rollback())
     print(json.dumps({k: rows[-1][k] for k in ("exp", "ok", "wall_s")}, indent=2), flush=True)
 
-    print("=== naive_frontier_commit_gap ===", flush=True)
-    rows.append(exp_naive_frontier_commit_gap())
+    print("=== frontier_selective_commit ===", flush=True)
+    rows.append(exp_frontier_selective_commit())
     print(json.dumps({k: rows[-1][k] for k in ("exp", "ok", "wall_s", "fs_selective") if k in rows[-1]}, indent=2), flush=True)
 
     print("=== host_pollution_vs_bare ===", flush=True)
@@ -453,7 +450,7 @@ def main() -> int:
         "detail",
     ]
     with csv_path.open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+        w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore", lineterminator="\n")
         w.writeheader()
         for r in rows:
             w.writerow(r)
