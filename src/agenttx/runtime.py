@@ -146,7 +146,7 @@ class AgentTX:
         targets = self.ledger.cascade_rollback_targets(step_id)
         self.ledger.mark_rolled_back(targets)
         assert self.pool is not None
-        self.pool.reset()
+        self.pool.rollback_steps(targets)
         self._persist()
         return targets
 

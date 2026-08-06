@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 from .effects import SummaryEntry, diff_summaries, parse_try_summary
 from .ledger import Effect, EffectKind
+from .layers import LayerStore
 
 def _default_try_bin() -> Path:
     root = Path(__file__).resolve().parents[2]
@@ -36,6 +37,7 @@ class SharedSemisolate:
     _closed: bool = False
     _cached_summary: Dict[str, SummaryEntry] = field(default_factory=dict)
     _cached_digests: Dict[str, str] = field(default_factory=dict)
+    layers: Optional[LayerStore] = None
 
     def __post_init__(self) -> None:
         self.workspace = Path(self.workspace).resolve()
@@ -43,9 +45,13 @@ class SharedSemisolate:
         if self.sandbox_dir is None:
             self.sandbox_dir = Path(tempfile.mkdtemp(prefix="agenttx-sandbox-", dir="/tmp"))
             self._owns_sandbox = True
+        if self.layers is None:
+            self.layers = LayerStore(self.sandbox_dir / "layers")
         else:
             self.sandbox_dir = Path(self.sandbox_dir)
             self.sandbox_dir.mkdir(parents=True, exist_ok=True)
+        if self.layers is None:
+            self.layers = LayerStore(self.sandbox_dir / "layers")
 
     @property
     def session_dir(self) -> Path:
@@ -101,6 +107,9 @@ class SharedSemisolate:
         assert self.sandbox_dir is not None
         before = dict(self._cached_summary)
         dig_before = dict(self._cached_digests)
+        assert self.layers is not None and self.sandbox_dir is not None
+        upper = self.sandbox_dir / "upperdir"
+        self.layers.snapshot_before(self._step_count, upper)
         flags = ["-N", str(self.sandbox_dir)]
         if self.hide_network:
             flags.insert(0, "-x")
@@ -135,10 +144,11 @@ class SharedSemisolate:
         return self._run_try(["commit", str(self.sandbox_dir)])
 
     def reset(self) -> None:
+        """Hard reset overlay (legacy). Prefer rollback_steps for surgical restore."""
         assert self.sandbox_dir is not None
         subprocess.run(["chmod", "-R", "u+rwX", str(self.sandbox_dir)], check=False)
         for child in list(self.sandbox_dir.iterdir()):
-            if child.name == "agenttx.json":
+            if child.name in ("agenttx.json", "layers"):
                 continue
             if child.is_dir():
                 shutil.rmtree(child, ignore_errors=True)
@@ -149,6 +159,18 @@ class SharedSemisolate:
                     pass
         self._cached_summary = {}
         self._cached_digests = {}
+
+    def rollback_steps(self, step_ids: List[int]) -> None:
+        """Restore upperdir to snapshot taken before min(step_ids)."""
+        assert self.sandbox_dir is not None and self.layers is not None
+        if not step_ids:
+            return
+        first = min(step_ids)
+        upper = self.sandbox_dir / "upperdir"
+        self.layers.restore_before(first, upper)
+        self.layers.drop_from(step_ids)
+        self._cached_summary = {}
+        self._cached_digests = self.upperdir_digests()
 
     def close(self, destroy: bool = True) -> None:
         if self._closed:
