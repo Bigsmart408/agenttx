@@ -136,7 +136,7 @@ def test_causal_rollback_preserves_independent_later_step(tmp_path: Path) -> Non
         tx.close(destroy=True)
 
 
-def test_causal_rollback_rejects_retained_descendant_effects(
+def test_causal_rollback_includes_retained_descendant_writer(
     tmp_path: Path,
 ) -> None:
     ws, tx = _begin(tmp_path, "causal-overlap")
@@ -148,10 +148,11 @@ def test_causal_rollback_rejects_retained_descendant_effects(
             "child", ["bash", "-c", "echo two > pkg/b.txt"]
         )
 
-        with pytest.raises(ValueError, match="overlaps retained effects"):
-            tx.rollback_causal(first.step_id)
-        assert tx.ledger.steps[first.step_id].status == "speculative"
-        assert tx.ledger.steps[retained.step_id].status == "speculative"
+        assert tx.rollback_causal(first.step_id) == [
+            first.step_id,
+            retained.step_id,
+        ]
+        assert not (ws / "pkg").exists()
     finally:
         tx.close(destroy=True)
 
@@ -171,6 +172,32 @@ def test_causal_rollback_restores_lower_delete_and_keeps_independent(
         assert tx.rollback_causal(deleted.step_id) == [deleted.step_id]
         tx.commit(independent.step_id)
         assert seed.read_text(encoding="utf-8") == "seed\n"
+        assert (ws / "keep.txt").read_text(encoding="utf-8") == "keep\n"
+    finally:
+        tx.close(destroy=True)
+
+
+def test_causal_rollback_tracks_parent_directory_read(tmp_path: Path) -> None:
+    ws, tx = _begin(tmp_path, "causal-hierarchy")
+    try:
+        producer = tx.run_tool(
+            "producer",
+            ["bash", "-c", "mkdir pkg; echo one > pkg/data.txt"],
+        )
+        independent = tx.run_tool(
+            "independent", ["bash", "-c", "echo keep > keep.txt"]
+        )
+        consumer = tx.run_tool(
+            "consumer", ["bash", "-c", "cat pkg/data.txt >/dev/null"]
+        )
+
+        assert consumer.parents == [producer.step_id]
+        assert tx.rollback_causal(producer.step_id) == [
+            producer.step_id,
+            consumer.step_id,
+        ]
+        tx.commit(independent.step_id)
+        assert not (ws / "pkg").exists()
         assert (ws / "keep.txt").read_text(encoding="utf-8") == "keep\n"
     finally:
         tx.close(destroy=True)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, Iterable, List, Optional, Set
+from typing import Iterable, List, Optional, Set
 
 
 class EffectKind(str, Enum):
@@ -67,28 +67,56 @@ class Ledger:
             if s.step_id > self.committed_frontier and s.status != "rolled_back"
         )
 
-    def _writer_index(self) -> Dict[str, int]:
-        written: Dict[str, int] = {}
-        for prev in self._uncommitted():
-            for e in prev.effects:
-                if e.kind in (EffectKind.WRITE, EffectKind.DELETE):
-                    written[e.path] = prev.step_id
-        return written
+    @staticmethod
+    def _paths_overlap(left: str, right: str) -> bool:
+        left = left.rstrip("/") or "/"
+        right = right.rstrip("/") or "/"
+        return (
+            left == right
+            or left.startswith(right + "/")
+            or right.startswith(left + "/")
+        )
+
+    def _writers(self) -> List[tuple[str, int]]:
+        return [
+            (effect.path, step.step_id)
+            for step in self._uncommitted()
+            for effect in step.effects
+            if effect.kind in (EffectKind.WRITE, EffectKind.DELETE)
+        ]
+
+    def _negative_lookups(self) -> List[tuple[str, int]]:
+        return [
+            (effect.path, step.step_id)
+            for step in self._uncommitted()
+            for effect in step.effects
+            if effect.kind == EffectKind.NEGATIVE
+        ]
 
     def add_step(self, tool_name: str, effects: Optional[List[Effect]] = None) -> Step:
         effects = effects or []
         step = Step(step_id=len(self.steps), tool_name=tool_name, effects=list(effects))
-        written = self._writer_index()
-        for e in step.effects:
-            if e.kind in (EffectKind.READ, EffectKind.NEGATIVE) and e.path in written:
-                step.parents.add(written[e.path])
-            if e.kind in (EffectKind.WRITE, EffectKind.DELETE) and e.path in written:
-                step.parents.add(written[e.path])
-            if e.kind == EffectKind.WRITE:
-                for prev in self._uncommitted():
-                    for pe in prev.effects:
-                        if pe.kind == EffectKind.NEGATIVE and pe.path == e.path:
-                            step.parents.add(prev.step_id)
+        writers = self._writers()
+        negatives = self._negative_lookups()
+        for effect in step.effects:
+            if effect.kind in (EffectKind.READ, EffectKind.NEGATIVE):
+                step.parents.update(
+                    previous_id
+                    for previous_path, previous_id in writers
+                    if self._paths_overlap(effect.path, previous_path)
+                )
+            if effect.kind in (EffectKind.WRITE, EffectKind.DELETE):
+                step.parents.update(
+                    previous_id
+                    for previous_path, previous_id in writers
+                    if self._paths_overlap(effect.path, previous_path)
+                )
+            if effect.kind == EffectKind.WRITE:
+                step.parents.update(
+                    previous_id
+                    for previous_path, previous_id in negatives
+                    if self._paths_overlap(effect.path, previous_path)
+                )
         self.steps.append(step)
         return step
 

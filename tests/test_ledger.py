@@ -55,6 +55,27 @@ def test_roundtrip():
     assert led2.steps[0].effects[0].path == "/x"
 
 
+def test_parent_child_paths_create_causal_edges():
+    led = Ledger()
+    creator = led.add_step("mkdir", [Effect("/ws/pkg", EffectKind.WRITE)])
+    reader = led.add_step(
+        "read-child", [Effect("/ws/pkg/data.txt", EffectKind.READ)]
+    )
+    writer = led.add_step(
+        "write-child", [Effect("/ws/pkg/other.txt", EffectKind.WRITE)]
+    )
+    missing = led.add_step(
+        "missing", [Effect("/ws/missing", EffectKind.NEGATIVE)]
+    )
+    nested = led.add_step(
+        "nested", [Effect("/ws/missing/child", EffectKind.WRITE)]
+    )
+
+    assert reader.parents == {creator.step_id}
+    assert writer.parents == {creator.step_id}
+    assert nested.parents == {missing.step_id}
+
+
 if __name__ == "__main__":
     test_raw_and_cascade()
     test_temporal_vs_causal()

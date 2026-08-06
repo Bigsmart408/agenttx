@@ -9,7 +9,7 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 - Design notes in `docs/problem.md`, `docs/architecture.md`.
 
 ### Runtime (v0)
-- **Effect ledger** with automatically captured workspace reads, negative lookups, writes, and deletes; dependency edges; cascade / temporal rollback; and a commit frontier.
+- **Effect ledger** with automatically captured workspace reads, negative lookups, writes, and deletes; parent/child path dependency edges; cascade / temporal rollback; and a commit frontier.
 - **Shared semisolate** pool (`try -N`) with upperdir digests + interactive `try commit` auto-confirm.
 - **Surgical rollback** via per-step upperdir snapshots (`layers.py`).
 - **Explicit causal rollback** reconstructs selected write/delete paths from a pre-step snapshot, retains independent later steps, and fails closed on retained-effect overlap; temporal rollback remains the backward-compatible default.
@@ -38,6 +38,7 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 | Interrupted multi-path commit recovery | Step 10 + crash injection | `test_recovery.py`, `commit_wal.py` |
 | Historical same-path frontier commit | Step 11 + real-try integration | `test_runtime_integration.py`, `layers.py` |
 | Content-addressed snapshot storage | Step 12 benchmark | `bench_snapshot_storage.py`, `snapshot_storage.{csv,md}` |
+| Hierarchical causal dependencies | Step 13 + real-try integration | `test_ledger.py`, `test_runtime_integration.py` |
 | Long coding traj under AgentTX | Step 4 | `long_trajectory.csv` |
 | Live DeepSeek speculative edit + policy commit | live demo | `live_agent_ledger.json` |
 | AgentTX-LLM vs Aider refactor | compare bench | `refactor_agent_compare.{csv,md}` |
@@ -65,7 +66,7 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 ## Remaining / open
 
 ### High priority (systems)
-1. **Causal rollback as the default API** - explicit rollback_causal now retains independent work; switching the default still needs broader path-alias coverage and replay evaluation.
+1. **Causal rollback as the default API** - explicit rollback_causal now retains independent work and hierarchical path dependencies; switching the default still needs symlink/bind-mount alias coverage and replay evaluation.
 2. **Scalable snapshots** - content-addressed blobs reduce repeated file storage (9.0% physical/logical bytes in the Step 12 workload), but directory traversal and historical/WAL copies still grow with speculative state.
 3. **Crash-atomic filesystem commit** - a durable WAL now restores interrupted host materialization on reload; an in-flight external observer can still see partial paths, so kernel-level atomicity remains out of scope.
 4. **Lower overlay overhead** - shared pool remains substantially slower than bare execution on the evidence trajectory; explore a longer-lived mount or alternative layering design.

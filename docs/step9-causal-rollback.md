@@ -44,7 +44,7 @@ Real-try tests cover:
 - fail-closed rejection when a retained descendant path overlaps a target
   directory.
 
-The full suite passes (37 tests), including the existing eight-scenario
+The full suite passes (39 tests), including the existing eight-scenario
 evidence suite.
 
 ## Remaining work
