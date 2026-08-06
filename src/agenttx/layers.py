@@ -186,6 +186,15 @@ class LayerStore:
             dest.mkdir(parents=True, exist_ok=True)
         return dest
 
+    def copy_tree(self, source: Path, destination: Path) -> None:
+        """Replace ``destination`` with an overlay-safe copy of ``source``."""
+        _remove_overlay_tree(destination)
+        if source.exists():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            _copy_overlay_tree(source, destination)
+        else:
+            destination.mkdir(parents=True, exist_ok=True)
+
     def restore_paths(
         self, before_step_id: int, upperdir: Path, paths: List[str]
     ) -> None:

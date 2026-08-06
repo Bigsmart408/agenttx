@@ -72,17 +72,24 @@ def test_direct_host_file_deletion_is_recorded_and_committed(tmp_path: Path) -> 
         tx.close(destroy=True)
 
 
-def test_partial_commit_rejects_later_write_to_same_path(tmp_path: Path) -> None:
-    ws, tx = _begin(tmp_path, "conflict")
+def test_partial_commit_reconstructs_historical_same_path_version(
+    tmp_path: Path,
+) -> None:
+    ws, tx = _begin(tmp_path, "historical")
     try:
-        tx.run_tool("first", ["bash", "-c", "echo old > same.txt"])
-        tx.run_tool("second", ["bash", "-c", "echo new > same.txt"])
-        with pytest.raises(ValueError, match="partial commit crosses later writes"):
-            tx.commit(0)
-        assert not (ws / "same.txt").exists()
+        first = tx.run_tool("first", ["bash", "-c", "echo old > same.txt"])
+        second = tx.run_tool("second", ["bash", "-c", "echo new > same.txt"])
+        later = tx.run_tool("later", ["bash", "-c", "echo later > later.txt"])
+
+        assert tx.commit(first.step_id) == first.step_id
+        assert (ws / "same.txt").read_text(encoding="utf-8") == "old\n"
+        assert not (ws / "later.txt").exists()
+        assert tx.ledger.steps[second.step_id].status == "speculative"
+        assert tx.ledger.steps[later.step_id].status == "speculative"
 
         tx.commit()
         assert (ws / "same.txt").read_text(encoding="utf-8") == "new\n"
+        assert (ws / "later.txt").read_text(encoding="utf-8") == "later\n"
     finally:
         tx.close(destroy=True)
 

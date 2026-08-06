@@ -13,7 +13,8 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 - **Shared semisolate** pool (`try -N`) with upperdir digests + interactive `try commit` auto-confirm.
 - **Surgical rollback** via per-step upperdir snapshots (`layers.py`).
 - **Explicit causal rollback** reconstructs selected write/delete paths from a pre-step snapshot, retains independent later steps, and fails closed on retained-effect overlap; temporal rollback remains the backward-compatible default.
-- **True path-selective commit** from the ledger frontier using anchored `try -I` filters; overlapping later writes fail closed.
+- **True path-selective commit** from the ledger frontier using anchored `try -I` filters.
+- Historical same-path frontier commit reconstructs the pre-later-step upperdir, materializes the earlier version, and restores later speculative state.
 - OverlayFS character-device and `.wh.*` **whiteouts are recorded as delete effects**.
 - Metadata-aware fingerprints record repeated `chmod`/`chown`/`touch`, empty directories, renames, and symlink changes.
 - Session resume preserves monotonically increasing snapshot ids; `agenttx.json` uses same-directory atomic replace with file and directory `fsync`.
@@ -35,6 +36,7 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 | Whiteout/mode-000 rollback durability | Step 8 + real-try integration | `test_filesystem_effects_integration.py` |
 | Non-contiguous causal rollback | Step 9 + real-try integration | `test_runtime_integration.py` |
 | Interrupted multi-path commit recovery | Step 10 + crash injection | `test_recovery.py`, `commit_wal.py` |
+| Historical same-path frontier commit | Step 11 + real-try integration | `test_runtime_integration.py`, `layers.py` |
 | Long coding traj under AgentTX | Step 4 | `long_trajectory.csv` |
 | Live DeepSeek speculative edit + policy commit | live demo | `live_agent_ledger.json` |
 | AgentTX-LLM vs Aider refactor | compare bench | `refactor_agent_compare.{csv,md}` |
@@ -63,12 +65,11 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 
 ### High priority (systems)
 1. **Causal rollback as the default API** - explicit rollback_causal now retains independent work; switching the default still needs broader path-alias coverage and replay evaluation.
-2. **Same-path historical commit reconstruction** - path-selective partial commit currently fails closed if a later step rewrote a selected path; snapshots could materialize the earlier version safely.
+2. **Scalable snapshots** - rollback and historical commit snapshots still copy accumulated upperdir state, so storage and latency grow with speculative state.
 3. **Crash-atomic filesystem commit** - a durable WAL now restores interrupted host materialization on reload; an in-flight external observer can still see partial paths, so kernel-level atomicity remains out of scope.
-4. **Scalable snapshots** - rollback snapshots still copy the accumulated upperdir, so storage and latency grow with speculative state.
-5. **Lower overlay overhead** - shared pool remains substantially slower than bare execution on the evidence trajectory; explore a longer-lived mount or alternative layering design.
-6. **Trace portability and completeness** - current capture requires Linux strace, models workspace-local path syscalls, and uses exact-path dependency matching; unsupported syscalls and hierarchical aliasing need a formal coverage story.
-7. **Non-filesystem effects** - network/cloud side effects (currently coarse hide_network only).
+4. **Lower overlay overhead** - shared pool remains substantially slower than bare execution on the evidence trajectory; explore a longer-lived mount or alternative layering design.
+5. **Trace portability and completeness** - current capture requires Linux strace, models workspace-local path syscalls, and uses exact-path dependency matching; unsupported syscalls and hierarchical aliasing need a formal coverage story.
+6. **Non-filesystem effects** - network/cloud side effects (currently coarse hide_network only).
 
 ### Evaluation gaps
 8. Harder / longer agent workloads (multi-package refactors, failing CI loops).

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Sequence
 from .effects import SummaryEntry, diff_summaries, parse_try_summary
 from .ledger import Effect, EffectKind
-from .layers import LayerStore
+from .layers import LayerStore, _remove_overlay_tree
 from .trace import parse_strace_effects
 
 _WHITEOUT_DIGEST = "<agenttx:whiteout>"
@@ -418,6 +418,41 @@ class SharedSemisolate:
                 path.chmod(mode)
             elif kind == "directory" and stat.S_ISDIR(current_mode):
                 path.chmod(mode)
+
+    def commit_from_snapshot(
+        self, before_step_id: int, paths: Sequence[str]
+    ) -> subprocess.CompletedProcess:
+        """Commit selected paths from a historical frontier snapshot.
+
+        The current speculative upperdir is copied aside, the snapshot taken
+        before the first later step is mounted as the temporary upperdir, and
+        the current upperdir is restored after ``try commit`` consumes the
+        historical entries. The caller's WAL protects both images if the
+        process is interrupted in the middle of this reconstruction.
+        """
+        assert self.sandbox_dir is not None and self.layers is not None
+        snapshot = self.layers.root / f"before_{before_step_id:04d}"
+        if not snapshot.exists():
+            raise FileNotFoundError(
+                f"historical commit snapshot is missing: {snapshot}"
+            )
+        upper = self.sandbox_dir / "upperdir"
+        temporary = Path(
+            tempfile.mkdtemp(prefix=".agenttx-historical-", dir=str(self.sandbox_dir))
+        )
+        saved = temporary / "current"
+        saved_current = False
+        try:
+            self.layers.copy_tree(upper, saved)
+            saved_current = True
+            self.layers.copy_tree(snapshot, upper)
+            return self.commit(paths=paths)
+        finally:
+            if saved_current:
+                self.layers.copy_tree(saved, upper)
+                self._cached_summary = {}
+                self._cached_digests = self.upperdir_digests()
+            _remove_overlay_tree(temporary)
 
     def commit(self, paths: Optional[Sequence[str]] = None) -> subprocess.CompletedProcess:
         """Commit all effects, or only exact ledger-selected paths, to the host."""

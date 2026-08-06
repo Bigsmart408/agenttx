@@ -303,7 +303,7 @@ class AgentTX:
             or right.startswith(left + "/")
         )
 
-    def _commit_paths(self, up_to: int) -> List[str]:
+    def _commit_path_plan(self, up_to: int) -> tuple[List[str], List[tuple[str, str]]]:
         selected = set()
         later = set()
         for step in self.ledger.steps:
@@ -320,13 +320,37 @@ class AgentTX:
             for later_path in later
             if self._paths_overlap(path, later_path)
         )
+        return sorted(selected), conflicts
+
+    def _commit_paths(self, up_to: int) -> List[str]:
+        selected, conflicts = self._commit_path_plan(up_to)
         if conflicts:
             details = ", ".join(f"{a} <> {b}" for a, b in conflicts[:8])
             raise ValueError(
                 "partial commit crosses later writes to the same path; "
                 f"roll back or include those steps first: {details}"
             )
-        return sorted(selected)
+        return selected
+
+    def _historical_snapshot_step(self, up_to: int) -> int:
+        assert self.pool is not None and self.pool.layers is not None
+        candidates = [
+            step.step_id
+            for step in self.ledger.steps
+            if step.step_id > up_to
+            and step.step_id > self.ledger.committed_frontier
+            and step.status != "rolled_back"
+        ]
+        if not candidates:
+            raise ValueError("historical commit has no retained later snapshot")
+        snapshot_step = min(candidates)
+        snapshot = self.pool.layers.root / f"before_{snapshot_step:04d}"
+        if not snapshot.exists():
+            raise ValueError(
+                "historical commit snapshot is unavailable; "
+                f"expected {snapshot}"
+            )
+        return snapshot_step
 
     def commit_frontier(self, up_to: Optional[int] = None) -> int:
         self._recover_commit_wal()
@@ -345,7 +369,8 @@ class AgentTX:
             up_to = max(active)
         if up_to <= self.ledger.committed_frontier:
             return self.ledger.committed_frontier
-        paths = self._commit_paths(up_to)
+        paths, conflicts = self._commit_path_plan(up_to)
+        historical_step = self._historical_snapshot_step(up_to) if conflicts else None
         assert self.pool is not None
         if not paths:
             self.ledger.advance_frontier(up_to)
@@ -363,7 +388,10 @@ class AgentTX:
         )
         try:
             wal.mark("applying")
-            cp = self.pool.commit(paths=paths)
+            if historical_step is None:
+                cp = self.pool.commit(paths=paths)
+            else:
+                cp = self.pool.commit_from_snapshot(historical_step, paths)
             if cp.returncode != 0:
                 raise RuntimeError(f"try commit failed: {cp.stderr}")
             wal.mark("materialized")
