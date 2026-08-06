@@ -103,3 +103,67 @@ def test_temporal_rollback_keeps_host_clean_then_allows_new_commit(tmp_path: Pat
         assert tx.rollback() == []
     finally:
         tx.close(destroy=True)
+
+
+def test_causal_rollback_preserves_independent_later_step(tmp_path: Path) -> None:
+    ws, tx = _begin(tmp_path, "causal")
+    try:
+        producer = tx.run_tool("producer", ["bash", "-c", "echo one > a.txt"])
+        independent = tx.run_tool(
+            "independent", ["bash", "-c", "echo two > b.txt"]
+        )
+        consumer = tx.run_tool(
+            "consumer", ["bash", "-c", "cat a.txt >/dev/null"]
+        )
+
+        assert consumer.parents == [producer.step_id]
+        assert tx.rollback_causal(producer.step_id) == [
+            producer.step_id,
+            consumer.step_id,
+        ]
+        assert tx.ledger.steps[independent.step_id].status == "speculative"
+        assert tx.commit(independent.step_id) == independent.step_id
+        assert not (ws / "a.txt").exists()
+        assert (ws / "b.txt").read_text(encoding="utf-8") == "two\n"
+    finally:
+        tx.close(destroy=True)
+
+
+def test_causal_rollback_rejects_retained_descendant_effects(
+    tmp_path: Path,
+) -> None:
+    ws, tx = _begin(tmp_path, "causal-overlap")
+    try:
+        first = tx.run_tool(
+            "parent", ["bash", "-c", "mkdir pkg; echo one > pkg/a.txt"]
+        )
+        retained = tx.run_tool(
+            "child", ["bash", "-c", "echo two > pkg/b.txt"]
+        )
+
+        with pytest.raises(ValueError, match="overlaps retained effects"):
+            tx.rollback_causal(first.step_id)
+        assert tx.ledger.steps[first.step_id].status == "speculative"
+        assert tx.ledger.steps[retained.step_id].status == "speculative"
+    finally:
+        tx.close(destroy=True)
+
+
+def test_causal_rollback_restores_lower_delete_and_keeps_independent(
+    tmp_path: Path,
+) -> None:
+    ws, tx = _begin(tmp_path, "causal-delete")
+    seed = ws / "seed.txt"
+    seed.write_text("seed\n", encoding="utf-8")
+    try:
+        deleted = tx.run_tool("delete", ["bash", "-c", "rm seed.txt"])
+        independent = tx.run_tool(
+            "independent", ["bash", "-c", "echo keep > keep.txt"]
+        )
+
+        assert tx.rollback_causal(deleted.step_id) == [deleted.step_id]
+        tx.commit(independent.step_id)
+        assert seed.read_text(encoding="utf-8") == "seed\n"
+        assert (ws / "keep.txt").read_text(encoding="utf-8") == "keep\n"
+    finally:
+        tx.close(destroy=True)

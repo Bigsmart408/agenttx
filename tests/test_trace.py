@@ -83,3 +83,10 @@ def test_runtime_traces_causal_reads_and_negative_lookups(tmp_path: Path) -> Non
 def test_cli_exposes_explicit_trace_opt_out() -> None:
     args = build_parser().parse_args(["begin", "--no-trace-reads"])
     assert args.no_trace_reads is True
+
+
+def test_cli_exposes_causal_rollback() -> None:
+    args = build_parser().parse_args(
+        ["rollback", "--session", "/tmp/session", "--causal"]
+    )
+    assert args.causal is True

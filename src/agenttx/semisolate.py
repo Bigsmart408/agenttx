@@ -477,6 +477,18 @@ class SharedSemisolate:
         self._cached_summary = {}
         self._cached_digests = {}
 
+    def rollback_causal(
+        self, step_ids: List[int], paths: Sequence[str]
+    ) -> None:
+        """Restore only causal write/delete paths and retain independent steps."""
+        assert self.sandbox_dir is not None and self.layers is not None
+        if not step_ids:
+            return
+        self.layers.restore_paths(min(step_ids), self.sandbox_dir / "upperdir", list(paths))
+        self.layers.drop_from(step_ids)
+        self._cached_summary = {}
+        self._cached_digests = self.upperdir_digests()
+
     def rollback_steps(self, step_ids: List[int]) -> None:
         """Restore upperdir to snapshot taken before min(step_ids)."""
         assert self.sandbox_dir is not None and self.layers is not None

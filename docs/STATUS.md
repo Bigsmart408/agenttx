@@ -12,6 +12,7 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 - **Effect ledger** with automatically captured workspace reads, negative lookups, writes, and deletes; dependency edges; cascade / temporal rollback; and a commit frontier.
 - **Shared semisolate** pool (`try -N`) with upperdir digests + interactive `try commit` auto-confirm.
 - **Surgical rollback** via per-step upperdir snapshots (`layers.py`).
+- **Explicit causal rollback** reconstructs selected write/delete paths from a pre-step snapshot, retains independent later steps, and fails closed on retained-effect overlap; temporal rollback remains the backward-compatible default.
 - **True path-selective commit** from the ledger frontier using anchored `try -I` filters; overlapping later writes fail closed.
 - OverlayFS character-device and `.wh.*` **whiteouts are recorded as delete effects**.
 - Metadata-aware fingerprints record repeated `chmod`/`chown`/`touch`, empty directories, renames, and symlink changes.
@@ -31,6 +32,7 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 | Native frontier-selective commit | Step 5 + real-try integration | `test_runtime_integration.py`, `evidence_suite.*` |
 | Automatic read/negative dependencies | Step 7 + real-strace integration | `test_trace.py`, `trace_overhead.{csv,md}` |
 | Whiteout/mode-000 rollback durability | Step 8 + real-try integration | `test_filesystem_effects_integration.py` |
+| Non-contiguous causal rollback | Step 9 + real-try integration | `test_runtime_integration.py` |
 | Long coding traj under AgentTX | Step 4 | `long_trajectory.csv` |
 | Live DeepSeek speculative edit + policy commit | live demo | `live_agent_ledger.json` |
 | AgentTX-LLM vs Aider refactor | compare bench | `refactor_agent_compare.{csv,md}` |
@@ -58,7 +60,7 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 ## Remaining / open
 
 ### High priority (systems)
-1. **Causal (not only temporal) rollback as default API** - causal_dependents exists and now receives automatic read/negative edges; runtime still uses temporal cascade_rollback_targets.
+1. **Causal rollback as the default API** - explicit rollback_causal now retains independent work; switching the default still needs broader path-alias coverage and replay evaluation.
 2. **Same-path historical commit reconstruction** - path-selective partial commit currently fails closed if a later step rewrote a selected path; snapshots could materialize the earlier version safely.
 3. **Crash-atomic filesystem commit** - metadata persistence is atomic, but a crash during multi-path host materialization can still expose a partially committed frontier; add a WAL/recovery protocol.
 4. **Scalable snapshots** - rollback snapshots still copy the accumulated upperdir, so storage and latency grow with speculative state.

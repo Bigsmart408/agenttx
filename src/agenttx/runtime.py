@@ -204,6 +204,68 @@ class AgentTX:
     def rollback(self, step_id: Optional[int] = None) -> List[int]:
         return self.rollback_from(step_id)
 
+    def rollback_causal_from(self, step_id: Optional[int] = None) -> List[int]:
+        """Rollback a failed step and graph dependents, retaining independent work."""
+        if not self.ledger.steps:
+            return []
+        active = [
+            s.step_id
+            for s in self.ledger.steps
+            if s.step_id > self.ledger.committed_frontier
+            and s.status != "rolled_back"
+        ]
+        if not active:
+            return []
+        if step_id is None:
+            step_id = max(active)
+        if step_id <= self.ledger.committed_frontier:
+            raise ValueError("cannot roll back a committed step")
+
+        targets = self.ledger.causal_dependents(step_id)
+        if any(
+            target <= self.ledger.committed_frontier for target in targets
+        ):
+            raise ValueError("causal rollback crosses the committed frontier")
+        target_set = set(targets)
+        target_paths = {
+            effect.path
+            for step in self.ledger.steps
+            if step.step_id in target_set
+            for effect in step.effects
+            if effect.kind in (EffectKind.WRITE, EffectKind.DELETE)
+        }
+        retained_effects = [
+            effect
+            for step in self.ledger.steps
+            if step.step_id > self.ledger.committed_frontier
+            and step.status != "rolled_back"
+            and step.step_id not in target_set
+            for effect in step.effects
+        ]
+        conflicts = sorted(
+            (target_path, effect.path)
+            for target_path in target_paths
+            for effect in retained_effects
+            if self._paths_overlap(target_path, effect.path)
+        )
+        if conflicts:
+            details = ", ".join(
+                f"{left} <> {right}" for left, right in conflicts[:8]
+            )
+            raise ValueError(
+                "causal rollback overlaps retained effects; "
+                f"cannot reconstruct safely: {details}"
+            )
+
+        assert self.pool is not None
+        self.pool.rollback_causal(targets, sorted(target_paths))
+        self.ledger.mark_rolled_back(targets)
+        self._persist()
+        return targets
+
+    def rollback_causal(self, step_id: Optional[int] = None) -> List[int]:
+        return self.rollback_causal_from(step_id)
+
     @staticmethod
     def _paths_overlap(left: str, right: str) -> bool:
         left = left.rstrip("/") or "/"

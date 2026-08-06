@@ -55,7 +55,11 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def cmd_rollback(args: argparse.Namespace) -> int:
     tx = _load(args)
-    targets = tx.rollback_from(args.step)
+    targets = (
+        tx.rollback_causal(args.step)
+        if args.causal
+        else tx.rollback_from(args.step)
+    )
     print(json.dumps({"aborted": targets}, indent=2))
     return 0
 
@@ -106,6 +110,11 @@ def build_parser() -> argparse.ArgumentParser:
     rb = sp.add_parser("rollback", help="cascade rollback from a step")
     rb.add_argument("--session", required=True)
     rb.add_argument("--step", type=int, default=None)
+    rb.add_argument(
+        "--causal",
+        action="store_true",
+        help="rollback only graph dependents and retain independent steps",
+    )
     rb.set_defaults(func=cmd_rollback)
 
     c = sp.add_parser("commit", help="commit up to frontier")
