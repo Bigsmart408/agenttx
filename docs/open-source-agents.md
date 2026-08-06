@@ -42,3 +42,15 @@ source ~/miniconda3/etc/profile.d/conda.sh && conda activate agenttx
 cd /home/bfq/agenttx
 PYTHONPATH=src python experiments/scripts/demo_live_agent.py
 ```
+
+## Refactor comparison
+
+`experiments/scripts/bench_refactor_compare.py` runs AgentTX-LLM vs Aider on a multi-file calc refactor.
+
+```bash
+source ~/.agenttx_llm.env
+export PATH="$HOME/miniconda3/envs/agenttx/bin:$PATH"
+AIDER_TIMEOUT_S=180 python experiments/scripts/bench_refactor_compare.py
+```
+
+Results land in `experiments/results/refactor_agent_compare.{csv,md}`.

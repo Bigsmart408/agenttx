@@ -1,0 +1,3 @@
+mode,wall_s,finished,tool_calls,ledger_steps,host_polluted_before_commit,committed,commit_ok,tests_rc,timed_out
+agenttx_llm,14.433014522990561,True,15,14,False,True,True,0,False
+aider_baseline,40.672122324991506,True,,,True,True,True,2,False
