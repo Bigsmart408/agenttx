@@ -10,6 +10,14 @@ from typing import Iterable, List, Sequence
 from .ledger import Effect, EffectKind, Ledger
 
 
+IGNORE_COMMIT_GLOBS = (
+    "*/__pycache__/*",
+    "*.pyc",
+    "*.pyo",
+    "*/.pytest_cache/*",
+    "*/.git/*",
+)
+
 DEFAULT_DENY = (
     "/etc/*",
     "/usr/*",
@@ -75,6 +83,8 @@ class CommitPolicy:
         out: List[PolicyDecision] = []
         for e in effects:
             if e.kind in (EffectKind.WRITE, EffectKind.DELETE):
+                if self._match(e.path, IGNORE_COMMIT_GLOBS):
+                    continue  # ephemeral tooling artifacts
                 out.append(self.check_path(e.path))
         return out
 

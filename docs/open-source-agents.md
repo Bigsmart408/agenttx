@@ -28,3 +28,17 @@ cd /home/bfq/agenttx
 ```bash
 ./scripts/agenttx-agent aider --workdir /tmp/ws --task "add a README"
 ```
+
+## Live result (DeepSeek)
+
+`experiments/scripts/demo_live_agent.py` ran successfully:
+- tool calls intercepted into AgentTX ledger
+- host unchanged until `try commit`
+- after commit, `mul` appeared on host
+
+```bash
+source ~/miniconda3/etc/profile.d/conda.sh && conda activate agenttx
+. ~/.agenttx_llm.env
+cd /home/bfq/agenttx
+PYTHONPATH=src python experiments/scripts/demo_live_agent.py
+```

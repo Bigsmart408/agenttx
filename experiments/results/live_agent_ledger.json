@@ -1,0 +1,79 @@
+{
+  "committed_frontier": -1,
+  "steps": [
+    {
+      "step_id": 0,
+      "tool_name": "read_file",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-live-34bkn4l3/ws/src/calc.py",
+          "kind": "R"
+        }
+      ],
+      "parents": [],
+      "status": "speculative"
+    },
+    {
+      "step_id": 1,
+      "tool_name": "read_file",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-live-34bkn4l3/ws/tests/test_calc.py",
+          "kind": "R"
+        }
+      ],
+      "parents": [],
+      "status": "speculative"
+    },
+    {
+      "step_id": 2,
+      "tool_name": "write_file",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-live-34bkn4l3/ws/src/calc.py",
+          "kind": "W"
+        }
+      ],
+      "parents": [],
+      "status": "speculative"
+    },
+    {
+      "step_id": 3,
+      "tool_name": "write_file",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-live-34bkn4l3/ws/tests/test_calc.py",
+          "kind": "W"
+        }
+      ],
+      "parents": [],
+      "status": "speculative"
+    },
+    {
+      "step_id": 4,
+      "tool_name": "run_shell",
+      "effects": [],
+      "parents": [],
+      "status": "speculative"
+    },
+    {
+      "step_id": 5,
+      "tool_name": "run_shell",
+      "effects": [],
+      "parents": [],
+      "status": "speculative"
+    },
+    {
+      "step_id": 6,
+      "tool_name": "run_shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-live-34bkn4l3/ws/src/__pycache__/calc.cpython-311.pyc",
+          "kind": "W"
+        }
+      ],
+      "parents": [],
+      "status": "speculative"
+    }
+  ]
+}

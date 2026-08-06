@@ -12,3 +12,7 @@ agenttx-sess-*/
 agenttx-itest-*/
 experiments/results/*.raw
 *.trace
+.env
+.env.*
+*.pem
+.agenttx_llm.env
