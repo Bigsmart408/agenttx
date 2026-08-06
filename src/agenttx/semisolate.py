@@ -78,6 +78,13 @@ class SharedSemisolate:
         return self._cached_summary
 
     def upperdir_digests(self) -> Dict[str, str]:
+        """Fingerprint materialized overlay entries relevant to the ledger.
+
+        File fingerprints include metadata so repeated chmod/chown/touch calls are
+        visible even when content is unchanged. Directories are tracked only below
+        the transaction workspace; this excludes try's root-level mount scaffolding
+        while preserving empty-directory effects created by agent tools.
+        """
         assert self.sandbox_dir is not None
         upper = self.sandbox_dir / "upperdir"
         out: Dict[str, str] = {}
@@ -85,20 +92,50 @@ class SharedSemisolate:
             return out
         for entry in upper.rglob("*"):
             try:
-                mode = entry.lstat().st_mode
+                entry_stat = entry.lstat()
+                mode = entry_stat.st_mode
                 rel = entry.relative_to(upper)
+                logical = Path("/" + rel.as_posix())
+
                 # OverlayFS uses character devices as whiteouts on this VM. Some
                 # union implementations use .wh.<name> files instead.
+                if entry.name == ".wh..wh..opq":
+                    logical = Path("/" + rel.parent.as_posix())
+                    out[str(logical)] = "<agenttx:opaque-directory>"
+                    continue
                 if entry.name.startswith(".wh."):
-                    rel = rel.with_name(entry.name[4:])
-                    out["/" + rel.as_posix()] = _WHITEOUT_DIGEST
-                elif stat.S_ISCHR(mode):
-                    out["/" + rel.as_posix()] = _WHITEOUT_DIGEST
-                elif stat.S_ISLNK(mode):
+                    logical = logical.with_name(entry.name[4:])
+                    out[str(logical)] = _WHITEOUT_DIGEST
+                    continue
+                if stat.S_ISCHR(mode):
+                    out[str(logical)] = _WHITEOUT_DIGEST
+                    continue
+
+                metadata = (
+                    f"{stat.S_IMODE(mode):o}:{entry_stat.st_uid}:"
+                    f"{entry_stat.st_gid}:{entry_stat.st_mtime_ns}"
+                ).encode("ascii")
+                if stat.S_ISLNK(mode):
                     target = os.readlink(str(entry)).encode("utf-8", "surrogateescape")
-                    out["/" + rel.as_posix()] = hashlib.sha256(b"link\0" + target).hexdigest()
+                    payload = b"link\0" + metadata + b"\0" + target
                 elif stat.S_ISREG(mode):
-                    out["/" + rel.as_posix()] = hashlib.sha256(entry.read_bytes()).hexdigest()
+                    payload = b"file\0" + metadata + b"\0" + entry.read_bytes()
+                elif stat.S_ISDIR(mode):
+                    try:
+                        logical.relative_to(self.workspace)
+                    except ValueError:
+                        continue
+                    if logical == self.workspace:
+                        continue
+                    # Child creation changes directory mtime, but the child itself
+                    # is already an effect. Excluding mtime avoids spurious rewrites.
+                    directory_metadata = (
+                        f"{stat.S_IMODE(mode):o}:{entry_stat.st_uid}:{entry_stat.st_gid}"
+                    ).encode("ascii")
+                    payload = b"directory\0" + directory_metadata
+                else:
+                    continue
+                out[str(logical)] = hashlib.sha256(payload).hexdigest()
             except OSError:
                 continue
         return out

@@ -9,11 +9,13 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 - Design notes in `docs/problem.md`, `docs/architecture.md`.
 
 ### Runtime (v0)
-- Causal **effect ledger** (R/W/D deps, cascade / temporal rollback, commit frontier).
+- **Effect ledger** with read/write/delete representation, dependency edges, cascade / temporal rollback, and a commit frontier. Filesystem writes/deletes are captured automatically; reads still require explicit hints.
 - **Shared semisolate** pool (`try -N`) with upperdir digests + interactive `try commit` auto-confirm.
 - **Surgical rollback** via per-step upperdir snapshots (`layers.py`).
 - **True path-selective commit** from the ledger frontier using anchored `try -I` filters; overlapping later writes fail closed.
 - OverlayFS character-device and `.wh.*` **whiteouts are recorded as delete effects**.
+- Metadata-aware fingerprints record repeated `chmod`/`chown`/`touch`, empty directories, renames, and symlink changes.
+- Session resume preserves monotonically increasing snapshot ids; `agenttx.json` uses same-directory atomic replace with file and directory `fsync`.
 - **Coding harness** + commit **policy** (allow/deny, ignore caches).
 - **LLM tool agent** (`scripts/agenttx-agent`) with OpenAI-compatible / DeepSeek config in `~/.agenttx_llm.env` (not in git).
 
@@ -51,22 +53,25 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 ## Remaining / open
 
 ### High priority (systems)
-1. **Causal (not only temporal) rollback as default API** - `causal_dependents` exists; runtime still uses temporal `cascade_rollback_targets`.
-2. **Same-path historical commit reconstruction** - path-selective partial commit currently fails closed if a later step rewrote a selected path; snapshots could materialize the earlier version safely.
-3. **Lower overlay overhead** - shared pool is approximately per-call cost (~170-200ms/step); value is isolation/ledger, not speedup. Explore mergerfs / stacked `-L`, or longer-lived mounts without remount tax.
-4. **Non-filesystem effects** - network/cloud side effects (currently coarse `hide_network` only).
+1. **Automatic read and negative-lookup tracing** - filesystem writes/deletes are observed, but read dependencies currently require extra_reads; causal rollback is therefore incomplete by default.
+2. **Causal (not only temporal) rollback as default API** - causal_dependents exists; runtime still uses temporal cascade_rollback_targets.
+3. **Same-path historical commit reconstruction** - path-selective partial commit currently fails closed if a later step rewrote a selected path; snapshots could materialize the earlier version safely.
+4. **Crash-atomic filesystem commit** - metadata persistence is atomic, but a crash during multi-path host materialization can still expose a partially committed frontier; add a WAL/recovery protocol.
+5. **Scalable snapshots** - rollback snapshots still copy the accumulated upperdir, so storage and latency grow with speculative state.
+6. **Lower overlay overhead** - shared pool remains substantially slower than bare execution on the evidence trajectory; explore a longer-lived mount or alternative layering design.
+7. **Non-filesystem effects** - network/cloud side effects (currently coarse hide_network only).
 
 ### Evaluation gaps
-5. Harder / longer agent workloads (multi-package refactors, failing CI loops).
-6. More baselines: full container / gVisor / OS-level sandbox comparison.
-7. Stronger Aider (or other agents) bakeoff with fair timeouts and success criteria.
-8. Statistical repeats / variance reporting for LLM runs (cost-aware).
+8. Harder / longer agent workloads (multi-package refactors, failing CI loops).
+9. More baselines: full container / gVisor / OS-level sandbox comparison.
+10. Stronger Aider (or other agents) bakeoff with fair timeouts and success criteria.
+11. Statistical repeats / variance reporting for LLM runs (cost-aware).
 
 ### Product / paper
-9. OSDI paper draft (HLS: problem → root cause → AET → design points → eval).
-10. Problem B (adversarial mediation) — explicitly deferred.
-11. Push `main` to GitHub when approved (currently ahead of `origin/main`).
-12. Rotate DeepSeek API key if it was exposed in chat; keep secrets out of git.
+12. OSDI paper draft (HLS: problem → root cause → AET → design points → eval).
+13. Problem B (adversarial mediation) — explicitly deferred.
+14. Push `main` to GitHub when approved (currently ahead of `origin/main`).
+15. Rotate DeepSeek API key if it was exposed in chat; keep secrets out of git.
 
 ## How to re-run evidence
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import List, Optional, Sequence
@@ -10,6 +12,33 @@ from typing import List, Optional, Sequence
 from .effects import effects_from_paths
 from .ledger import Effect, EffectKind, Ledger
 from .semisolate import SharedSemisolate
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    """Durably replace a JSON metadata file without exposing partial content."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            json.dump(payload, handle, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(str(temporary), str(path))
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        directory_fd = os.open(str(path.parent), directory_flags)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
 
 
 @dataclass
@@ -86,6 +115,9 @@ class AgentTX:
             hide_network=tx.hide_network,
         )
         tx.pool._owns_sandbox = True
+        # Layer snapshots are keyed by ledger step id. Resume at the next id so
+        # a loaded session cannot overwrite an earlier before_NNNN snapshot.
+        tx.pool._step_count = len(tx.ledger.steps)
         # restore cached summary if overlay already has state
         tx.pool.refresh_summary()
         tx.pool._cached_digests = tx.pool.upperdir_digests()
@@ -100,7 +132,7 @@ class AgentTX:
             "hide_network": self.hide_network,
             "ledger": self.ledger.to_dict(),
         }
-        meta.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        _atomic_write_json(meta, payload)
         self._meta_path = meta
 
     def start(self) -> None:
