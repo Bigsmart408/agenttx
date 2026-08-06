@@ -44,12 +44,12 @@ Real-try tests cover:
 - fail-closed rejection when a retained descendant path overlaps a target
   directory.
 
-The full suite passes (35 tests), including the existing eight-scenario
+The full suite passes (37 tests), including the existing eight-scenario
 evidence suite.
 
 ## Remaining work
 
 Causal rollback is explicit rather than the default until path aliasing and
 hierarchical dependency coverage are stronger. A crashed reconstruction or
-commit still needs WAL-based recovery, and replay cost remains tied to
-upperdir snapshot size.
+commit still needs WAL-based recovery, and replay traversal remains tied to upperdir snapshot size, although Step 12
+deduplicates repeated regular-file content.

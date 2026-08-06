@@ -17,7 +17,7 @@ OverlayFS represents deletion of a lower-layer file as a character-device whiteo
 
 ## Fail-closed boundary
 
-If step 0 writes `a.txt` and a later speculative step rewrites `a.txt`, the current upperdir holds only the later version. Committing through step 0 therefore raises `ValueError`; it never materializes the wrong version. Historical same-path reconstruction from step snapshots remains future work.
+If step 0 writes `a.txt` and a later speculative step rewrites `a.txt`, Step 11 reconstructs the snapshot before the later step and commits the earlier version without consuming the later upperdir. Causal rollback still fails closed on retained parent/descendant overlaps.
 
 ## Verification
 
@@ -28,4 +28,4 @@ export PYTHONPATH=src:.
 python -m pytest -q
 ```
 
-The real-try integration suite verifies independent-path partial commit, direct lower-file deletion, overlap rejection, and rollback followed by a new commit. Test failures are no longer converted into successful exits.
+The real-try integration suite verifies independent-path partial commit, historical same-path reconstruction, direct lower-file deletion, and rollback followed by a new commit. Test failures are no longer converted into successful exits.

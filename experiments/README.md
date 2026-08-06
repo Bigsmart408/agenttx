@@ -57,3 +57,12 @@ PYTHONPATH=src:. python3 experiments/scripts/bench_trace_overhead.py -n 10 --rep
 Compares the same shared AgentTX no-op trajectory with automatic workspace
 read/negative tracing disabled and enabled. Results are written to
 `experiments/results/trace_overhead.{csv,md}`.
+
+## Step 12 ? content-addressed snapshot storage
+
+```bash
+PYTHONPATH=src:. python3 experiments/scripts/bench_snapshot_storage.py
+```
+
+The benchmark reports logical snapshot payload, physical unique blob bytes,
+and the deduplication ratio in `experiments/results/snapshot_storage.{csv,md}`.

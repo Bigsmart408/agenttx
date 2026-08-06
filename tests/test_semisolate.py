@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 import agenttx.semisolate as semisolate_module
+from agenttx.layers import LayerStore
 from agenttx.semisolate import SharedSemisolate
 
 
@@ -69,3 +70,28 @@ def test_try_commit_error_text_is_not_treated_as_success(
     result = pool.commit()
 
     assert result.returncode == 1
+
+
+def test_snapshots_deduplicate_unchanged_files_without_aliasing(
+    tmp_path: Path,
+) -> None:
+    upper = tmp_path / "upper"
+    upper.mkdir()
+    target = upper / "target.txt"
+    target.write_text("old\n", encoding="utf-8")
+    layers = LayerStore(tmp_path / "layers")
+
+    before_zero = layers.snapshot_before(0, upper)
+    snapshot_target = before_zero / "target.txt"
+    assert snapshot_target.read_text(encoding="utf-8") == "old\n"
+    assert snapshot_target.stat().st_ino != target.stat().st_ino
+
+    target.write_text("new\n", encoding="utf-8")
+    before_one = layers.snapshot_before(1, upper)
+    assert (before_one / "target.txt").read_text(encoding="utf-8") == "new\n"
+    assert snapshot_target.read_text(encoding="utf-8") == "old\n"
+    assert len(list((tmp_path / "layers" / "blobs").glob("*/*"))) == 2
+
+    layers.drop_from([0])
+    assert snapshot_target.exists() is False
+    assert len(list((tmp_path / "layers" / "blobs").glob("*/*"))) == 1

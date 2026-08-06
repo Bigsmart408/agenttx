@@ -29,7 +29,7 @@ speculative execution, and cascade rollback / selective commit.
 
 ## Status
 
-Working v0 prototype for OSDI-oriented systems work (Problem A), including automatic read/negative-lookup dependencies, a shared semisolate, durable session resume, whiteout-safe rollback snapshots, explicit causal rollback, metadata-aware filesystem effects, crash-recoverable commits, historical same-path frontier commits, and path-selective commit.
+Working v0 prototype for OSDI-oriented systems work (Problem A), including automatic read/negative-lookup dependencies, a shared semisolate, durable session resume, whiteout-safe rollback snapshots, explicit causal rollback, metadata-aware filesystem effects, crash-recoverable commits, historical same-path frontier commits, content-addressed snapshots, and path-selective commit.
 
 See [`docs/STATUS.md`](docs/STATUS.md) for completed work, evidence artifacts, and remaining gaps.
 

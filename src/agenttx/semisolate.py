@@ -252,7 +252,9 @@ class SharedSemisolate:
         dig_before = dict(self._cached_digests)
         assert self.layers is not None and self.sandbox_dir is not None
         upper = self.sandbox_dir / "upperdir"
-        self.layers.snapshot_before(self._step_count, upper)
+        self.layers.snapshot_before(
+            self._step_count, upper, fingerprints=dig_before
+        )
         flags = ["-N", str(self.sandbox_dir)]
         if self.hide_network:
             flags.insert(0, "-x")
