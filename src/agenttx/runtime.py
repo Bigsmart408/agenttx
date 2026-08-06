@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import List, Optional, Sequence
 
+from .commit_wal import CommitWAL
 from .effects import effects_from_paths
 from .ledger import Effect, EffectKind, Ledger
 from .semisolate import SharedSemisolate
@@ -102,6 +103,7 @@ class AgentTX:
             hide_network=hide_network,
             trace_reads=trace_reads,
         )
+        tx._recover_commit_wal()
         tx._persist()
         return tx
 
@@ -125,6 +127,7 @@ class AgentTX:
             trace_reads=tx.trace_reads,
         )
         tx.pool._owns_sandbox = True
+        tx._recover_commit_wal()
         # Layer snapshots are keyed by ledger step id. Resume at the next id so
         # a loaded session cannot overwrite an earlier before_NNNN snapshot.
         tx.pool._step_count = len(tx.ledger.steps)
@@ -133,6 +136,30 @@ class AgentTX:
         tx.pool._cached_digests = tx.pool.upperdir_digests()
         tx._meta_path = meta
         return tx
+
+    def _recover_commit_wal(self) -> None:
+        """Resolve an interrupted host commit before exposing the session."""
+        assert self.pool is not None
+        wal = CommitWAL.load(self.pool.session_dir)
+        if wal is None:
+            return
+        finalize = self.ledger.committed_frontier >= wal.up_to and wal.phase in {
+            "materialized",
+            "committed",
+        }
+        if not finalize:
+            wal.restore(self.workspace, self.pool.session_dir / "upperdir")
+            if self.ledger.committed_frontier >= wal.up_to:
+                self.ledger = Ledger.from_dict(wal.payload["ledger_before"])
+                self._persist()
+        try:
+            wal.cleanup()
+        except OSError:
+            # The WAL intent was removed before its backup; an orphaned backup
+            # is harmless and will be reclaimed by the next prepare.
+            pass
+        self.pool._cached_summary = {}
+        self.pool._cached_digests = self.pool.upperdir_digests()
 
     def _persist(self) -> None:
         assert self.pool is not None
@@ -302,6 +329,7 @@ class AgentTX:
         return sorted(selected)
 
     def commit_frontier(self, up_to: Optional[int] = None) -> int:
+        self._recover_commit_wal()
         if up_to is not None and (up_to < 0 or up_to >= len(self.ledger.steps)):
             raise ValueError(f"invalid commit frontier {up_to}")
         if not self.ledger.steps:
@@ -319,12 +347,49 @@ class AgentTX:
             return self.ledger.committed_frontier
         paths = self._commit_paths(up_to)
         assert self.pool is not None
-        if paths:
+        if not paths:
+            self.ledger.advance_frontier(up_to)
+            self._persist()
+            return self.ledger.committed_frontier
+
+        ledger_before = self.ledger.to_dict()
+        wal = CommitWAL.prepare(
+            self.pool.session_dir,
+            self.workspace,
+            self.pool.session_dir / "upperdir",
+            paths,
+            up_to,
+            ledger_before,
+        )
+        try:
+            wal.mark("applying")
             cp = self.pool.commit(paths=paths)
             if cp.returncode != 0:
                 raise RuntimeError(f"try commit failed: {cp.stderr}")
-        self.ledger.advance_frontier(up_to)
-        self._persist()
+            wal.mark("materialized")
+            self.ledger.advance_frontier(up_to)
+            self._persist()
+        except Exception:
+            if wal.phase == "materialized":
+                # Metadata persistence may have succeeded before raising (for
+                # example, after a directory fsync failure). Leave the WAL for
+                # reload-time reconciliation instead of guessing.
+                self.ledger = Ledger.from_dict(ledger_before)
+                raise
+            self.ledger = Ledger.from_dict(ledger_before)
+            wal.restore(self.workspace, self.pool.session_dir / "upperdir")
+            wal.cleanup()
+            self.pool._cached_summary = {}
+            self.pool._cached_digests = self.pool.upperdir_digests()
+            raise
+
+        try:
+            wal.mark("committed")
+            wal.cleanup()
+        except OSError:
+            # The durable frontier is already persisted; a later load will
+            # finalize and remove this WAL.
+            pass
         return self.ledger.committed_frontier
 
     def commit(self, up_to: Optional[int] = None) -> int:

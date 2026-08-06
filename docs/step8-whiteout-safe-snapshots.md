@@ -59,7 +59,8 @@ pass with frontier-selective commit enabled.
 ## Remaining boundary
 
 Hard-link identity, ownership transitions, extended attributes, and arbitrary
-special files remain outside the complete effect model. Most importantly,
-detecting a failed upstream commit prevents frontier advancement but cannot
-undo host paths already materialized before the error. Crash-atomic multi-path
-commit still requires a write-ahead recovery protocol.
+special files remain outside the complete effect model. Most importantly, a
+failed or interrupted upstream commit may still be visible to an external
+observer while it is in flight. Step 10 adds a durable WAL that
+restores partial host materialization on session reload; kernel-level atomicity
+across independent paths remains out of scope.
