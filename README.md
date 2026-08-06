@@ -30,3 +30,8 @@ speculative execution, and cascade rollback / selective commit.
 ## Status
 
 Scaffold for OSDI-oriented systems work (Problem A).
+
+## Status
+
+See [`docs/STATUS.md`](docs/STATUS.md) for completed work, evidence artifacts, and remaining gaps.
+

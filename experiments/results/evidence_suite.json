@@ -1,0 +1,116 @@
+[
+  {
+    "exp": "cascade_rollback",
+    "ok": true,
+    "wall_s": 1.1081894380040467,
+    "aborted": [
+      1,
+      2,
+      3
+    ],
+    "upper_after_rollback": [
+      "chain_a.txt"
+    ],
+    "host_before_commit": {
+      "chain_a.txt": false,
+      "chain_b.txt": false,
+      "chain_c.txt": false,
+      "chain_d.txt": false,
+      "chain_e.txt": false
+    },
+    "host_after_commit": {
+      "chain_a.txt": true,
+      "chain_b.txt": false,
+      "chain_c.txt": false,
+      "chain_d.txt": false,
+      "chain_e.txt": true
+    },
+    "detail": "rollback step1 cascades; host clean until commit; only a+e land"
+  },
+  {
+    "exp": "selective_commit_via_rollback",
+    "ok": true,
+    "wall_s": 0.8877445660036756,
+    "aborted": [
+      2,
+      3
+    ],
+    "host_after_commit": {
+      "keep0.txt": true,
+      "keep1.txt": true,
+      "drop2.txt": false,
+      "drop3.txt": false
+    },
+    "detail": "rollback(2)+commit keeps keep0/1 only"
+  },
+  {
+    "exp": "naive_frontier_commit_gap",
+    "ok": true,
+    "wall_s": 0.7447069949994329,
+    "fs_selective": false,
+    "host_after_commit": {
+      "keep0.txt": true,
+      "keep1.txt": true,
+      "drop2.txt": true
+    },
+    "detail": "GAP: commit(1) still writes drop2 (full overlay commit)"
+  },
+  {
+    "exp": "host_pollution_vs_bare",
+    "ok": true,
+    "wall_s": 1.3036950399982743,
+    "bare_polluted_mid_traj": true,
+    "agenttx_polluted_mid_traj": false,
+    "agenttx_polluted_before_commit": false,
+    "agenttx_present_after_commit": true,
+    "detail": "bare writes visible mid-traj; agenttx host clean until commit"
+  },
+  {
+    "exp": "mistake_recovery",
+    "ok": true,
+    "wall_s": 2.334275572997285,
+    "bad_test_rc": 1,
+    "good_test_rc": 0,
+    "host_saw_bug_before_rollback": false,
+    "host_stayed_seed_after_rollback": true,
+    "host_clean_before_commit": true,
+    "aborted_steps": [
+      1,
+      2,
+      3
+    ],
+    "post_commit_tests_rc": 0,
+    "detail": "buggy mul never hits host; rollback; fixed mul committed; pytest pass"
+  },
+  {
+    "exp": "policy_blocks_dangerous_commit",
+    "ok": true,
+    "wall_s": 0.5466972720023477,
+    "commit_blocked": true,
+    "block_reason": "commit blocked by policy: /tmp/agenttx-ev-pol-9qma6xak/ws/secrets/key.pem (denied by deny_globs)",
+    "host_had_secret_when_blocked": false,
+    "host_ok_after_selective_commit": true,
+    "host_secret_after_selective_commit": false,
+    "detail": "deny secrets/*.pem blocks full commit; after rollback, ok.txt commits alone"
+  },
+  {
+    "exp": "isolation_matrix",
+    "mode": "bare",
+    "repeats": 2,
+    "wall_s_mean": 0.7989760409982409,
+    "failures_mean": 0.0,
+    "host_polluted_before_commit_rate": 1.0,
+    "ok": true,
+    "detail": "coding traj pollution/failures/wall"
+  },
+  {
+    "exp": "isolation_matrix",
+    "mode": "agenttx",
+    "repeats": 2,
+    "wall_s_mean": 5.921143037994625,
+    "failures_mean": 0.0,
+    "host_polluted_before_commit_rate": 0.0,
+    "ok": true,
+    "detail": "coding traj pollution/failures/wall"
+  }
+]

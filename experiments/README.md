@@ -35,3 +35,14 @@ PYTHONPATH=src python3 tests/test_policy.py
 PYTHONPATH=src:. python3 experiments/scripts/demo_coding_agent.py
 PYTHONPATH=src:. python3 experiments/scripts/bench_long_trajectory.py 2
 ```
+
+## Evidence suite (stronger claims)
+
+```bash
+PYTHONPATH=src:. python3 experiments/scripts/bench_evidence_suite.py
+PYTHONPATH=src:. python3 experiments/scripts/bench_scaling.py
+```
+
+Results: `experiments/results/evidence_suite.*`, `experiments/results/scaling_curve.*`.
+See also `docs/STATUS.md` for completed vs remaining.
+
