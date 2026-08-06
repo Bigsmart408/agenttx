@@ -3,15 +3,17 @@
 ## What landed
 
 - `Ledger`: path-level R/W/D/N effects, RAW edges, cascade rollback targets, commit frontier
-- `SharedSemisolate`: reuse one `try -N DIR` sandbox across tool calls
-- `AgentTXRuntime`: tool-boundary interceptor that diffs `try summary` into per-step effects
+- `SharedSemisolate`: reuse one `try -N DIR` sandbox; upperdir digests for per-step effects
+- `AgentTX`: session API (`begin/run/rollback/commit/status/close`) for CLI + tests
+- CLI: `scripts/agenttx`
+- Workaround: run each tool via a temp script file because `try` drops shell quoting on `bash -c`
 
-## Why this is not "wrap try"
+## Perf
 
-Per-call `try` pays full overlay setup each tool call (~160ms). Shared `-N` keeps one upperdir and only remounts/executes, which is the first systems lever toward incremental semisolates.
+Shared still remounts via `try -N` each call; the win vs per-call is preserving prior upperdir state + cheaper effect capture (no double `try summary`). See `experiments/results/shared_overlay_n20.csv`.
 
-## Known v0 limits
+## Known limits
 
-- Reads are not inferred from `try summary` (pass `extra_reads` when needed)
-- Cascade rollback currently resets the whole shared sandbox (no surgical layer drop yet)
+- Reads need `extra_reads` (or future `-t` once quoting/trace is solid)
+- Cascade rollback resets the whole shared sandbox (step 3: layered `-L`)
 - Non-FS effects out of scope

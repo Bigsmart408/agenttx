@@ -1,19 +1,11 @@
 """Shared/incremental semisolate pool backed by binpash/try -N DIR."""
-
 from __future__ import annotations
-
-import hashlib
-import shutil
-import subprocess
-import tempfile
-import time
+import hashlib, shlex, shutil, subprocess, tempfile, time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
-
 from .effects import SummaryEntry, diff_summaries, parse_try_summary
 from .ledger import Effect, EffectKind
-
 
 def _default_try_bin() -> Path:
     root = Path(__file__).resolve().parents[2]
@@ -21,7 +13,6 @@ def _default_try_bin() -> Path:
     if wrapper.exists():
         return wrapper
     raise FileNotFoundError("scripts/try-wrapper.sh not found")
-
 
 @dataclass
 class StepResult:
@@ -34,17 +25,8 @@ class StepResult:
     duration_s: float
     effects: List[Effect] = field(default_factory=list)
 
-
 @dataclass
 class SharedSemisolate:
-    """One overlay sandbox reused across many tool calls.
-
-    Optimization vs naive per-call try:
-    - pay sandbox dir creation once
-    - cache last summary in-memory; only one `try summary` per step
-    - detect content mutations via upperdir digests (append to existing file)
-    """
-
     workspace: Path
     try_bin: Path = field(default_factory=_default_try_bin)
     sandbox_dir: Optional[Path] = None
@@ -59,11 +41,7 @@ class SharedSemisolate:
         self.workspace = Path(self.workspace).resolve()
         self.try_bin = Path(self.try_bin)
         if self.sandbox_dir is None:
-            cache_root = Path.home() / ".cache" / "agenttx"
-            cache_root.mkdir(parents=True, exist_ok=True)
-            self.sandbox_dir = Path(
-                tempfile.mkdtemp(prefix="agenttx-sandbox-", dir=str(cache_root))
-            )
+            self.sandbox_dir = Path(tempfile.mkdtemp(prefix="agenttx-sandbox-", dir="/tmp"))
             self._owns_sandbox = True
         else:
             self.sandbox_dir = Path(self.sandbox_dir)
@@ -75,15 +53,7 @@ class SharedSemisolate:
         return self.sandbox_dir
 
     def _run_try(self, args: Sequence[str], cwd: Optional[Path] = None) -> subprocess.CompletedProcess:
-        cmd = [str(self.try_bin), *args]
-        return subprocess.run(
-            cmd,
-            cwd=str(cwd or self.workspace),
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
+        return subprocess.run([str(self.try_bin), *args], cwd=str(cwd or self.workspace), text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
 
     def refresh_summary(self) -> Dict[str, SummaryEntry]:
         assert self.sandbox_dir is not None
@@ -114,6 +84,17 @@ class SharedSemisolate:
                 continue
         return out
 
+    def _write_cmd_script(self, argv: Sequence[str]) -> Path:
+        cmd_dir = Path(tempfile.mkdtemp(prefix="agenttx-cmd-", dir="/tmp"))
+        script = cmd_dir / "cmd.sh"
+        if len(argv) >= 3 and Path(argv[0]).name == "bash" and argv[1] == "-c":
+            body = "#!/usr/bin/env bash\nset -e\n" + argv[2] + "\n"
+        else:
+            body = "#!/usr/bin/env bash\nset -e\n" + " ".join(shlex.quote(a) for a in argv) + "\n"
+        script.write_text(body, encoding="utf-8")
+        script.chmod(0o755)
+        return script
+
     def run(self, argv: Sequence[str]) -> StepResult:
         if self._closed:
             raise RuntimeError("SharedSemisolate is closed")
@@ -123,36 +104,28 @@ class SharedSemisolate:
         flags = ["-N", str(self.sandbox_dir)]
         if self.hide_network:
             flags.insert(0, "-x")
+        script = self._write_cmd_script(argv)
         t0 = time.perf_counter()
-        cp = self._run_try([*flags, "--", *argv], cwd=self.workspace)
+        try:
+            cp = self._run_try([*flags, "--", "bash", str(script)], cwd=self.workspace)
+        finally:
+            shutil.rmtree(script.parent, ignore_errors=True)
         duration = time.perf_counter() - t0
-        after = self.refresh_summary()
+        # Digests alone detect writes/deletes without a second try summary process.
         dig_after = self.upperdir_digests()
         self._cached_digests = dig_after
-
-        effects = diff_summaries(before, after)
-        # content mutations that stay "added" in summary
-        seen = {e.path for e in effects}
+        effects = []
         for path, h in dig_after.items():
-            if dig_before.get(path) != h and path not in seen:
+            if dig_before.get(path) != h:
                 effects.append(Effect(path=path, kind=EffectKind.WRITE))
-                seen.add(path)
         for path in dig_before:
-            if path not in dig_after and path not in seen:
+            if path not in dig_after:
                 effects.append(Effect(path=path, kind=EffectKind.DELETE))
-
+        # Keep cached summary lazily empty; refresh only on explicit commit/status.
+        after = dict(self._cached_summary)
         idx = self._step_count
         self._step_count += 1
-        return StepResult(
-            step_index=idx,
-            returncode=cp.returncode,
-            stdout=cp.stdout,
-            stderr=cp.stderr,
-            summary_before=before,
-            summary_after=after,
-            duration_s=duration,
-            effects=effects,
-        )
+        return StepResult(step_index=idx, returncode=cp.returncode, stdout=cp.stdout, stderr=cp.stderr, summary_before=before, summary_after=after, duration_s=duration, effects=effects)
 
     def step_effects(self, result: StepResult) -> List[Effect]:
         return list(result.effects)
@@ -162,14 +135,18 @@ class SharedSemisolate:
         return self._run_try(["commit", str(self.sandbox_dir)])
 
     def reset(self) -> None:
-        """Drop overlay state but keep the same session directory path."""
         assert self.sandbox_dir is not None
         subprocess.run(["chmod", "-R", "u+rwX", str(self.sandbox_dir)], check=False)
         for child in list(self.sandbox_dir.iterdir()):
+            if child.name == "agenttx.json":
+                continue
             if child.is_dir():
                 shutil.rmtree(child, ignore_errors=True)
             else:
-                child.unlink(missing_ok=True)
+                try:
+                    child.unlink()
+                except FileNotFoundError:
+                    pass
         self._cached_summary = {}
         self._cached_digests = {}
 

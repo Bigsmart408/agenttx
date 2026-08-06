@@ -1,0 +1,47 @@
+{
+  "committed_frontier": -1,
+  "steps": [
+    {
+      "step_id": 0,
+      "tool_name": "write_a",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-demo-qmknsfag/ws/a.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [],
+      "status": "speculative"
+    },
+    {
+      "step_id": 1,
+      "tool_name": "read_a_write_b",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-demo-qmknsfag/ws/b.txt",
+          "kind": "W"
+        },
+        {
+          "path": "/tmp/agenttx-demo-qmknsfag/ws/a.txt",
+          "kind": "R"
+        }
+      ],
+      "parents": [
+        0
+      ],
+      "status": "speculative"
+    },
+    {
+      "step_id": 2,
+      "tool_name": "write_c",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-demo-qmknsfag/ws/c.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [],
+      "status": "speculative"
+    }
+  ]
+}

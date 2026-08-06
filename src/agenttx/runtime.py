@@ -21,6 +21,8 @@ class ToolCallRecord:
     duration_s: float
     effects: List[Effect] = field(default_factory=list)
     parents: List[int] = field(default_factory=list)
+    stdout: str = ""
+    stderr: str = ""
 
     @property
     def exit_code(self) -> int:
@@ -126,10 +128,9 @@ class AgentTX:
             duration_s=result.duration_s,
             effects=effects,
             parents=sorted(step.parents),
+            stdout=result.stdout,
+            stderr=result.stderr,
         )
-        # attach stdout/stderr dynamically for verbose CLI
-        rec.stdout = result.stdout  # type: ignore[attr-defined]
-        rec.stderr = result.stderr  # type: ignore[attr-defined]
         self.history.append(rec)
         self._persist()
         return rec

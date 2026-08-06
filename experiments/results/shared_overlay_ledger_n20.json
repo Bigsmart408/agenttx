@@ -1,0 +1,283 @@
+{
+  "committed_frontier": -1,
+  "steps": [
+    {
+      "step_id": 0,
+      "tool_name": "shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [],
+      "status": "speculative"
+    },
+    {
+      "step_id": 1,
+      "tool_name": "shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [
+        0
+      ],
+      "status": "speculative"
+    },
+    {
+      "step_id": 2,
+      "tool_name": "shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [
+        1
+      ],
+      "status": "speculative"
+    },
+    {
+      "step_id": 3,
+      "tool_name": "shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [
+        2
+      ],
+      "status": "speculative"
+    },
+    {
+      "step_id": 4,
+      "tool_name": "shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [
+        3
+      ],
+      "status": "speculative"
+    },
+    {
+      "step_id": 5,
+      "tool_name": "shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [
+        4
+      ],
+      "status": "speculative"
+    },
+    {
+      "step_id": 6,
+      "tool_name": "shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [
+        5
+      ],
+      "status": "speculative"
+    },
+    {
+      "step_id": 7,
+      "tool_name": "shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [
+        6
+      ],
+      "status": "speculative"
+    },
+    {
+      "step_id": 8,
+      "tool_name": "shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [
+        7
+      ],
+      "status": "speculative"
+    },
+    {
+      "step_id": 9,
+      "tool_name": "shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [
+        8
+      ],
+      "status": "speculative"
+    },
+    {
+      "step_id": 10,
+      "tool_name": "shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [
+        9
+      ],
+      "status": "speculative"
+    },
+    {
+      "step_id": 11,
+      "tool_name": "shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [
+        10
+      ],
+      "status": "speculative"
+    },
+    {
+      "step_id": 12,
+      "tool_name": "shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [
+        11
+      ],
+      "status": "speculative"
+    },
+    {
+      "step_id": 13,
+      "tool_name": "shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [
+        12
+      ],
+      "status": "speculative"
+    },
+    {
+      "step_id": 14,
+      "tool_name": "shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [
+        13
+      ],
+      "status": "speculative"
+    },
+    {
+      "step_id": 15,
+      "tool_name": "shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [
+        14
+      ],
+      "status": "speculative"
+    },
+    {
+      "step_id": 16,
+      "tool_name": "shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [
+        15
+      ],
+      "status": "speculative"
+    },
+    {
+      "step_id": 17,
+      "tool_name": "shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [
+        16
+      ],
+      "status": "speculative"
+    },
+    {
+      "step_id": 18,
+      "tool_name": "shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [
+        17
+      ],
+      "status": "speculative"
+    },
+    {
+      "step_id": 19,
+      "tool_name": "shell",
+      "effects": [
+        {
+          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "kind": "W"
+        }
+      ],
+      "parents": [
+        18
+      ],
+      "status": "speculative"
+    }
+  ]
+}

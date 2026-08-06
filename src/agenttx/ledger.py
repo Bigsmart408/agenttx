@@ -137,7 +137,7 @@ class Ledger:
         for s in self.steps:
             if self.committed_frontier < s.step_id <= step_id:
                 if s.status == "rolled_back":
-                    raise ValueError(f"step {s.step_id} is rolled_back; cannot commit past it")
+                    continue  # holes from cascade rollback are allowed
                 s.status = "committed"
         self.committed_frontier = step_id
 
