@@ -26,3 +26,12 @@ PYTHONPATH=src python3 experiments/scripts/bench_shared_overlay.py 20 3
 ```
 
 Compares `per_call_try` vs `shared_overlay` (`try -N` reuse + effect ledger).
+
+
+## Step 4 — coding agent + long trajectory
+
+```bash
+PYTHONPATH=src python3 tests/test_policy.py
+PYTHONPATH=src:. python3 experiments/scripts/demo_coding_agent.py
+PYTHONPATH=src:. python3 experiments/scripts/bench_long_trajectory.py 2
+```

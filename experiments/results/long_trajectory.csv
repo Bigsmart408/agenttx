@@ -1,0 +1,4 @@
+mode,n_steps,repeats,wall_s_mean,wall_s_stdev,per_step_s_mean
+bare,28,2,0.773685,0.009302,0.027632
+per_call_try,28,2,5.022128,0.247989,0.179362
+agenttx,28,2,5.681036,0.077766,0.202894

@@ -140,8 +140,18 @@ class SharedSemisolate:
         return list(result.effects)
 
     def commit(self) -> subprocess.CompletedProcess:
+        """Commit overlay to host. try commit prompts; auto-confirm with y."""
         assert self.sandbox_dir is not None
-        return self._run_try(["commit", str(self.sandbox_dir)])
+        cmd = [str(self.try_bin), "commit", str(self.sandbox_dir)]
+        return subprocess.run(
+            cmd,
+            cwd=str(self.workspace),
+            text=True,
+            input="y\n",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
 
     def reset(self) -> None:
         """Hard reset overlay (legacy). Prefer rollback_steps for surgical restore."""
