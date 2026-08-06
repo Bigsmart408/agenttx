@@ -3,13 +3,86 @@ from __future__ import annotations
 import hashlib, os, re, shlex, shutil, stat, subprocess, tempfile, time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, Iterator, List, Optional, Sequence
 from .effects import SummaryEntry, diff_summaries, parse_try_summary
 from .ledger import Effect, EffectKind
 from .layers import LayerStore
 from .trace import parse_strace_effects
 
 _WHITEOUT_DIGEST = "<agenttx:whiteout>"
+
+
+def _iter_upper_entries(directory: Path) -> Iterator[Path]:
+    """Walk an unmounted upperdir without losing mode-000 descendants."""
+    original_mode = stat.S_IMODE(directory.lstat().st_mode)
+    access_mode = original_mode | stat.S_IRUSR | stat.S_IXUSR
+    changed_mode = access_mode != original_mode
+    if changed_mode:
+        directory.chmod(access_mode)
+    try:
+        with os.scandir(directory) as scan:
+            entries = list(scan)
+        for entry in entries:
+            path = Path(entry.path)
+            mode = entry.stat(follow_symlinks=False).st_mode
+            yield path
+            if stat.S_ISDIR(mode):
+                yield from _iter_upper_entries(path)
+    finally:
+        if changed_mode:
+            directory.chmod(original_mode)
+
+
+def _grant_upper_commit_access(
+    directory: Path, modes: Dict[Path, int]
+) -> None:
+    directory_stat = directory.lstat()
+    directory_mode = stat.S_IMODE(directory_stat.st_mode)
+    modes[directory] = directory_mode
+    accessible_mode = (
+        directory_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
+    )
+    if accessible_mode != directory_mode:
+        directory.chmod(accessible_mode)
+
+    with os.scandir(directory) as scan:
+        entries = list(scan)
+    for entry in entries:
+        path = Path(entry.path)
+        entry_mode = entry.stat(follow_symlinks=False).st_mode
+        if stat.S_ISDIR(entry_mode):
+            _grant_upper_commit_access(path, modes)
+        elif stat.S_ISREG(entry_mode):
+            original_mode = stat.S_IMODE(entry_mode)
+            modes[path] = original_mode
+            readable_mode = original_mode | stat.S_IRUSR
+            if readable_mode != original_mode:
+                path.chmod(readable_mode)
+
+
+def _restore_upper_modes(modes: Dict[Path, int]) -> None:
+    for path, mode in sorted(
+        modes.items(),
+        key=lambda item: len(item[0].parts),
+        reverse=True,
+    ):
+        try:
+            path.chmod(mode)
+        except FileNotFoundError:
+            continue
+
+
+def _read_regular_preserving_mode(path: Path, mode: int) -> bytes:
+    original_mode = stat.S_IMODE(mode)
+    readable_mode = original_mode | stat.S_IRUSR
+    changed_mode = readable_mode != original_mode
+    if changed_mode:
+        path.chmod(readable_mode)
+    try:
+        return path.read_bytes()
+    finally:
+        if changed_mode:
+            path.chmod(original_mode)
 
 
 def _default_try_bin() -> Path:
@@ -97,7 +170,7 @@ class SharedSemisolate:
         out: Dict[str, str] = {}
         if not upper.exists():
             return out
-        for entry in upper.rglob("*"):
+        for entry in _iter_upper_entries(upper):
             try:
                 entry_stat = entry.lstat()
                 mode = entry_stat.st_mode
@@ -134,7 +207,12 @@ class SharedSemisolate:
                     target = os.readlink(str(entry)).encode("utf-8", "surrogateescape")
                     payload = b"link\0" + metadata + b"\0" + target
                 elif stat.S_ISREG(mode):
-                    payload = b"file\0" + metadata + b"\0" + entry.read_bytes()
+                    payload = (
+                        b"file\0"
+                        + metadata
+                        + b"\0"
+                        + _read_regular_preserving_mode(entry, mode)
+                    )
                 elif stat.S_ISDIR(mode):
                     try:
                         logical.relative_to(self.workspace)
@@ -271,26 +349,113 @@ class SharedSemisolate:
                 current = current.parent
         return sorted(patterns, key=lambda pattern: (pattern.count("/"), pattern))
 
+    def _capture_commit_metadata(
+        self, paths: Optional[Sequence[str]]
+    ) -> Dict[str, tuple[int, int, int, str]]:
+        """Capture mode/times before try consumes selected upperdir entries."""
+        assert self.sandbox_dir is not None
+        wanted = set(paths) if paths is not None else None
+        upper = self.sandbox_dir / "upperdir"
+        metadata: Dict[str, tuple[int, int, int, str]] = {}
+        if not upper.exists():
+            return metadata
+
+        for entry in _iter_upper_entries(upper):
+            rel = entry.relative_to(upper)
+            logical = Path("/" + rel.as_posix())
+            try:
+                logical.relative_to(self.workspace)
+            except ValueError:
+                continue
+            logical_text = str(logical)
+            if wanted is not None and logical_text not in wanted:
+                continue
+
+            entry_stat = entry.lstat()
+            mode = entry_stat.st_mode
+            if stat.S_ISREG(mode):
+                kind = "file"
+            elif stat.S_ISDIR(mode):
+                kind = "directory"
+            elif stat.S_ISLNK(mode):
+                kind = "symlink"
+            else:
+                continue
+            metadata[logical_text] = (
+                stat.S_IMODE(mode),
+                entry_stat.st_atime_ns,
+                entry_stat.st_mtime_ns,
+                kind,
+            )
+        return metadata
+
+    @staticmethod
+    def _restore_committed_metadata(
+        metadata: Dict[str, tuple[int, int, int, str]]
+    ) -> None:
+        # Apply child metadata before making a parent directory non-searchable.
+        ordered = sorted(
+            metadata.items(),
+            key=lambda item: len(Path(item[0]).parts),
+            reverse=True,
+        )
+        for path_text, (mode, atime_ns, mtime_ns, kind) in ordered:
+            path = Path(path_text)
+            try:
+                current_mode = path.lstat().st_mode
+            except FileNotFoundError:
+                continue
+            if kind == "symlink":
+                if stat.S_ISLNK(current_mode):
+                    os.utime(
+                        path,
+                        ns=(atime_ns, mtime_ns),
+                        follow_symlinks=False,
+                    )
+                continue
+            if kind == "file" and stat.S_ISREG(current_mode):
+                os.utime(path, ns=(atime_ns, mtime_ns))
+                path.chmod(mode)
+            elif kind == "directory" and stat.S_ISDIR(current_mode):
+                path.chmod(mode)
+
     def commit(self, paths: Optional[Sequence[str]] = None) -> subprocess.CompletedProcess:
         """Commit all effects, or only exact ledger-selected paths, to the host."""
         assert self.sandbox_dir is not None
         if paths is not None and not paths:
             return subprocess.CompletedProcess([], 0, "", "")
+        metadata = self._capture_commit_metadata(paths)
         cmd = [str(self.try_bin)]
         if paths is not None:
             for pattern in self._include_patterns(paths):
                 cmd.extend(["-I", pattern])
         cmd.extend(["commit", str(self.sandbox_dir)])
-        cp = subprocess.run(
-            cmd,
-            cwd=str(self.workspace),
-            text=True,
-            input="y\n",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
+        upper_modes: Dict[Path, int] = {}
+        upper = self.sandbox_dir / "upperdir"
+        if upper.exists():
+            _grant_upper_commit_access(upper, upper_modes)
+        try:
+            cp = subprocess.run(
+                cmd,
+                cwd=str(self.workspace),
+                text=True,
+                input="y\n",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+        finally:
+            _restore_upper_modes(upper_modes)
+        commit_output = (cp.stdout or "") + "\n" + (cp.stderr or "")
+        if cp.returncode == 0 and "couldn't commit" in commit_output:
+            cp = subprocess.CompletedProcess(
+                cp.args,
+                1,
+                cp.stdout,
+                cp.stderr,
+            )
         if cp.returncode == 0:
+            self._restore_committed_metadata(metadata)
             self._cached_summary = {}
             self._cached_digests = self.upperdir_digests()
         return cp

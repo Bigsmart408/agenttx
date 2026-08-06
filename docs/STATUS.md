@@ -16,6 +16,8 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 - OverlayFS character-device and `.wh.*` **whiteouts are recorded as delete effects**.
 - Metadata-aware fingerprints record repeated `chmod`/`chown`/`touch`, empty directories, renames, and symlink changes.
 - Session resume preserves monotonically increasing snapshot ids; `agenttx.json` uses same-directory atomic replace with file and directory `fsync`.
+- Rollback snapshots preserve native OverlayFS whiteouts via same-filesystem hard links and safely traverse mode-000 trees without changing their final modes.
+- Commit restores selected file/directory metadata after materialization and converts upstream false-success error text into a failed commit.
 - Automatic strace-based dependency capture records successful workspace reads and ENOENT/ENOTDIR negative lookups; tracing is default-on and fails closed unless explicitly disabled.
 - **Coding harness** + commit **policy** (allow/deny, ignore caches).
 - **LLM tool agent** (`scripts/agenttx-agent`) with OpenAI-compatible / DeepSeek config in `~/.agenttx_llm.env` (not in git).
@@ -28,6 +30,7 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 | Surgical cascade rollback | Step 3 demo + suite | `demo_surgical_rollback.py`, `evidence_suite.*` |
 | Native frontier-selective commit | Step 5 + real-try integration | `test_runtime_integration.py`, `evidence_suite.*` |
 | Automatic read/negative dependencies | Step 7 + real-strace integration | `test_trace.py`, `trace_overhead.{csv,md}` |
+| Whiteout/mode-000 rollback durability | Step 8 + real-try integration | `test_filesystem_effects_integration.py` |
 | Long coding traj under AgentTX | Step 4 | `long_trajectory.csv` |
 | Live DeepSeek speculative edit + policy commit | live demo | `live_agent_ledger.json` |
 | AgentTX-LLM vs Aider refactor | compare bench | `refactor_agent_compare.{csv,md}` |

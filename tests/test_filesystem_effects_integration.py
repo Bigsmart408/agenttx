@@ -59,3 +59,57 @@ def test_rename_records_source_delete_and_destination_write(tmp_path: Path) -> N
         assert destination.read_text(encoding="utf-8") == "payload\n"
     finally:
         tx.close(destroy=True)
+
+
+def test_delete_survives_later_snapshot_and_rollback(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    victim = workspace / "victim.txt"
+    victim.write_text("lower\n", encoding="utf-8")
+
+    tx = AgentTX.begin(workdir=workspace, session_dir=tmp_path / "session")
+    try:
+        deleted = tx.run_tool("delete", ["bash", "-c", "rm victim.txt"])
+        later = tx.run_tool(
+            "later", ["bash", "-c", "printf 'later\n' > later.txt"]
+        )
+        assert (str(victim), EffectKind.DELETE) in _effects(deleted)
+
+        assert tx.rollback(later.step_id) == [later.step_id]
+        tx.commit(deleted.step_id)
+
+        assert not victim.exists()
+        assert not (workspace / "later.txt").exists()
+    finally:
+        tx.close(destroy=True)
+
+
+def test_unreadable_tree_is_tracked_snapshotted_and_committed(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+
+    tx = AgentTX.begin(workdir=workspace, session_dir=tmp_path / "session")
+    try:
+        sealed = tx.run_tool(
+            "seal",
+            [
+                "bash",
+                "-c",
+                "mkdir sealed; printf 'payload\n' > sealed/data.txt; chmod 000 sealed",
+            ],
+        )
+        expected_file = str(workspace / "sealed" / "data.txt")
+        assert (expected_file, EffectKind.WRITE) in _effects(sealed)
+
+        later = tx.run_tool("later", ["bash", "-c", ":"])
+        assert tx.rollback(later.step_id) == [later.step_id]
+        tx.commit(sealed.step_id)
+
+        directory = workspace / "sealed"
+        assert stat.S_IMODE(directory.stat().st_mode) == 0
+        directory.chmod(0o700)
+        assert (directory / "data.txt").read_text(encoding="utf-8") == "payload\n"
+    finally:
+        tx.close(destroy=True)
