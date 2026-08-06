@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# AgentTX open-source agent launcher
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
+  # shellcheck disable=SC1090
+  source "$HOME/miniconda3/etc/profile.d/conda.sh"
+  conda activate agenttx 2>/dev/null || true
+fi
+export PATH="$HOME/miniconda3/envs/agenttx/bin:$HOME/.local/bin:$PATH"
+export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+exec python -m agenttx.agents.cli "$@"
