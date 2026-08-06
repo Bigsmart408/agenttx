@@ -201,3 +201,50 @@ def test_causal_rollback_tracks_parent_directory_read(tmp_path: Path) -> None:
         assert (ws / "keep.txt").read_text(encoding="utf-8") == "keep\n"
     finally:
         tx.close(destroy=True)
+
+
+def test_causal_rollback_tracks_lower_symlink_alias(tmp_path: Path) -> None:
+    ws, tx = _begin(tmp_path, "causal-symlink")
+    (ws / "real").mkdir()
+    (ws / "alias").symlink_to("real", target_is_directory=True)
+    try:
+        producer = tx.run_tool(
+            "producer", ["bash", "-c", "echo one > real/data.txt"]
+        )
+        consumer = tx.run_tool(
+            "consumer", ["bash", "-c", "cat alias/data.txt >/dev/null"]
+        )
+
+        assert consumer.parents == [producer.step_id]
+        assert tx.rollback_causal(producer.step_id) == [
+            producer.step_id,
+            consumer.step_id,
+        ]
+        assert (ws / "alias").is_symlink()
+        assert not (ws / "real" / "data.txt").exists()
+    finally:
+        tx.close(destroy=True)
+
+
+def test_causal_rollback_tracks_upper_symlink_alias(tmp_path: Path) -> None:
+    ws, tx = _begin(tmp_path, "causal-upper-symlink")
+    (ws / "real").mkdir()
+    try:
+        link = tx.run_tool(
+            "link", ["bash", "-c", "ln -s real alias"]
+        )
+        producer = tx.run_tool(
+            "producer", ["bash", "-c", "echo one > real/data.txt"]
+        )
+        consumer = tx.run_tool(
+            "consumer", ["bash", "-c", "cat alias/data.txt >/dev/null"]
+        )
+
+        assert consumer.parents == [link.step_id, producer.step_id]
+        assert tx.rollback_causal(producer.step_id) == [
+            producer.step_id,
+            consumer.step_id,
+        ]
+        assert (ws / "alias").is_symlink() is False
+    finally:
+        tx.close(destroy=True)

@@ -53,7 +53,7 @@ Real-try integration tests now cover:
 2. create a file under a mode-000 directory, execute and roll back a later
    step, then commit both content and the final directory mode.
 
-The full suite passes (39 tests), and all eight evidence-suite scenarios still
+The full suite passes (42 tests), and all eight evidence-suite scenarios still
 pass with frontier-selective commit enabled.
 
 ## Remaining boundary

@@ -177,6 +177,7 @@ def parse_strace_effects(text: str, workspace: Path) -> List[Effect]:
             continue
 
         path: Optional[Path] = None
+        path_aliases: List[Path] = []
         flags = ""
         if call in {"open", "openat", "openat2"}:
             if call == "open":
@@ -191,7 +192,11 @@ def parse_strace_effects(text: str, workspace: Path) -> List[Effect]:
                 path = _resolve_path(args[1], base)
                 flags = args[2]
             if not _NEGATIVE_RE.match(result) and _open_is_read(flags):
-                path = _returned_path(result) or path
+                requested = path
+                returned = _returned_path(result)
+                if returned is not None and requested is not None and returned != requested:
+                    path_aliases.append(requested)
+                path = returned or path
             elif not _NEGATIVE_RE.match(result):
                 continue
         elif call in _FIRST_PATH_READS:
@@ -205,14 +210,15 @@ def parse_strace_effects(text: str, workspace: Path) -> List[Effect]:
         else:
             continue
 
-        effect_path = _workspace_path(path, workspace)
-        if effect_path is not None:
-            kind = (
-                EffectKind.NEGATIVE
-                if _NEGATIVE_RE.match(result)
-                else EffectKind.READ
-            )
-            effects.add(Effect(effect_path, kind))
+        kind = (
+            EffectKind.NEGATIVE
+            if _NEGATIVE_RE.match(result)
+            else EffectKind.READ
+        )
+        for candidate in [path, *path_aliases]:
+            effect_path = _workspace_path(candidate, workspace)
+            if effect_path is not None:
+                effects.add(Effect(effect_path, kind))
 
         if call == "chdir" and not result.startswith("-") and path is not None:
             cwd_by_pid[pid] = path

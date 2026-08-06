@@ -1,6 +1,6 @@
 """AgentTX: transactional side-effect control for agent trajectories."""
 
-__version__ = "0.0.13"
+__version__ = "0.0.14"
 
 from .harness import CodingAgentHarness, TrajectoryStep
 from .ledger import Effect, EffectKind, Ledger, Step

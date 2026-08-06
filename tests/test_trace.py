@@ -27,6 +27,20 @@ def test_parse_strace_distinguishes_reads_negatives_and_writes(
     assert Effect(str(workspace / "output.txt"), EffectKind.READ) not in effects
 
 
+def test_parse_strace_preserves_symlink_alias(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    raw = (
+        f'100 openat(AT_FDCWD, "alias/data.txt", O_RDONLY|O_CLOEXEC) '
+        f'= 3<{workspace}/real/data.txt>\n'
+    )
+
+    effects = set(parse_strace_effects(raw, workspace))
+
+    assert Effect(str(workspace / "alias/data.txt"), EffectKind.READ) in effects
+    assert Effect(str(workspace / "real/data.txt"), EffectKind.READ) in effects
+
+
 def test_parse_strace_tracks_chdir_across_child_processes(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     workspace.mkdir()

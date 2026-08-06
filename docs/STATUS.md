@@ -21,7 +21,7 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 - Rollback snapshots preserve native OverlayFS whiteouts via same-filesystem hard links, safely traverse mode-000 trees, and deduplicate regular-file states through immutable content-addressed blobs.
 - Commit restores selected file/directory metadata after materialization and converts upstream false-success error text into a failed commit.
 - Commit WAL snapshots selected host paths and the upperdir before materialization; reload restores interrupted partial commits or finalizes a durably persisted frontier.
-- Automatic strace-based dependency capture records successful workspace reads and ENOENT/ENOTDIR negative lookups; tracing is default-on and fails closed unless explicitly disabled.
+- Automatic strace-based dependency capture records successful workspace reads and ENOENT/ENOTDIR negative lookups, preserving both symlink request and resolved fd paths; tracing is default-on and fails closed unless explicitly disabled.
 - **Coding harness** + commit **policy** (allow/deny, ignore caches).
 - **LLM tool agent** (`scripts/agenttx-agent`) with OpenAI-compatible / DeepSeek config in `~/.agenttx_llm.env` (not in git).
 
@@ -39,6 +39,7 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 | Historical same-path frontier commit | Step 11 + real-try integration | `test_runtime_integration.py`, `layers.py` |
 | Content-addressed snapshot storage | Step 12 benchmark | `bench_snapshot_storage.py`, `snapshot_storage.{csv,md}` |
 | Hierarchical causal dependencies | Step 13 + real-try integration | `test_ledger.py`, `test_runtime_integration.py` |
+| Symlink alias causal dependencies | Step 14 + trace/real-try integration | `test_trace.py`, `test_runtime_integration.py` |
 | Long coding traj under AgentTX | Step 4 | `long_trajectory.csv` |
 | Live DeepSeek speculative edit + policy commit | live demo | `live_agent_ledger.json` |
 | AgentTX-LLM vs Aider refactor | compare bench | `refactor_agent_compare.{csv,md}` |
@@ -66,11 +67,11 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 ## Remaining / open
 
 ### High priority (systems)
-1. **Causal rollback as the default API** - explicit rollback_causal now retains independent work and hierarchical path dependencies; switching the default still needs symlink/bind-mount alias coverage and replay evaluation.
+1. **Causal rollback as the default API** - explicit rollback_causal now retains independent work, hierarchical paths, and symlink aliases; switching the default still needs bind-mount/hard-link alias coverage and replay evaluation.
 2. **Scalable snapshots** - content-addressed blobs reduce repeated file storage (9.0% physical/logical bytes in the Step 12 workload), but directory traversal and historical/WAL copies still grow with speculative state.
 3. **Crash-atomic filesystem commit** - a durable WAL now restores interrupted host materialization on reload; an in-flight external observer can still see partial paths, so kernel-level atomicity remains out of scope.
 4. **Lower overlay overhead** - shared pool remains substantially slower than bare execution on the evidence trajectory; explore a longer-lived mount or alternative layering design.
-5. **Trace portability and completeness** - current capture requires Linux strace, models workspace-local path syscalls, and uses exact-path dependency matching; unsupported syscalls and hierarchical aliasing need a formal coverage story.
+5. **Trace portability and completeness** - current capture requires Linux strace and models workspace-local path syscalls; unsupported syscalls and non-symlink aliases need a formal coverage story.
 6. **Non-filesystem effects** - network/cloud side effects (currently coarse hide_network only).
 
 ### Evaluation gaps

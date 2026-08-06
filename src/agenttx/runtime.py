@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -181,6 +182,66 @@ class AgentTX:
                 trace_reads=self.trace_reads,
             )
 
+    def _overlay_entry(self, logical: Path) -> Optional[Path]:
+        assert self.pool is not None
+        upper = self.pool.session_dir / "upperdir"
+        try:
+            relative = logical.relative_to(Path("/"))
+        except ValueError:
+            return None
+        upper_entry = upper.joinpath(*relative.parts)
+        if os.path.lexists(str(upper_entry)):
+            return upper_entry
+        if os.path.lexists(str(logical)):
+            return logical
+        return None
+
+    def _resolve_alias_ancestors(self, path: str) -> str:
+        """Resolve lexical symlink ancestors in the merged workspace view."""
+        candidate = Path(path)
+        try:
+            relative = candidate.relative_to(self.workspace)
+        except ValueError:
+            return path
+        if not relative.parts:
+            return path
+        current = self.workspace
+        for part in relative.parts[:-1]:
+            current = Path(os.path.normpath(str(current / part)))
+            for _ in range(40):
+                entry = self._overlay_entry(current)
+                if entry is None or not stat.S_ISLNK(entry.lstat().st_mode):
+                    break
+                target = os.readlink(str(entry))
+                current = Path(
+                    os.path.normpath(
+                        target if os.path.isabs(target) else str(current.parent / target)
+                    )
+                )
+            try:
+                current.relative_to(self.workspace)
+            except ValueError:
+                return path
+        resolved = Path(os.path.normpath(str(current / relative.parts[-1])))
+        try:
+            resolved.relative_to(self.workspace)
+        except ValueError:
+            return path
+        return str(resolved)
+
+    def _canonicalize_effects(self, effects: List[Effect]) -> List[Effect]:
+        out = list(effects)
+        seen = {(effect.path, effect.kind) for effect in out}
+        for effect in effects:
+            canonical = self._resolve_alias_ancestors(effect.path)
+            if canonical == effect.path:
+                continue
+            alias_effect = Effect(canonical, effect.kind)
+            if (alias_effect.path, alias_effect.kind) not in seen:
+                out.append(alias_effect)
+                seen.add((alias_effect.path, alias_effect.kind))
+        return out
+
     def run_tool(
         self,
         tool_name: str,
@@ -193,6 +254,7 @@ class AgentTX:
         effects = list(result.effects)
         if extra_reads:
             effects.extend(effects_from_paths(reads=extra_reads))
+        effects = self._canonicalize_effects(effects)
         step = self.ledger.add_step(tool_name, effects)
         rec = ToolCallRecord(
             step_id=step.step_id,
