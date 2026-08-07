@@ -94,7 +94,7 @@ class AgentTX:
             hide_network=hide_network,
             trace_reads=trace_reads,
         )
-        # if caller passed session_dir, SharedSemisolate should not destroy foreign dirs? 
+        # if caller passed session_dir, SharedSemisolate should not destroy foreign dirs?
         # mark ownership: if session_dir provided, still allow destroy on close(destroy=True)
         if session_dir is not None:
             pool._owns_sandbox = True
@@ -242,32 +242,11 @@ class AgentTX:
                 seen.add((alias_effect.path, alias_effect.kind))
         return out
 
-    def path_exists(self, path: Path) -> bool:
-        """Check a path in the merged host/upperdir view for trusted tools."""
-        logical = Path(path).resolve()
-        if self.pool is not None:
-            upper = self.pool.session_dir / "upperdir"
-            relative = logical.relative_to(Path("/"))
-            direct = upper.joinpath(*relative.parts)
-            whiteout = direct.parent / f".wh.{direct.name}"
-            if os.path.lexists(str(whiteout)):
-                return False
-            if os.path.lexists(str(direct)):
-                try:
-                    entry_stat = direct.lstat()
-                except FileNotFoundError:
-                    return False
-                if stat.S_ISCHR(entry_stat.st_mode) and entry_stat.st_rdev == os.makedev(0, 0):
-                    return False
-        entry = self._overlay_entry(logical)
-        return entry is not None
-
     def run_tool(
         self,
         tool_name: str,
         argv: Sequence[str],
         extra_reads: Optional[Sequence[str]] = None,
-        extra_effects: Optional[Sequence[Effect]] = None,
         trace_reads: Optional[bool] = None,
     ) -> ToolCallRecord:
         self.start()
@@ -276,8 +255,6 @@ class AgentTX:
         effects = list(result.effects)
         if extra_reads:
             effects.extend(effects_from_paths(reads=extra_reads))
-        if extra_effects:
-            effects.extend(extra_effects)
         effects = self._canonicalize_effects(effects)
         step = self.ledger.add_step(tool_name, effects)
         rec = ToolCallRecord(

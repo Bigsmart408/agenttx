@@ -1,0 +1,20 @@
+{
+  "iteration": 0,
+  "name": "unoptimized-hot-path",
+  "source_commit": "d55d6e8",
+  "captured_before": "known-tool-trace-bypass",
+  "baseline": {
+    "workload": "long_coding_trajectory",
+    "length": 64,
+    "repeats": 2,
+    "agenttx_without_read_tracing_ms_per_step": 361.008,
+    "agenttx_full_ms_per_step": 495.843,
+    "bare_ms_per_step": 52.663
+  },
+  "files": [
+    "runtime.py",
+    "semisolate.py",
+    "layers.py",
+    "harness.py"
+  ]
+}

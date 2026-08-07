@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
 
-from .ledger import Effect, EffectKind
 from .policy import CommitPolicy
 from .runtime import AgentTX, ToolCallRecord
 
@@ -73,7 +72,7 @@ class CodingAgentHarness:
             f"mkdir -p '{parent}' && cat > '{path}' <<'AGENTTX_EOF'\n"
             f"{content}\nAGENTTX_EOF"
         )
-        return tx.run_tool("write_file", ["bash", "-c", cmd], trace_reads=False)
+        return tx.run_tool("write_file", ["bash", "-c", cmd])
 
     def _append_file(self, tx: AgentTX, args: dict) -> ToolCallRecord:
         path = self._rel(args["path"])
@@ -82,16 +81,14 @@ class CodingAgentHarness:
             f"mkdir -p '{path.parent}' && cat >> '{path}' <<'AGENTTX_EOF'\n"
             f"{content}\nAGENTTX_EOF"
         )
-        return tx.run_tool("append_file", ["bash", "-c", cmd], trace_reads=False)
+        return tx.run_tool("append_file", ["bash", "-c", cmd])
 
     def _read_file(self, tx: AgentTX, args: dict) -> ToolCallRecord:
         path = self._rel(args["path"])
-        effect_kind = EffectKind.READ if tx.path_exists(path) else EffectKind.NEGATIVE
         return tx.run_tool(
             "read_file",
             ["bash", "-c", f"cat '{path}'"],
-            extra_effects=[Effect(str(path), effect_kind)],
-            trace_reads=False,
+            extra_reads=[str(path)],
         )
 
     def _run_shell(self, tx: AgentTX, args: dict) -> ToolCallRecord:
@@ -103,11 +100,7 @@ class CodingAgentHarness:
 
     def _delete_file(self, tx: AgentTX, args: dict) -> ToolCallRecord:
         path = self._rel(args["path"])
-        return tx.run_tool(
-            "delete_file",
-            ["bash", "-c", f"rm -f '{path}'"],
-            trace_reads=False,
-        )
+        return tx.run_tool("delete_file", ["bash", "-c", f"rm -f '{path}'"])
 
     def call_tool(self, name: str, args: Optional[dict] = None) -> ToolCallRecord:
         if name not in self.tools:

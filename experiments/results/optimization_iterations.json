@@ -1,0 +1,26 @@
+[
+  {
+    "iteration": 0,
+    "snapshot": "iteration_00_unoptimized",
+    "optimization": "known write/delete trace bypass",
+    "before_full_ms_per_step": 495.843,
+    "after_full_ms_per_step": 500.906,
+    "before_repeats": 2,
+    "after_repeats": 1,
+    "after_stdev_ms_per_step": "",
+    "correct": true,
+    "note": "directional single-run post-change measurement"
+  },
+  {
+    "iteration": 1,
+    "snapshot": "iteration_01_known_write_trace_bypass",
+    "optimization": "known read_file explicit READ/NEGATIVE effects + trace bypass",
+    "before_full_ms_per_step": 500.906,
+    "after_full_ms_per_step": 437.534,
+    "before_repeats": 1,
+    "after_repeats": 2,
+    "after_stdev_ms_per_step": 10.589,
+    "correct": true,
+    "note": "paired current implementation; full recovery passed; no-trace ablation remained intentionally incorrect"
+  }
+]

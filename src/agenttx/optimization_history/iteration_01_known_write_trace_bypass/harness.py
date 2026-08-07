@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
 
-from .ledger import Effect, EffectKind
 from .policy import CommitPolicy
 from .runtime import AgentTX, ToolCallRecord
 
@@ -86,12 +85,10 @@ class CodingAgentHarness:
 
     def _read_file(self, tx: AgentTX, args: dict) -> ToolCallRecord:
         path = self._rel(args["path"])
-        effect_kind = EffectKind.READ if tx.path_exists(path) else EffectKind.NEGATIVE
         return tx.run_tool(
             "read_file",
             ["bash", "-c", f"cat '{path}'"],
-            extra_effects=[Effect(str(path), effect_kind)],
-            trace_reads=False,
+            extra_reads=[str(path)],
         )
 
     def _run_shell(self, tx: AgentTX, args: dict) -> ToolCallRecord:

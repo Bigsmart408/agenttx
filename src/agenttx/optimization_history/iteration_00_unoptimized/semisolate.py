@@ -244,17 +244,12 @@ class SharedSemisolate:
         script.chmod(0o755)
         return script
 
-    def run(
-        self, argv: Sequence[str], *, trace_reads: Optional[bool] = None
-    ) -> StepResult:
+    def run(self, argv: Sequence[str]) -> StepResult:
         if self._closed:
             raise RuntimeError("SharedSemisolate is closed")
         assert self.sandbox_dir is not None
         before = dict(self._cached_summary)
         dig_before = dict(self._cached_digests)
-        should_trace_reads = (
-            self.trace_reads if trace_reads is None else trace_reads
-        )
         assert self.layers is not None and self.sandbox_dir is not None
         upper = self.sandbox_dir / "upperdir"
         self.layers.snapshot_before(
@@ -266,7 +261,7 @@ class SharedSemisolate:
         script = self._write_cmd_script(argv)
         command = ["bash", str(script)]
         trace_upper: Optional[Path] = None
-        if should_trace_reads:
+        if self.trace_reads:
             strace_bin = shutil.which("strace")
             assert strace_bin is not None  # validated during initialization
             session_token = hashlib.sha256(

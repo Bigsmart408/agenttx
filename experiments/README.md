@@ -126,3 +126,11 @@ PYTHONPATH=src:. python3 experiments/scripts/bench_snapshot_storage.py
 Results: `long_workload_scaling.{csv,json,md}`, `scaling_curve.{csv,md}`,
 `trace_overhead.{csv,md}`, and `snapshot_storage.{csv,md}`. See
 `docs/step17-evaluation-scaling.md`.
+
+## Step 18 ? optimization iteration history
+
+Performance changes preserve a source snapshot before each iteration under
+`src/agenttx/optimization_history/`. The first two low-risk changes make known
+harness effects explicit and keep opaque shell/test tracing intact. See
+`docs/step18-optimization-iterations.md` for before/after measurements and the
+remaining incremental-snapshot/worker optimizations.
