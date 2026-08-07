@@ -107,3 +107,22 @@ rollback removes the faulty formatter plus its derived report while retaining
 independent docs/config files. Results are written to
 `experiments/results/long_workload_matrix.{csv,json,md}`. See
 `docs/step16-long-agent-workloads.md`.
+
+## Step 17 ? scaling, variance, tracing, and storage
+
+These experiments do not add external comparison systems. They extend the long
+workload to 54/64/96 calls with two repeats, and refresh the existing scaling,
+read-tracing, and content-addressed snapshot measurements.
+
+```bash
+PYTHONPATH=src:. python3 experiments/scripts/bench_long_scaling.py \
+  --lengths 54 64 96 --repeats 2
+PYTHONPATH=src:. python3 experiments/scripts/bench_scaling.py
+PYTHONPATH=src:. python3 experiments/scripts/bench_trace_overhead.py \
+  --steps 20 --repeats 3
+PYTHONPATH=src:. python3 experiments/scripts/bench_snapshot_storage.py
+```
+
+Results: `long_workload_scaling.{csv,json,md}`, `scaling_curve.{csv,md}`,
+`trace_overhead.{csv,md}`, and `snapshot_storage.{csv,md}`. See
+`docs/step17-evaluation-scaling.md`.
