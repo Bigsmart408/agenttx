@@ -1,0 +1,4 @@
+repeat,model,wall_s,finished,tool_calls,ledger_steps,host_polluted_before_commit,committed,commit_ok,tests_rc,success,error
+0,deepseek-chat,14.357981,True,13,12,False,True,True,0,True,
+1,deepseek-chat,12.327848,True,16,15,False,True,True,0,True,
+2,deepseek-chat,11.260778,True,12,11,False,True,True,0,True,

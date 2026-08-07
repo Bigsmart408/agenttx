@@ -1,0 +1,57 @@
+{
+  "suite": "real_agent",
+  "repeats": 3,
+  "wall_p50_s": 12.327848,
+  "wall_p95_s": 14.154968,
+  "tool_calls_p50": 13.0,
+  "tool_calls_p95": 15.7,
+  "finished_rate": 1.0,
+  "success_rate": 1.0,
+  "host_leak_rate": 0.0,
+  "tests_pass_rate": 1.0,
+  "model": "deepseek-chat",
+  "rows": [
+    {
+      "repeat": 0,
+      "model": "deepseek-chat",
+      "wall_s": 14.357981,
+      "finished": true,
+      "tool_calls": 13,
+      "ledger_steps": 12,
+      "host_polluted_before_commit": false,
+      "committed": true,
+      "commit_ok": true,
+      "tests_rc": 0,
+      "error": "",
+      "success": true
+    },
+    {
+      "repeat": 1,
+      "model": "deepseek-chat",
+      "wall_s": 12.327848,
+      "finished": true,
+      "tool_calls": 16,
+      "ledger_steps": 15,
+      "host_polluted_before_commit": false,
+      "committed": true,
+      "commit_ok": true,
+      "tests_rc": 0,
+      "error": "",
+      "success": true
+    },
+    {
+      "repeat": 2,
+      "model": "deepseek-chat",
+      "wall_s": 11.260778,
+      "finished": true,
+      "tool_calls": 12,
+      "ledger_steps": 11,
+      "host_polluted_before_commit": false,
+      "committed": true,
+      "commit_ok": true,
+      "tests_rc": 0,
+      "error": "",
+      "success": true
+    }
+  ]
+}

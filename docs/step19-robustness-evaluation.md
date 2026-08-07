@@ -62,3 +62,27 @@ tail-latency repeats, a 256-step session, and four 16-step concurrent agents):
 The long-workload tail includes the intentionally missing architecture read and
 injected CI failure; the reported failure rate is therefore an expected-workload
 signal, not an infrastructure failure rate.
+
+## Real LLM agent extension
+
+The runtime benchmark can be extended with the actual OpenAI-compatible
+`LLMToolAgent` using the project’s existing provider configuration:
+
+```bash
+source ~/.agenttx_llm.env
+PYTHONPATH=src:. /home/bfq/miniconda3/envs/agenttx/bin/python \
+  experiments/scripts/bench_real_agent.py --repeats 3 --max-turns 35
+```
+
+Each repeat gives the real agent a fresh seeded multi-file refactor repository.
+The agent independently chooses tools through the OpenAI-compatible API; the
+tools still pass through AgentTX. The benchmark validates that the host remains
+unchanged before commit, commits the resulting ledger frontier, and runs the
+tests after commit. It writes `real_agent_robustness.{csv,json,md}` without
+serializing the API key or full conversation.
+
+The latest three-repeat run used `deepseek-chat`: wall p50/p95 were 12.328/14.155
+seconds, tool-call p50/p95 were 13.0/15.7, finished rate was 1.0, success rate
+was 1.0, tests passed in all repeats, and host leak rate before commit was 0.0.
+These numbers include network/model latency and are not directly comparable to
+the deterministic runtime-only p50/p95 measurements.
