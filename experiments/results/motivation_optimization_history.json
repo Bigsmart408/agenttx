@@ -1,0 +1,250 @@
+{
+  "problem": {
+    "baseline": "Each opaque tool call paid for tracing, shell/script setup, snapshot traversal, and try namespace setup.",
+    "motivation": "Long trajectories multiply per-call costs; optimization must reduce overhead without weakening causal recovery."
+  },
+  "optimization_history": [
+    {
+      "iteration": 0,
+      "snapshot": "iteration_00_unoptimized",
+      "optimization": "known write/delete trace bypass",
+      "metric": "full_ms_per_step",
+      "before": 495.843,
+      "after": 500.906,
+      "improvement_pct": -1.021,
+      "correct": true,
+      "note": "directional single-run post-change measurement"
+    },
+    {
+      "iteration": 1,
+      "snapshot": "iteration_01_known_write_trace_bypass",
+      "optimization": "known read_file explicit READ/NEGATIVE effects + trace bypass",
+      "metric": "full_ms_per_step",
+      "before": 500.906,
+      "after": 437.534,
+      "improvement_pct": 12.651,
+      "correct": true,
+      "note": "paired current implementation; full recovery passed; no-trace ablation remained intentionally incorrect"
+    },
+    {
+      "iteration": 2,
+      "snapshot": "iteration_02_known_read_effect_bypass",
+      "optimization": "persistent per-semisolate command script reuse",
+      "metric": "full_ms_per_step",
+      "before": 418.899,
+      "after": 409.835,
+      "improvement_pct": 2.164,
+      "correct": true,
+      "note": "directional two-repeat measurement; no-trace 331.599 -> 328.601 ms/step; full recovery passed; ablation remained intentionally incorrect"
+    },
+    {
+      "iteration": 3,
+      "snapshot": "iteration_03_persistent_command_script",
+      "optimization": "defer unreachable blob GC from per-snapshot hot path",
+      "metric": "full_ms_per_step",
+      "before": 406.099,
+      "after": 397.104,
+      "improvement_pct": 2.215,
+      "correct": true,
+      "note": "directional two-repeat measurement; no-trace 325.434 -> 324.325 ms/step; full recovery and evidence suite passed"
+    },
+    {
+      "iteration": 4,
+      "snapshot": "iteration_04_deferred_blob_gc",
+      "optimization": "execute reusable command script directly via shebang",
+      "metric": "full_ms_per_step",
+      "before": 397.104,
+      "after": 393.631,
+      "improvement_pct": 0.875,
+      "correct": true,
+      "note": "directional two-repeat measurement; no-trace 324.325 -> 318.575 ms/step; full recovery and evidence suite passed"
+    },
+    {
+      "iteration": 5,
+      "snapshot": "iteration_05_direct_executable_script",
+      "optimization": "persistent try worker with framed command IPC",
+      "metric": "full_ms_per_step",
+      "before": 393.631,
+      "after": 151.531,
+      "improvement_pct": 61.504,
+      "correct": true,
+      "note": "directional two-repeat measurement; no-trace 318.575 -> 66.975 ms/step; full recovery and evidence suite passed; worker fallback retained"
+    },
+    {
+      "iteration": 6,
+      "snapshot": "iteration_06_persistent_try_worker",
+      "optimization": "incremental upperdir snapshot with hard-linked unchanged entries",
+      "metric": "snapshot_stage_s",
+      "before": 0.384,
+      "after": 0.158,
+      "improvement_pct": 58.854,
+      "correct": true,
+      "note": "snapshot stage 0.384 -> 0.158 s over 63 incremental calls; endpoint pair noisy; no end-to-end speedup claim"
+    }
+  ],
+  "deterministic_robustness": [
+    {
+      "suite": "p50_p95",
+      "mode": "agenttx_without_read_tracing",
+      "length": 64,
+      "repeats": 3,
+      "samples": 192,
+      "step_p50_ms": 17.114,
+      "step_p95_ms": 334.112,
+      "run_p50_ms": 4216.381,
+      "run_p95_ms": 4368.319,
+      "wall_ms": 4216.381,
+      "failure_rate": 0.03125,
+      "ok": true,
+      "note": "end-to-end call wall time includes AgentTX ledger persistence"
+    },
+    {
+      "suite": "p50_p95",
+      "mode": "agenttx_full",
+      "length": 64,
+      "repeats": 3,
+      "samples": 192,
+      "step_p50_ms": 22.761,
+      "step_p95_ms": 743.23,
+      "run_p50_ms": 8942.204,
+      "run_p95_ms": 9232.131,
+      "wall_ms": 8942.204,
+      "failure_rate": 0.03125,
+      "ok": true,
+      "note": "end-to-end call wall time includes AgentTX ledger persistence"
+    },
+    {
+      "suite": "worker_crash",
+      "mode": "agenttx_without_read_tracing",
+      "injected": true,
+      "fallback_used": true,
+      "worker_restarted": true,
+      "fallback_ms": 286.541,
+      "failure_count": 1,
+      "ok": true,
+      "note": "worker killed before dispatch; command completed through one-shot try fallback"
+    },
+    {
+      "suite": "long_session",
+      "mode": "agenttx_without_read_tracing",
+      "steps": 256,
+      "resume_at": 128,
+      "resumed": true,
+      "wall_ms": 10604.103,
+      "step_p50_ms": 36.286,
+      "step_p95_ms": 72.312,
+      "failures": 0,
+      "materialized_files": 256,
+      "ok": true,
+      "note": "session was closed and reloaded at the midpoint before final commit"
+    },
+    {
+      "suite": "concurrent_agents",
+      "mode": "agenttx_without_read_tracing",
+      "agents": 4,
+      "steps_per_agent": 16,
+      "wall_ms": 3105.418,
+      "agent_p50_ms": 2935.097,
+      "agent_p95_ms": 3043.653,
+      "successful_agents": 4,
+      "cross_contamination": false,
+      "ok": true,
+      "details": [
+        {
+          "agent_id": 0,
+          "steps": 16,
+          "wall_ms": 2856.084,
+          "frontier": 15,
+          "files": 16,
+          "isolated": true,
+          "ok": true
+        },
+        {
+          "agent_id": 1,
+          "steps": 16,
+          "wall_ms": 3059.847,
+          "frontier": 15,
+          "files": 16,
+          "isolated": true,
+          "ok": true
+        },
+        {
+          "agent_id": 2,
+          "steps": 16,
+          "wall_ms": 2918.308,
+          "frontier": 15,
+          "files": 16,
+          "isolated": true,
+          "ok": true
+        },
+        {
+          "agent_id": 3,
+          "steps": 16,
+          "wall_ms": 2951.885,
+          "frontier": 15,
+          "files": 16,
+          "isolated": true,
+          "ok": true
+        }
+      ],
+      "note": "agents use separate session overlays and commit into separate workspace subdirectories concurrently"
+    }
+  ],
+  "real_agent": {
+    "suite": "real_agent",
+    "repeats": 3,
+    "wall_p50_s": 12.327848,
+    "wall_p95_s": 14.154968,
+    "tool_calls_p50": 13.0,
+    "tool_calls_p95": 15.7,
+    "finished_rate": 1.0,
+    "success_rate": 1.0,
+    "host_leak_rate": 0.0,
+    "tests_pass_rate": 1.0,
+    "model": "deepseek-chat",
+    "rows": [
+      {
+        "repeat": 0,
+        "model": "deepseek-chat",
+        "wall_s": 14.357981,
+        "finished": true,
+        "tool_calls": 13,
+        "ledger_steps": 12,
+        "host_polluted_before_commit": false,
+        "committed": true,
+        "commit_ok": true,
+        "tests_rc": 0,
+        "error": "",
+        "success": true
+      },
+      {
+        "repeat": 1,
+        "model": "deepseek-chat",
+        "wall_s": 12.327848,
+        "finished": true,
+        "tool_calls": 16,
+        "ledger_steps": 15,
+        "host_polluted_before_commit": false,
+        "committed": true,
+        "commit_ok": true,
+        "tests_rc": 0,
+        "error": "",
+        "success": true
+      },
+      {
+        "repeat": 2,
+        "model": "deepseek-chat",
+        "wall_s": 11.260778,
+        "finished": true,
+        "tool_calls": 12,
+        "ledger_steps": 11,
+        "host_polluted_before_commit": false,
+        "committed": true,
+        "commit_ok": true,
+        "tests_rc": 0,
+        "error": "",
+        "success": true
+      }
+    ]
+  }
+}

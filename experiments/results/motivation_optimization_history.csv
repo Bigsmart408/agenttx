@@ -1,0 +1,8 @@
+iteration,snapshot,optimization,metric,before,after,improvement_pct,correct,note
+0,iteration_00_unoptimized,known write/delete trace bypass,full_ms_per_step,495.843,500.906,-1.021,True,directional single-run post-change measurement
+1,iteration_01_known_write_trace_bypass,known read_file explicit READ/NEGATIVE effects + trace bypass,full_ms_per_step,500.906,437.534,12.651,True,paired current implementation; full recovery passed; no-trace ablation remained intentionally incorrect
+2,iteration_02_known_read_effect_bypass,persistent per-semisolate command script reuse,full_ms_per_step,418.899,409.835,2.164,True,directional two-repeat measurement; no-trace 331.599 -> 328.601 ms/step; full recovery passed; ablation remained intentionally incorrect
+3,iteration_03_persistent_command_script,defer unreachable blob GC from per-snapshot hot path,full_ms_per_step,406.099,397.104,2.215,True,directional two-repeat measurement; no-trace 325.434 -> 324.325 ms/step; full recovery and evidence suite passed
+4,iteration_04_deferred_blob_gc,execute reusable command script directly via shebang,full_ms_per_step,397.104,393.631,0.875,True,directional two-repeat measurement; no-trace 324.325 -> 318.575 ms/step; full recovery and evidence suite passed
+5,iteration_05_direct_executable_script,persistent try worker with framed command IPC,full_ms_per_step,393.631,151.531,61.504,True,directional two-repeat measurement; no-trace 318.575 -> 66.975 ms/step; full recovery and evidence suite passed; worker fallback retained
+6,iteration_06_persistent_try_worker,incremental upperdir snapshot with hard-linked unchanged entries,snapshot_stage_s,0.384,0.158,58.854,True,snapshot stage 0.384 -> 0.158 s over 63 incremental calls; endpoint pair noisy; no end-to-end speedup claim
