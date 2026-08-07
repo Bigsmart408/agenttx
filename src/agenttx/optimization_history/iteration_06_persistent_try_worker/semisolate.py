@@ -119,7 +119,6 @@ class SharedSemisolate:
     persistent_worker: bool = True
     _worker_process: Optional[subprocess.Popen] = None
     _worker_script: Optional[Path] = None
-    _pending_snapshot_changes: Optional[List[str]] = None
     layers: Optional[LayerStore] = None
 
     def __post_init__(self) -> None:
@@ -376,10 +375,7 @@ class SharedSemisolate:
         assert self.layers is not None and self.sandbox_dir is not None
         upper = self.sandbox_dir / "upperdir"
         self.layers.snapshot_before(
-            self._step_count,
-            upper,
-            fingerprints=dig_before,
-            changed_paths=self._pending_snapshot_changes,
+            self._step_count, upper, fingerprints=dig_before
         )
         flags = ["-N", str(self.sandbox_dir)]
         if self.hide_network:
@@ -455,13 +451,6 @@ class SharedSemisolate:
         effects = trace_effects + [
             effects_by_path[path] for path in sorted(effects_by_path)
         ]
-        self._pending_snapshot_changes = sorted(
-            {
-                effect.path
-                for effect in effects
-                if effect.kind in (EffectKind.WRITE, EffectKind.DELETE)
-            }
-        )
         # Keep cached summary lazily empty; refresh only on explicit commit/status.
         after = dict(self._cached_summary)
         idx = self._step_count
@@ -596,7 +585,6 @@ class SharedSemisolate:
                 self.layers.copy_tree(saved, upper)
                 self._cached_summary = {}
                 self._cached_digests = self.upperdir_digests()
-                self._pending_snapshot_changes = None
             _remove_overlay_tree(temporary)
 
     def commit(self, paths: Optional[Sequence[str]] = None) -> subprocess.CompletedProcess:
@@ -639,7 +627,6 @@ class SharedSemisolate:
             self._restore_committed_metadata(metadata)
             self._cached_summary = {}
             self._cached_digests = self.upperdir_digests()
-            self._pending_snapshot_changes = None
         return cp
 
     def reset(self) -> None:
@@ -659,7 +646,6 @@ class SharedSemisolate:
                     pass
         self._cached_summary = {}
         self._cached_digests = {}
-        self._pending_snapshot_changes = None
 
     def rollback_causal(
         self, step_ids: List[int], paths: Sequence[str]
@@ -673,7 +659,6 @@ class SharedSemisolate:
         self.layers.drop_from(step_ids)
         self._cached_summary = {}
         self._cached_digests = self.upperdir_digests()
-        self._pending_snapshot_changes = None
 
     def rollback_steps(self, step_ids: List[int]) -> None:
         """Restore upperdir to snapshot taken before min(step_ids)."""
@@ -687,7 +672,6 @@ class SharedSemisolate:
         self.layers.drop_from(step_ids)
         self._cached_summary = {}
         self._cached_digests = self.upperdir_digests()
-        self._pending_snapshot_changes = None
 
     def close(self, destroy: bool = True) -> None:
         if self._closed:

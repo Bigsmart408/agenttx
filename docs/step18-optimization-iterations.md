@@ -135,11 +135,35 @@ worker reduces the dominant per-call try setup cost; the remaining gap includes
 command execution, upperdir snapshots, ledger persistence, and optional strace.
 
 
+## Iteration 06 -> current: incremental upperdir snapshots
+
+The pre-image for this change is `iteration_06_persistent_try_worker`. The
+previous implementation copied the complete upperdir tree into a new
+`before_<step>` directory at every step, even when only one or two paths changed.
+The current implementation clones the previous snapshot, hard-links unchanged
+regular files and native whiteouts, and replays only the current step's write and
+delete paths. Symlinks, directories, metadata, and whiteout semantics continue to
+use the existing snapshot helpers. A read-only step therefore reuses the prior
+snapshot without replaying any path.
+
+The optimization is deliberately conservative at state boundaries. After commit,
+rollback, reset, or session restore, the next snapshot uses the full-copy path;
+this avoids depending on a previous snapshot that may have been discarded or
+reconstructed. If the changed-path list is unavailable, the full-copy fallback is
+also used.
+
+A controlled 64-call profile measured cumulative `snapshot_before` time of
+0.384 s before the change and 0.158 s after it (63 incremental calls, about 59%
+lower). The end-to-end pair was noisy on the VM: 151.531 ms/step before versus
+162.104 ms/step after, with 18.839 ms/step after standard deviation. We therefore
+report the snapshot-stage reduction but do not claim a total-latency speedup.
+The unit suite (48 tests) and evidence suite both pass.
+
 ## Next optimization candidates
 
-The source history now supports a clean before/after experiment for the higher-
-risk changes: incremental upperdir digests/snapshots, journaled ledger
-persistence, and a persistent try/worker session. Those changes must preserve
+The source history now supports a clean before/after experiment for the remaining
+higher-risk changes: journaled ledger persistence and snapshot/WAL traversal
+reductions. Those changes must preserve
 rollback, crash recovery, and the full-trace causal oracle.
 
 Artifacts:
@@ -151,5 +175,6 @@ Artifacts:
 - `src/agenttx/optimization_history/iteration_03_persistent_command_script/`
 - `src/agenttx/optimization_history/iteration_04_deferred_blob_gc/`
 - `src/agenttx/optimization_history/iteration_05_direct_executable_script/`
+- `src/agenttx/optimization_history/iteration_06_persistent_try_worker/`
 - `experiments/results/long_workload_matrix.{csv,json,md}`
 - `experiments/results/optimization_iterations.{csv,json,md}`

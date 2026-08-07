@@ -166,93 +166,6 @@ def _copy_overlay_tree(source: Path, destination: Path) -> None:
             source.chmod(original_mode)
 
 
-def _clone_snapshot_tree(source: Path, destination: Path) -> None:
-    """Clone a snapshot tree while hard-linking immutable file entries."""
-    source_stat = source.lstat()
-    original_mode = stat.S_IMODE(source_stat.st_mode)
-    accessible_mode = original_mode | stat.S_IRUSR | stat.S_IXUSR
-    changed_mode = accessible_mode != original_mode
-    if changed_mode:
-        source.chmod(accessible_mode)
-    destination.mkdir(parents=True, exist_ok=False)
-    try:
-        with os.scandir(source) as entries:
-            for entry in entries:
-                source_entry = Path(entry.path)
-                destination_entry = destination / entry.name
-                entry_stat = entry.stat(follow_symlinks=False)
-                mode = entry_stat.st_mode
-                if stat.S_ISDIR(mode):
-                    _clone_snapshot_tree(source_entry, destination_entry)
-                elif stat.S_ISLNK(mode):
-                    destination_entry.parent.mkdir(parents=True, exist_ok=True)
-                    destination_entry.symlink_to(os.readlink(source_entry))
-                    shutil.copystat(source_entry, destination_entry, follow_symlinks=False)
-                elif stat.S_ISREG(mode) or (
-                    stat.S_ISCHR(mode) and entry_stat.st_rdev == os.makedev(0, 0)
-                ):
-                    destination_entry.parent.mkdir(parents=True, exist_ok=True)
-                    os.link(source_entry, destination_entry, follow_symlinks=False)
-                else:
-                    raise shutil.SpecialFileError(
-                        f"unsupported snapshot entry: {source_entry}"
-                    )
-        shutil.copystat(source, destination, follow_symlinks=False)
-    finally:
-        if changed_mode:
-            source.chmod(original_mode)
-
-
-def _copy_snapshot_logical_entry(
-    source_root: Path,
-    destination_root: Path,
-    blob_root: Path,
-    logical: Path,
-    fingerprints: Optional[Dict[str, str]],
-) -> None:
-    """Apply one changed upperdir path while retaining content-addressed blobs."""
-    relative = logical.relative_to("/")
-    source = source_root.joinpath(*relative.parts)
-    destination = destination_root.joinpath(*relative.parts)
-    if _lexists(source):
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        _copy_snapshot_entry(source, destination, blob_root, logical, fingerprints)
-        return
-    source_whiteout = source.parent / f".wh.{source.name}"
-    if _lexists(source_whiteout):
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        _copy_snapshot_entry(
-            source_whiteout,
-            destination.parent / source_whiteout.name,
-            blob_root,
-            logical.parent / source_whiteout.name,
-            fingerprints,
-        )
-
-
-def _incremental_snapshot_tree(
-    previous: Path,
-    destination: Path,
-    upperdir: Path,
-    blob_root: Path,
-    changed_paths: List[str],
-    fingerprints: Optional[Dict[str, str]],
-) -> None:
-    """Clone the prior state and replay only paths changed by the prior step."""
-    _clone_snapshot_tree(previous, destination)
-    logical_paths = sorted(
-        {Path(path) for path in changed_paths},
-        key=lambda path: (len(path.parts), str(path)),
-    )
-    for logical in logical_paths:
-        if not logical.is_absolute() or logical == Path("/"):
-            raise ValueError(f"invalid incremental snapshot path: {logical}")
-        _remove_logical_entry(destination, logical)
-        _copy_snapshot_logical_entry(
-            upperdir, destination, blob_root, logical, fingerprints
-        )
-
-
 def _snapshot_blob_key(source: Path) -> str:
     source_stat = source.lstat()
     original_mode = stat.S_IMODE(source_stat.st_mode)
@@ -410,7 +323,6 @@ class LayerStore:
         step_id: int,
         upperdir: Path,
         fingerprints: Optional[Dict[str, str]] = None,
-        changed_paths: Optional[List[str]] = None,
     ) -> Path:
         """Capture a pre-step view with content-addressed file snapshots.
 
@@ -423,17 +335,7 @@ class LayerStore:
         _remove_overlay_tree(dest)
         blob_root = self.root / "blobs"
         blob_root.mkdir(parents=True, exist_ok=True)
-        previous = self.root / f"before_{step_id - 1:04d}"
-        if (
-            upperdir.exists()
-            and changed_paths is not None
-            and step_id > 0
-            and previous.exists()
-        ):
-            _incremental_snapshot_tree(
-                previous, dest, upperdir, blob_root, changed_paths, fingerprints
-            )
-        elif upperdir.exists():
+        if upperdir.exists():
             _copy_snapshot_tree(
                 upperdir, dest, blob_root, Path("/"), fingerprints
             )

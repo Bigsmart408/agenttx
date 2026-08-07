@@ -70,5 +70,17 @@
     "after_stdev_ms_per_step": 5.013,
     "correct": true,
     "note": "directional two-repeat measurement; no-trace 318.575 -> 66.975 ms/step; full recovery and evidence suite passed; worker fallback retained"
+  },
+  {
+    "iteration": 6,
+    "snapshot": "iteration_06_persistent_try_worker",
+    "optimization": "incremental upperdir snapshot with hard-linked unchanged entries",
+    "before_full_ms_per_step": 151.531,
+    "after_full_ms_per_step": 162.104,
+    "before_repeats": 2,
+    "after_repeats": 2,
+    "after_stdev_ms_per_step": 18.839,
+    "correct": true,
+    "note": "snapshot stage 0.384 -> 0.158 s over 63 incremental calls; endpoint pair noisy; no end-to-end speedup claim"
   }
 ]

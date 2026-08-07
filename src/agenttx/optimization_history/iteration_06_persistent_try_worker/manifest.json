@@ -1,0 +1,31 @@
+{
+  "iteration": 6,
+  "name": "persistent-try-worker",
+  "captured_before": "incremental-upperdir-snapshot",
+  "baseline": {
+    "workload": "long_coding_trajectory",
+    "length": 64,
+    "repeats": 2,
+    "agenttx_without_read_tracing_ms_per_step_mean": 66.975,
+    "agenttx_full_ms_per_step_mean": 151.531,
+    "agenttx_full_ms_per_step_stdev": 5.013,
+    "recovery_agenttx_full": true,
+    "recovery_agenttx_without_read_tracing": false
+  },
+  "result_after_next_optimization": {
+    "snapshot_stage_before_s": 0.384,
+    "snapshot_stage_after_s": 0.158,
+    "incremental_calls": 63,
+    "agenttx_without_read_tracing_ms_per_step_mean": 65.827,
+    "agenttx_full_ms_per_step_mean": 162.104,
+    "agenttx_full_ms_per_step_stdev": 18.839,
+    "correct": true,
+    "note": "snapshot stage improved by about 59%; endpoint pair was noisy, so no end-to-end speedup claim"
+  },
+  "files": [
+    "runtime.py",
+    "semisolate.py",
+    "layers.py",
+    "harness.py"
+  ]
+}

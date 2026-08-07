@@ -48,7 +48,7 @@ Last updated: 2026-08-07 (VM `/home/bfq/agenttx`).
 | Baseline comparison matrix | Step 15 fixed causal-retention workload | `comparison_matrix.{csv,json,md}`, `step15-comparison-experiments.md` |
 | Longer 64-call Agent workload | Step 16 deterministic multi-file refactor, failing CI, independent edits, derived artifact | `long_workload_matrix.{csv,json,md}`, `step16-long-agent-workloads.md` |
 | Long workload scaling + variance | Step 17 lengths 54/64/96, two repeats; refreshed trace and snapshot measurements | `long_workload_scaling.{csv,json,md}`, `step17-evaluation-scaling.md` |
-| Optimization iteration history | P1 before/after source snapshots, known-tool tracing bypass, persistent command-script reuse, deferred blob GC, direct script execution, and a persistent try worker | `src/agenttx/optimization_history/`, `step18-optimization-iterations.md` |
+| Optimization iteration history | P1 before/after source snapshots, known-tool tracing bypass, persistent command-script reuse, deferred blob GC, direct script execution, persistent try worker, and incremental upperdir snapshots | `src/agenttx/optimization_history/`, `step18-optimization-iterations.md` |
 
 **Evidence suite highlights (2026-08-07):**
 - Cascade rollback: host clean until commit; only intended files land.
@@ -62,7 +62,7 @@ Last updated: 2026-08-07 (VM `/home/bfq/agenttx`).
 - Evidence suite rerun: all cascade rollback, selective/frontier commit, host-pollution, mistake-recovery, policy, and isolation checks passed.
 - Long workload: 64 deterministic tool calls, multi-file refactor plus failing CI and independent docs/config edits; full AgentTX retains the independent files and removes the faulty formatter plus derived report, while no-trace retains the report.
 - Scaling/variance: long workload lengths 54/64/96 with two repeats; full AgentTX is 456.5?495.8 ms/step and read tracing contributes 8.0% on a 20-step no-op trace.
-- Optimization history: every hot-path iteration now preserves its prior source under `src/agenttx/optimization_history`; explicit effects for known `read_file` plus write/delete trace bypass preserved correctness, and persistent command-script reuse reduced full 64-call cost from 393.6 to 151.5 ms/step in iteration 05 with a persistent try worker (two repeats; VM-local measurement).
+- Optimization history: every hot-path iteration now preserves its prior source under `src/agenttx/optimization_history`; iteration 05 reduced full 64-call cost from 393.6 to 151.5 ms/step with a persistent try worker, and iteration 06 reduced cumulative snapshot-stage time from 0.384 to 0.158 s with incremental upperdir replay (two-repeat VM-local measurements; no endpoint speedup claim for iteration 06).
 
 **Refactor compare (DeepSeek):**
 - AgentTX-LLM: ~14s, host clean before commit, tests pass.
@@ -80,7 +80,7 @@ Last updated: 2026-08-07 (VM `/home/bfq/agenttx`).
 1. **Causal rollback as the default API** - explicit rollback_causal now retains independent work, hierarchical paths, and symlink aliases; switching the default still needs bind-mount/hard-link alias coverage and replay evaluation.
 2. **Scalable snapshots** - content-addressed blobs reduce repeated file storage (9.0% physical/logical bytes in the Step 12 workload), but directory traversal and historical/WAL copies still grow with speculative state.
 3. **Crash-atomic filesystem commit** - a durable WAL now restores interrupted host materialization on reload; an in-flight external observer can still see partial paths, so kernel-level atomicity remains out of scope.
-4. **Lower overlay overhead** - known-tool tracing bypass is measured and preserved in iteration history; shared pool remains substantially slower than bare execution, so incremental snapshots and a longer-lived worker remain open.
+4. **Lower overlay overhead** - known-tool tracing bypass, a longer-lived try worker, and incremental snapshots are measured and preserved in iteration history; shared pool remains substantially slower than bare execution, so ledger and overlay traversal costs remain open.
 5. **Trace portability and completeness** - current capture requires Linux strace and models workspace-local path syscalls; unsupported syscalls and non-symlink aliases need a formal coverage story.
 6. **Non-filesystem effects** - network/cloud side effects (currently coarse hide_network only).
 

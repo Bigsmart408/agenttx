@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 
+from agenttx.layers import LayerStore
 from agenttx.semisolate import SharedSemisolate
 
 
@@ -14,6 +15,7 @@ def test_optimization_history_preserves_preimages_and_manifests() -> None:
         "iteration_03_persistent_command_script",
         "iteration_04_deferred_blob_gc",
         "iteration_05_direct_executable_script",
+        "iteration_06_persistent_try_worker",
     ):
         snapshot = root / name
         assert (snapshot / "runtime.py").exists()
@@ -55,3 +57,23 @@ def test_persistent_try_worker_reuses_session(tmp_path: Path) -> None:
     finally:
         tx.close()
     assert worker is not None and worker.poll() is not None
+
+
+def test_incremental_snapshot_replays_changed_paths(tmp_path: Path) -> None:
+    upper = tmp_path / "upper"
+    upper.mkdir()
+    (upper / "stable.txt").write_text("stable\n", encoding="utf-8")
+    (upper / "changed.txt").write_text("before\n", encoding="utf-8")
+    store = LayerStore(tmp_path / "layers")
+    store.snapshot_before(0, upper)
+
+    (upper / "changed.txt").write_text("after\n", encoding="utf-8")
+    (upper / "new.txt").write_text("new\n", encoding="utf-8")
+    store.snapshot_before(1, upper, changed_paths=["/changed.txt", "/new.txt"])
+
+    assert (store.root / "before_0001/changed.txt").read_text(encoding="utf-8") == "after\n"
+    assert (store.root / "before_0001/new.txt").read_text(encoding="utf-8") == "new\n"
+    assert (store.root / "before_0001/stable.txt").read_text(encoding="utf-8") == "stable\n"
+    assert (store.root / "before_0000/stable.txt").stat().st_ino == (
+        store.root / "before_0001/stable.txt"
+    ).stat().st_ino
