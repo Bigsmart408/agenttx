@@ -1,0 +1,6 @@
+agent_p50_ms,agent_p95_ms,agents,cross_contamination,failure_count,failure_rate,failures,fallback_ms,fallback_used,injected,length,materialized_files,mode,note,ok,repeats,resume_at,resumed,run_p50_ms,run_p95_ms,samples,step_p50_ms,step_p95_ms,steps,steps_per_agent,successful_agents,suite,wall_ms,worker_restarted
+,,,,,0.03125,,,,,64,,agenttx_without_read_tracing,end-to-end call wall time includes AgentTX ledger persistence,True,3,,,4216.381,4368.319,192,17.114,334.112,,,,p50_p95,4216.381,
+,,,,,0.03125,,,,,64,,agenttx_full,end-to-end call wall time includes AgentTX ledger persistence,True,3,,,8942.204,9232.131,192,22.761,743.23,,,,p50_p95,8942.204,
+,,,,1,,,286.541,True,True,,,agenttx_without_read_tracing,worker killed before dispatch; command completed through one-shot try fallback,True,,,,,,,,,,,,worker_crash,,True
+,,,,,,0,,,,,256,agenttx_without_read_tracing,session was closed and reloaded at the midpoint before final commit,True,,128,True,,,,36.286,72.312,256,,,long_session,10604.103,
+2935.097,3043.653,4,False,,,,,,,,,agenttx_without_read_tracing,agents use separate session overlays and commit into separate workspace subdirectories concurrently,True,,,,,,,,,,16,4,concurrent_agents,3105.418,

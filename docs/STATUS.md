@@ -49,6 +49,7 @@ Last updated: 2026-08-07 (VM `/home/bfq/agenttx`).
 | Longer 64-call Agent workload | Step 16 deterministic multi-file refactor, failing CI, independent edits, derived artifact | `long_workload_matrix.{csv,json,md}`, `step16-long-agent-workloads.md` |
 | Long workload scaling + variance | Step 17 lengths 54/64/96, two repeats; refreshed trace and snapshot measurements | `long_workload_scaling.{csv,json,md}`, `step17-evaluation-scaling.md` |
 | Optimization iteration history | P1 before/after source snapshots, known-tool tracing bypass, persistent command-script reuse, deferred blob GC, direct script execution, persistent try worker, and incremental upperdir snapshots | `src/agenttx/optimization_history/`, `step18-optimization-iterations.md` |
+| Robustness evaluation | Step 19 p50/p95 tail latency, worker crash injection/fallback, reloadable long session, and concurrent isolated agents | `robustness.{csv,json,md}`, `step19-robustness-evaluation.md` |
 
 **Evidence suite highlights (2026-08-07):**
 - Cascade rollback: host clean until commit; only intended files land.
@@ -63,6 +64,7 @@ Last updated: 2026-08-07 (VM `/home/bfq/agenttx`).
 - Long workload: 64 deterministic tool calls, multi-file refactor plus failing CI and independent docs/config edits; full AgentTX retains the independent files and removes the faulty formatter plus derived report, while no-trace retains the report.
 - Scaling/variance: long workload lengths 54/64/96 with two repeats; full AgentTX is 456.5?495.8 ms/step and read tracing contributes 8.0% on a 20-step no-op trace.
 - Optimization history: every hot-path iteration now preserves its prior source under `src/agenttx/optimization_history`; iteration 05 reduced full 64-call cost from 393.6 to 151.5 ms/step with a persistent try worker, and iteration 06 reduced cumulative snapshot-stage time from 0.384 to 0.158 s with incremental upperdir replay (two-repeat VM-local measurements; no endpoint speedup claim for iteration 06).
+- Robustness evaluation: Step 19 records per-call/per-run p50 and p95 (no-trace 17.114/334.112 ms; full-trace 22.761/743.230 ms), verifies worker fallback plus restart after injected crash, reloads and commits a 256-step session, and runs 4 concurrent agents with no cross-contamination.
 
 **Refactor compare (DeepSeek):**
 - AgentTX-LLM: ~14s, host clean before commit, tests pass.
@@ -85,10 +87,10 @@ Last updated: 2026-08-07 (VM `/home/bfq/agenttx`).
 6. **Non-filesystem effects** - network/cloud side effects (currently coarse hide_network only).
 
 ### Evaluation gaps
-8. Harder / longer agent workloads: deterministic 54/64/96-call scaling is covered by Steps 16?17; real multi-package LLM agents and repeated p50/p95 runs remain.
+8. Harder / longer agent workloads: deterministic 54/64/96-call scaling and a reloadable 256-step session are covered by Steps 16?19; real multi-package LLM agents remain.
 9. External baselines: BranchFS/Waypoint/Sandlock/YoloFS/DeltaBox/Crab/Cordon remain artifact- or environment-blocked; current VM matrix covers the runnable references and records the blockers.
 10. Stronger Aider (or other agents) bakeoff with fair timeouts and success criteria.
-11. Statistical repeats / variance reporting for LLM runs (cost-aware).
+11. Statistical repeats / variance reporting for real LLM runs (cost-aware) remains open; deterministic runtime tails now have p50/p95 coverage.
 
 ### Product / paper
 12. OSDI paper draft (HLS: problem → root cause → AET → design points → eval).
@@ -110,6 +112,7 @@ python experiments/scripts/bench_scaling.py
 python experiments/scripts/bench_comparison_matrix.py --repeats 3 --n 10
 python experiments/scripts/bench_long_trajectory.py --length 64 --repeats 1
 python experiments/scripts/bench_long_scaling.py --lengths 54 64 96 --repeats 2
+python experiments/scripts/bench_robustness.py --tail-length 64 --tail-repeats 3 --long-steps 256 --long-resume-at 128 --agents 4 --concurrent-steps 16
 AIDER_TIMEOUT_S=180 python experiments/scripts/bench_refactor_compare.py
 ```
 

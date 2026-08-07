@@ -1,0 +1,11 @@
+{
+  "iteration": 7,
+  "name": "robustness-evaluation",
+  "captured_before": "worker-crash-injection-and-tail-latency-evaluation",
+  "files": [
+    "runtime.py",
+    "semisolate.py",
+    "layers.py",
+    "harness.py"
+  ]
+}

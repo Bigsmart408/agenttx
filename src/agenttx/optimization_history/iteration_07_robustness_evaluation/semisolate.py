@@ -120,8 +120,6 @@ class SharedSemisolate:
     _worker_process: Optional[subprocess.Popen] = None
     _worker_script: Optional[Path] = None
     _pending_snapshot_changes: Optional[List[str]] = None
-    _worker_crash_once: bool = False
-    _worker_failure_count: int = 0
     layers: Optional[LayerStore] = None
 
     def __post_init__(self) -> None:
@@ -288,23 +286,6 @@ class SharedSemisolate:
             self._stop_worker()
             raise
 
-    def inject_worker_crash_once(self) -> None:
-        """Inject one persistent-worker failure before its next request.
-
-        This is an evaluation hook, not a normal execution path.  Killing the
-        worker before dispatch leaves the command for the fail-safe one-shot
-        fallback in :meth:`run`, so crash recovery can be measured without
-        intentionally duplicating filesystem effects.
-        """
-        if self._worker_process is None or self._worker_process.poll() is not None:
-            raise RuntimeError("try worker is not running")
-        self._worker_crash_once = True
-
-    @property
-    def worker_failure_count(self) -> int:
-        """Number of worker failures that have used the one-shot fallback."""
-        return self._worker_failure_count
-
     @staticmethod
     def _read_worker_frame(stream) -> dict:
         def read_exact(size: int) -> bytes:
@@ -336,11 +317,6 @@ class SharedSemisolate:
             {"argv": list(command), "cwd": str(cwd)},
             separators=(",", ":"),
         ).encode("utf-8")
-        if self._worker_crash_once:
-            self._worker_crash_once = False
-            self._worker_process.kill()
-            self._worker_process.wait(timeout=2)
-            raise RuntimeError("injected persistent-worker crash")
         self._worker_process.stdin.write(struct.pack("!I", len(request)))
         self._worker_process.stdin.write(request)
         self._worker_process.stdin.flush()
@@ -385,31 +361,6 @@ class SharedSemisolate:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=2)
-
-    def _repair_worker_sandbox(self) -> None:
-        """Remove stale try mount scaffolding after a worker process loss."""
-        assert self.sandbox_dir is not None
-        # A killed try namespace cannot run its normal unmount/cleanup trap.
-        # The upperdir is the speculative state we must retain; all other
-        # generated mount scaffolding can be recreated by the one-shot path.
-        for name in ("temproot", "workdir", "hidedir", "mergerdir"):
-            _remove_overlay_tree(self.sandbox_dir / name)
-        for name in (
-            "mounts",
-            "mounts.updated",
-            "mount_and_execute.sh",
-            "chroot_executable.sh",
-            "script_to_execute.sh",
-            "hide",
-            "include",
-            "exclude",
-            "mount.log",
-            "error.log",
-        ):
-            path = self.sandbox_dir / name
-            if path.exists() or os.path.lexists(path):
-                _remove_overlay_tree(path)
-        (self.sandbox_dir / "upperdir").mkdir(parents=True, exist_ok=True)
 
     def run(
         self, argv: Sequence[str], *, trace_reads: Optional[bool] = None
@@ -470,9 +421,7 @@ class SharedSemisolate:
             except Exception:
                 # A worker failure must not change correctness. Restarting the
                 # worker is deferred; this step uses the original try path.
-                self._worker_failure_count += 1
                 self._stop_worker()
-                self._repair_worker_sandbox()
                 cp = self._run_try([*flags, "--", *command], cwd=self.workspace)
         else:
             cp = self._run_try([*flags, "--", *command], cwd=self.workspace)

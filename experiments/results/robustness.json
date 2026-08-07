@@ -1,0 +1,108 @@
+[
+  {
+    "suite": "p50_p95",
+    "mode": "agenttx_without_read_tracing",
+    "length": 64,
+    "repeats": 3,
+    "samples": 192,
+    "step_p50_ms": 17.114,
+    "step_p95_ms": 334.112,
+    "run_p50_ms": 4216.381,
+    "run_p95_ms": 4368.319,
+    "wall_ms": 4216.381,
+    "failure_rate": 0.03125,
+    "ok": true,
+    "note": "end-to-end call wall time includes AgentTX ledger persistence"
+  },
+  {
+    "suite": "p50_p95",
+    "mode": "agenttx_full",
+    "length": 64,
+    "repeats": 3,
+    "samples": 192,
+    "step_p50_ms": 22.761,
+    "step_p95_ms": 743.23,
+    "run_p50_ms": 8942.204,
+    "run_p95_ms": 9232.131,
+    "wall_ms": 8942.204,
+    "failure_rate": 0.03125,
+    "ok": true,
+    "note": "end-to-end call wall time includes AgentTX ledger persistence"
+  },
+  {
+    "suite": "worker_crash",
+    "mode": "agenttx_without_read_tracing",
+    "injected": true,
+    "fallback_used": true,
+    "worker_restarted": true,
+    "fallback_ms": 286.541,
+    "failure_count": 1,
+    "ok": true,
+    "note": "worker killed before dispatch; command completed through one-shot try fallback"
+  },
+  {
+    "suite": "long_session",
+    "mode": "agenttx_without_read_tracing",
+    "steps": 256,
+    "resume_at": 128,
+    "resumed": true,
+    "wall_ms": 10604.103,
+    "step_p50_ms": 36.286,
+    "step_p95_ms": 72.312,
+    "failures": 0,
+    "materialized_files": 256,
+    "ok": true,
+    "note": "session was closed and reloaded at the midpoint before final commit"
+  },
+  {
+    "suite": "concurrent_agents",
+    "mode": "agenttx_without_read_tracing",
+    "agents": 4,
+    "steps_per_agent": 16,
+    "wall_ms": 3105.418,
+    "agent_p50_ms": 2935.097,
+    "agent_p95_ms": 3043.653,
+    "successful_agents": 4,
+    "cross_contamination": false,
+    "ok": true,
+    "details": [
+      {
+        "agent_id": 0,
+        "steps": 16,
+        "wall_ms": 2856.084,
+        "frontier": 15,
+        "files": 16,
+        "isolated": true,
+        "ok": true
+      },
+      {
+        "agent_id": 1,
+        "steps": 16,
+        "wall_ms": 3059.847,
+        "frontier": 15,
+        "files": 16,
+        "isolated": true,
+        "ok": true
+      },
+      {
+        "agent_id": 2,
+        "steps": 16,
+        "wall_ms": 2918.308,
+        "frontier": 15,
+        "files": 16,
+        "isolated": true,
+        "ok": true
+      },
+      {
+        "agent_id": 3,
+        "steps": 16,
+        "wall_ms": 2951.885,
+        "frontier": 15,
+        "files": 16,
+        "isolated": true,
+        "ok": true
+      }
+    ],
+    "note": "agents use separate session overlays and commit into separate workspace subdirectories concurrently"
+  }
+]

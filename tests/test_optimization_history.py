@@ -16,6 +16,7 @@ def test_optimization_history_preserves_preimages_and_manifests() -> None:
         "iteration_04_deferred_blob_gc",
         "iteration_05_direct_executable_script",
         "iteration_06_persistent_try_worker",
+        "iteration_07_robustness_evaluation",
     ):
         snapshot = root / name
         assert (snapshot / "runtime.py").exists()
