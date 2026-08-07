@@ -550,10 +550,6 @@ class SharedSemisolate:
         if self._closed:
             return
         self._closed = True
-        if not destroy and self.layers is not None:
-            # Blob reachability is unchanged during normal execution; defer
-            # this directory scan until the session is explicitly retained.
-            self.layers.gc_blobs()
         if self._cmd_script is not None:
             shutil.rmtree(self._cmd_script.parent, ignore_errors=True)
             self._cmd_script = None

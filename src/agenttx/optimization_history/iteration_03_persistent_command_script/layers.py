@@ -341,6 +341,7 @@ class LayerStore:
             )
         else:
             dest.mkdir(parents=True, exist_ok=True)
+        self._gc_blobs()
         return dest
 
     def copy_tree(self, source: Path, destination: Path) -> None:
@@ -403,10 +404,6 @@ class LayerStore:
     def drop_from(self, step_ids: List[int]) -> None:
         for step_id in step_ids:
             _remove_overlay_tree(self.root / f"before_{step_id:04d}")
-        self._gc_blobs()
-
-    def gc_blobs(self) -> None:
-        """Remove content blobs no longer referenced by retained snapshots."""
         self._gc_blobs()
 
     def _gc_blobs(self) -> None:

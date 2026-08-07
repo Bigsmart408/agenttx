@@ -1,0 +1,21 @@
+{
+  "iteration": 3,
+  "name": "persistent-command-script",
+  "captured_before": "deferred-blob-gc",
+  "baseline": {
+    "workload": "long_coding_trajectory",
+    "length": 64,
+    "repeats": 2,
+    "agenttx_without_read_tracing_ms_per_step_mean": 325.434,
+    "agenttx_full_ms_per_step_mean": 406.099,
+    "agenttx_full_ms_per_step_stdev": 2.846,
+    "recovery_agenttx_full": true,
+    "recovery_agenttx_without_read_tracing": false
+  },
+  "files": [
+    "runtime.py",
+    "semisolate.py",
+    "layers.py",
+    "harness.py"
+  ]
+}

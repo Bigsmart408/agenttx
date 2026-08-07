@@ -34,5 +34,17 @@
     "after_stdev_ms_per_step": 6.003,
     "correct": true,
     "note": "directional two-repeat measurement; no-trace 331.599 -> 328.601 ms/step; full recovery passed; ablation remained intentionally incorrect"
+  },
+  {
+    "iteration": 3,
+    "snapshot": "iteration_03_persistent_command_script",
+    "optimization": "defer unreachable blob GC from per-snapshot hot path",
+    "before_full_ms_per_step": 406.099,
+    "after_full_ms_per_step": 397.104,
+    "before_repeats": 2,
+    "after_repeats": 2,
+    "after_stdev_ms_per_step": 0.891,
+    "correct": true,
+    "note": "directional two-repeat measurement; no-trace 325.434 -> 324.325 ms/step; full recovery and evidence suite passed"
   }
 ]

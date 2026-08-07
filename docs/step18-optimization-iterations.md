@@ -1,4 +1,4 @@
-# Step 18 — optimization iteration history and first hot-path change
+# Step 18 — optimization iteration history and hot-path changes
 
 ## Motivation and reproducibility rule
 
@@ -67,6 +67,26 @@ The full after standard deviation was 6.003 ms/step across two repeats (before
 standard deviation 0.344 ms/step), so this is retained as a low-risk directional
 optimization, not a final OSDI performance claim.
 
+## Iteration 03 ? current: deferred blob garbage collection
+
+The pre-image for this change is `iteration_03_persistent_command_script`. Every
+`LayerStore.snapshot_before()` call used to scan the content-addressed blob store
+and remove unreferenced blobs. During a trajectory, retained snapshots cannot
+lose those blobs, so the scan is unnecessary in the hot path. The current code
+defers the scan until rollback (where snapshots are dropped) or an explicit
+retained-session close; destroying a session still removes the whole tree.
+
+The controlled 64-call measurements were:
+
+| mode | before | current | delta | recovery |
+|---|---:|---:|---:|:---:|
+| AgentTX without read tracing | 325.434 ms/step | 324.325 ms/step | -0.3% | expected ablation failure |
+| AgentTX full | 406.099 ms/step | 397.104 ms/step | -2.2% | passed |
+
+The full after standard deviation was 0.891 ms/step across two repeats. The
+change is retained as a low-risk directional optimization; it does not claim a
+final statistical improvement until an interleaved run is collected.
+
 ## Next optimization candidates
 
 The source history now supports a clean before/after experiment for the higher-
@@ -80,5 +100,6 @@ Artifacts:
 - `src/agenttx/optimization_history/iteration_00_unoptimized/`
 - `src/agenttx/optimization_history/iteration_01_known_write_trace_bypass/`
 - `src/agenttx/optimization_history/iteration_02_known_read_effect_bypass/`
+- `src/agenttx/optimization_history/iteration_03_persistent_command_script/`
 - `experiments/results/long_workload_matrix.{csv,json,md}`
 - `experiments/results/optimization_iterations.{csv,json,md}`

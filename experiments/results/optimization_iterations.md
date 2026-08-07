@@ -7,5 +7,6 @@ These are paired before/after records for the source snapshots under `src/agentt
 | 0 | `iteration_00_unoptimized` | known write/delete trace bypass | 495.843 | 500.906 | 1 |  | True | directional single-run post-change measurement |
 | 1 | `iteration_01_known_write_trace_bypass` | known read_file explicit READ/NEGATIVE effects + trace bypass | 500.906 | 437.534 | 2 | 10.589 | True | paired current implementation; full recovery passed; no-trace ablation remained intentionally incorrect |
 | 2 | `iteration_02_known_read_effect_bypass` | persistent per-semisolate command script reuse | 418.899 | 409.835 | 2 | 6.003 | True | directional two-repeat measurement; no-trace 331.599 -> 328.601 ms/step; full recovery passed; ablation remained intentionally incorrect |
+| 3 | `iteration_03_persistent_command_script` | defer unreachable blob GC from per-snapshot hot path | 406.099 | 397.104 | 2 | 0.891 | True | directional two-repeat measurement; no-trace 325.434 -> 324.325 ms/step; full recovery and evidence suite passed |
 
-Iteration 02 is a directional two-repeat measurement. The before pair was collected immediately before the change and the after pair immediately after it, but the VM was not interleaved; use the values for engineering guidance, not as the final statistical claim.
+Iteration 03 is a directional two-repeat measurement. The before pair was collected immediately before the change and the after pair immediately after it, but the VM was not interleaved; use the values for engineering guidance, not as the final statistical claim.
