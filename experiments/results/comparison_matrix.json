@@ -1,0 +1,272 @@
+[
+  {
+    "suite": "overhead",
+    "mode": "bare",
+    "supported": true,
+    "repeats": 3,
+    "n_calls": 10,
+    "wall_s_mean": 0.030735,
+    "wall_s_stdev": 0.001041,
+    "per_step_ms": 3.073,
+    "note": ""
+  },
+  {
+    "suite": "overhead",
+    "mode": "per_call_try",
+    "supported": true,
+    "repeats": 3,
+    "n_calls": 10,
+    "wall_s_mean": 2.608234,
+    "wall_s_stdev": 0.021426,
+    "per_step_ms": 260.823,
+    "note": ""
+  },
+  {
+    "suite": "overhead",
+    "mode": "session_try",
+    "supported": true,
+    "repeats": 3,
+    "n_calls": 10,
+    "wall_s_mean": 0.25024,
+    "wall_s_stdev": 0.025951,
+    "per_step_ms": 25.024,
+    "note": ""
+  },
+  {
+    "suite": "overhead",
+    "mode": "shared_try",
+    "supported": true,
+    "repeats": 3,
+    "n_calls": 10,
+    "wall_s_mean": 2.552706,
+    "wall_s_stdev": 0.066535,
+    "per_step_ms": 255.271,
+    "note": ""
+  },
+  {
+    "suite": "overhead",
+    "mode": "shared_checkpoint",
+    "supported": true,
+    "repeats": 3,
+    "n_calls": 10,
+    "wall_s_mean": 2.616077,
+    "wall_s_stdev": 0.068924,
+    "per_step_ms": 261.608,
+    "note": ""
+  },
+  {
+    "suite": "overhead",
+    "mode": "bubblewrap",
+    "supported": true,
+    "repeats": 3,
+    "n_calls": 10,
+    "wall_s_mean": 0.017312,
+    "wall_s_stdev": 0.000762,
+    "per_step_ms": 1.731,
+    "note": ""
+  },
+  {
+    "suite": "overhead",
+    "mode": "agenttx_without_read_tracing",
+    "supported": true,
+    "repeats": 3,
+    "n_calls": 10,
+    "wall_s_mean": 2.761809,
+    "wall_s_stdev": 0.080699,
+    "per_step_ms": 276.181,
+    "note": ""
+  },
+  {
+    "suite": "overhead",
+    "mode": "agenttx_full",
+    "supported": true,
+    "repeats": 3,
+    "n_calls": 10,
+    "wall_s_mean": 3.077769,
+    "wall_s_stdev": 0.107471,
+    "per_step_ms": 307.777,
+    "note": ""
+  },
+  {
+    "suite": "recovery",
+    "mode": "bare",
+    "supported": true,
+    "exit_codes": [
+      0,
+      0,
+      0
+    ],
+    "host_before_recovery": {
+      "a.txt": true,
+      "b.txt": true,
+      "c.txt": true
+    },
+    "host_after_recovery": {
+      "a.txt": false,
+      "b.txt": false,
+      "c.txt": false
+    },
+    "host_clean_before_recovery": false,
+    "causal_retention_correct": false,
+    "note": "host writes visible before recovery; whole cleanup loses c"
+  },
+  {
+    "suite": "recovery",
+    "mode": "per_call_try",
+    "supported": true,
+    "exit_codes": [
+      0,
+      0,
+      0
+    ],
+    "host_before_recovery": {
+      "a.txt": false,
+      "b.txt": false,
+      "c.txt": false
+    },
+    "host_after_recovery": {
+      "a.txt": false,
+      "b.txt": false,
+      "c.txt": false
+    },
+    "host_clean_before_recovery": true,
+    "causal_retention_correct": false,
+    "note": "isolated calls cannot pass a from step 0 to step 1"
+  },
+  {
+    "suite": "recovery",
+    "mode": "session_try",
+    "supported": true,
+    "exit_codes": [
+      0
+    ],
+    "host_before_recovery": {
+      "a.txt": false,
+      "b.txt": false,
+      "c.txt": false
+    },
+    "host_after_recovery": {
+      "a.txt": false,
+      "b.txt": false,
+      "c.txt": false
+    },
+    "host_clean_before_recovery": true,
+    "causal_retention_correct": false,
+    "note": "one session can see state, but abort discards the whole session"
+  },
+  {
+    "suite": "recovery",
+    "mode": "shared_try",
+    "supported": true,
+    "exit_codes": [
+      0,
+      0,
+      0
+    ],
+    "host_before_recovery": {
+      "a.txt": false,
+      "b.txt": false,
+      "c.txt": false
+    },
+    "host_after_recovery": {
+      "a.txt": false,
+      "b.txt": false,
+      "c.txt": false
+    },
+    "host_clean_before_recovery": true,
+    "causal_retention_correct": false,
+    "note": "shared upperdir preserves state, but recovery is whole-session discard"
+  },
+  {
+    "suite": "recovery",
+    "mode": "shared_checkpoint",
+    "supported": true,
+    "exit_codes": [
+      0,
+      0,
+      0
+    ],
+    "host_before_recovery": {
+      "a.txt": false,
+      "b.txt": false,
+      "c.txt": false
+    },
+    "host_after_recovery": {
+      "a.txt": false,
+      "b.txt": false,
+      "c.txt": false
+    },
+    "host_clean_before_recovery": true,
+    "causal_retention_correct": false,
+    "note": "full checkpoint restore removes independent c with the failed prefix"
+  },
+  {
+    "suite": "recovery",
+    "mode": "bubblewrap",
+    "supported": true,
+    "exit_codes": [
+      0
+    ],
+    "host_before_recovery": {
+      "a.txt": false,
+      "b.txt": false,
+      "c.txt": false
+    },
+    "host_after_recovery": {
+      "a.txt": false,
+      "b.txt": false,
+      "c.txt": false
+    },
+    "host_clean_before_recovery": true,
+    "causal_retention_correct": false,
+    "note": "whole-session namespace abort; no causal retention"
+  },
+  {
+    "suite": "recovery",
+    "mode": "agenttx_without_read_tracing",
+    "supported": true,
+    "exit_codes": [
+      0,
+      0,
+      0,
+      1
+    ],
+    "host_before_recovery": {
+      "a.txt": false,
+      "b.txt": false,
+      "c.txt": false
+    },
+    "host_after_recovery": {
+      "a.txt": false,
+      "b.txt": true,
+      "c.txt": true
+    },
+    "host_clean_before_recovery": true,
+    "causal_retention_correct": false,
+    "note": "causal targets=[0]; read tracing=False"
+  },
+  {
+    "suite": "recovery",
+    "mode": "agenttx_full",
+    "supported": true,
+    "exit_codes": [
+      0,
+      0,
+      0,
+      1
+    ],
+    "host_before_recovery": {
+      "a.txt": false,
+      "b.txt": false,
+      "c.txt": false
+    },
+    "host_after_recovery": {
+      "a.txt": false,
+      "b.txt": false,
+      "c.txt": true
+    },
+    "host_clean_before_recovery": true,
+    "causal_retention_correct": true,
+    "note": "causal targets=[0, 1]; read tracing=True"
+  }
+]

@@ -1,0 +1,17 @@
+causal_retention_correct,exit_codes,host_after_recovery,host_before_recovery,host_clean_before_recovery,mode,n_calls,note,per_step_ms,repeats,suite,supported,wall_s_mean,wall_s_stdev
+,,,,,bare,10,,3.073,3,overhead,True,0.030735,0.001041
+,,,,,per_call_try,10,,260.823,3,overhead,True,2.608234,0.021426
+,,,,,session_try,10,,25.024,3,overhead,True,0.25024,0.025951
+,,,,,shared_try,10,,255.271,3,overhead,True,2.552706,0.066535
+,,,,,shared_checkpoint,10,,261.608,3,overhead,True,2.616077,0.068924
+,,,,,bubblewrap,10,,1.731,3,overhead,True,0.017312,0.000762
+,,,,,agenttx_without_read_tracing,10,,276.181,3,overhead,True,2.761809,0.080699
+,,,,,agenttx_full,10,,307.777,3,overhead,True,3.077769,0.107471
+False,"[0, 0, 0]","{'a.txt': False, 'b.txt': False, 'c.txt': False}","{'a.txt': True, 'b.txt': True, 'c.txt': True}",False,bare,,host writes visible before recovery; whole cleanup loses c,,,recovery,True,,
+False,"[0, 0, 0]","{'a.txt': False, 'b.txt': False, 'c.txt': False}","{'a.txt': False, 'b.txt': False, 'c.txt': False}",True,per_call_try,,isolated calls cannot pass a from step 0 to step 1,,,recovery,True,,
+False,[0],"{'a.txt': False, 'b.txt': False, 'c.txt': False}","{'a.txt': False, 'b.txt': False, 'c.txt': False}",True,session_try,,"one session can see state, but abort discards the whole session",,,recovery,True,,
+False,"[0, 0, 0]","{'a.txt': False, 'b.txt': False, 'c.txt': False}","{'a.txt': False, 'b.txt': False, 'c.txt': False}",True,shared_try,,"shared upperdir preserves state, but recovery is whole-session discard",,,recovery,True,,
+False,"[0, 0, 0]","{'a.txt': False, 'b.txt': False, 'c.txt': False}","{'a.txt': False, 'b.txt': False, 'c.txt': False}",True,shared_checkpoint,,full checkpoint restore removes independent c with the failed prefix,,,recovery,True,,
+False,[0],"{'a.txt': False, 'b.txt': False, 'c.txt': False}","{'a.txt': False, 'b.txt': False, 'c.txt': False}",True,bubblewrap,,whole-session namespace abort; no causal retention,,,recovery,True,,
+False,"[0, 0, 0, 1]","{'a.txt': False, 'b.txt': True, 'c.txt': True}","{'a.txt': False, 'b.txt': False, 'c.txt': False}",True,agenttx_without_read_tracing,,causal targets=[0]; read tracing=False,,,recovery,True,,
+True,"[0, 0, 0, 1]","{'a.txt': False, 'b.txt': False, 'c.txt': True}","{'a.txt': False, 'b.txt': False, 'c.txt': False}",True,agenttx_full,,"causal targets=[0, 1]; read tracing=True",,,recovery,True,,

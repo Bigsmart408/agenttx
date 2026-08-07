@@ -1,6 +1,6 @@
 # AgentTX status — done vs remaining
 
-Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
+Last updated: 2026-08-07 (VM `/home/bfq/agenttx`).
 
 ## Completed
 
@@ -45,6 +45,7 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 | AgentTX-LLM vs Aider refactor | compare bench | `refactor_agent_compare.{csv,md}` |
 | Cascade / selective / pollution / recovery / policy | evidence suite (all ok) | `evidence_suite.{csv,md,json}` |
 | Scaling curve n=5..40 | scaling bench | `scaling_curve.{csv,md}` |
+| Baseline comparison matrix | Step 15 fixed causal-retention workload | `comparison_matrix.{csv,json,md}`, `step15-comparison-experiments.md` |
 
 **Evidence suite highlights (2026-08-06):**
 - Cascade rollback: host clean until commit; only intended files land.
@@ -53,6 +54,8 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 - Mistake recovery: buggy `mul` never hits host; after rollback + fix, pytest passes.
 - Policy blocks `*.pem` / secrets; selective commit of safe files works.
 - Isolation matrix: bare pollution rate 1.0 vs AgentTX 0.0 before commit (coding traj).
+- Baseline matrix: full AgentTX is the only supported mode that retains independent `c` while removing `a` and derived `b`; disabling read tracing retains `b`.
+- Baseline overhead (10 writes, 3 repeats): bare 3.1 ms/step, session try 25.0 ms/step, shared try 255.3 ms/step, AgentTX full 307.8 ms/step. These are VM-specific and not a universal speed claim.
 
 **Refactor compare (DeepSeek):**
 - AgentTX-LLM: ~14s, host clean before commit, tests pass.
@@ -76,7 +79,7 @@ Last updated: 2026-08-06 (VM `/home/bfq/agenttx`).
 
 ### Evaluation gaps
 8. Harder / longer agent workloads (multi-package refactors, failing CI loops).
-9. More baselines: full container / gVisor / OS-level sandbox comparison.
+9. External baselines: BranchFS/Waypoint/Sandlock/YoloFS/DeltaBox/Crab/Cordon remain artifact- or environment-blocked; current VM matrix covers the runnable references and records the blockers.
 10. Stronger Aider (or other agents) bakeoff with fair timeouts and success criteria.
 11. Statistical repeats / variance reporting for LLM runs (cost-aware).
 
@@ -97,6 +100,7 @@ cd /home/bfq/agenttx
 python -m pytest -q
 python experiments/scripts/bench_evidence_suite.py
 python experiments/scripts/bench_scaling.py
+python experiments/scripts/bench_comparison_matrix.py --repeats 3 --n 10
 AIDER_TIMEOUT_S=180 python experiments/scripts/bench_refactor_compare.py
 ```
 
