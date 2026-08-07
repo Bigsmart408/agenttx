@@ -115,7 +115,6 @@ class SharedSemisolate:
     _closed: bool = False
     _cached_summary: Dict[str, SummaryEntry] = field(default_factory=dict)
     _cached_digests: Dict[str, str] = field(default_factory=dict)
-    _cmd_script: Optional[Path] = None
     layers: Optional[LayerStore] = None
 
     def __post_init__(self) -> None:
@@ -235,19 +234,14 @@ class SharedSemisolate:
         return out
 
     def _write_cmd_script(self, argv: Sequence[str]) -> Path:
-        # Reuse one private script per semisolate.  try still needs a stable
-        # executable path, but creating a temporary directory, chmod-ing, and
-        # recursively deleting it on every step dominated short commands.
-        if self._cmd_script is None:
-            cmd_dir = Path(tempfile.mkdtemp(prefix="agenttx-cmd-", dir="/tmp"))
-            self._cmd_script = cmd_dir / "cmd.sh"
-            self._cmd_script.touch(mode=0o700)
-        script = self._cmd_script
+        cmd_dir = Path(tempfile.mkdtemp(prefix="agenttx-cmd-", dir="/tmp"))
+        script = cmd_dir / "cmd.sh"
         if len(argv) >= 3 and Path(argv[0]).name == "bash" and argv[1] == "-c":
             body = "#!/usr/bin/env bash\nset -e\n" + argv[2] + "\n"
         else:
             body = "#!/usr/bin/env bash\nset -e\n" + " ".join(shlex.quote(a) for a in argv) + "\n"
         script.write_text(body, encoding="utf-8")
+        script.chmod(0o755)
         return script
 
     def run(
@@ -298,7 +292,10 @@ class SharedSemisolate:
             ]
 
         t0 = time.perf_counter()
-        cp = self._run_try([*flags, "--", *command], cwd=self.workspace)
+        try:
+            cp = self._run_try([*flags, "--", *command], cwd=self.workspace)
+        finally:
+            shutil.rmtree(script.parent, ignore_errors=True)
         duration = time.perf_counter() - t0
 
         trace_effects: List[Effect] = []
@@ -550,9 +547,6 @@ class SharedSemisolate:
         if self._closed:
             return
         self._closed = True
-        if self._cmd_script is not None:
-            shutil.rmtree(self._cmd_script.parent, ignore_errors=True)
-            self._cmd_script = None
         if destroy and self._owns_sandbox and self.sandbox_dir is not None:
             subprocess.run(["chmod", "-R", "u+rwX", str(self.sandbox_dir)], check=False)
             shutil.rmtree(self.sandbox_dir, ignore_errors=True)

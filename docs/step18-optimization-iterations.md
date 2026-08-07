@@ -38,12 +38,34 @@ The paired 64-call result was:
 
 | mode | before (iteration 01) | current | recovery |
 |---|---:|---:|:---:|
-| AgentTX without read tracing | 385.438 ms/step | 397.041 ms/step | expected ablation failure |
+| AgentTX without read tracing | 385.294 ms/step | 385.294 ms/step | expected ablation failure |
 | AgentTX full | 500.906 ms/step | 437.534 ms/step | passed |
 
 The full run recorded the same causal targets `[27, 29, 30]` and retained the
 independent docs/config edits. The no-trace ablation continued to retain the
 derived report, as expected. The current full mean is roughly 12.7% below the single-run previous value, with 10.589 ms/step standard deviation across two repeats. The older baseline was not interleaved with this run, so a controlled paired run is still needed for a final claim.
+
+## Iteration 02 ? current: persistent command script
+
+The pre-image for this change is `iteration_02_known_read_effect_bypass`. The
+previous implementation created a fresh `/tmp/agenttx-cmd-*` directory, wrote and
+chmod-ed `cmd.sh`, then recursively deleted that directory after every tool call.
+The current implementation allocates one private command directory per
+`SharedSemisolate`, rewrites the same script each step, and removes it exactly
+once in `close()`. The try command, shell body, tracing policy, and effect
+collection are unchanged. A focused lifecycle test checks both path reuse and
+close-time cleanup.
+
+The controlled 64-call measurements were:
+
+| mode | before | current | delta | recovery |
+|---|---:|---:|---:|:---:|
+| AgentTX without read tracing | 331.599 ms/step | 328.601 ms/step | -0.9% | expected ablation failure |
+| AgentTX full | 418.899 ms/step | 409.835 ms/step | -2.2% | passed |
+
+The full after standard deviation was 6.003 ms/step across two repeats (before
+standard deviation 0.344 ms/step), so this is retained as a low-risk directional
+optimization, not a final OSDI performance claim.
 
 ## Next optimization candidates
 
@@ -57,5 +79,6 @@ Artifacts:
 - `src/agenttx/optimization_history/README.md`
 - `src/agenttx/optimization_history/iteration_00_unoptimized/`
 - `src/agenttx/optimization_history/iteration_01_known_write_trace_bypass/`
+- `src/agenttx/optimization_history/iteration_02_known_read_effect_bypass/`
 - `experiments/results/long_workload_matrix.{csv,json,md}`
 - `experiments/results/optimization_iterations.{csv,json,md}`

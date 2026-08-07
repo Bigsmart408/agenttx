@@ -22,5 +22,17 @@
     "after_stdev_ms_per_step": 10.589,
     "correct": true,
     "note": "paired current implementation; full recovery passed; no-trace ablation remained intentionally incorrect"
+  },
+  {
+    "iteration": 2,
+    "snapshot": "iteration_02_known_read_effect_bypass",
+    "optimization": "persistent per-semisolate command script reuse",
+    "before_full_ms_per_step": 418.899,
+    "after_full_ms_per_step": 409.835,
+    "before_repeats": 2,
+    "after_repeats": 2,
+    "after_stdev_ms_per_step": 6.003,
+    "correct": true,
+    "note": "directional two-repeat measurement; no-trace 331.599 -> 328.601 ms/step; full recovery passed; ablation remained intentionally incorrect"
   }
 ]
