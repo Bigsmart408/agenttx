@@ -13,6 +13,7 @@ behavior are preserved.
 | 02 | `iteration_02_known_read_effect_bypass` | reuse one private command script per semisolate; clean it at close | 418.899 -> 409.835 ms/step* |
 | 03 | `iteration_03_persistent_command_script` | defer unreachable blob GC from every snapshot to rollback/retained-session cleanup | 406.099 -> 397.104 ms/step* |
 | 04 | `iteration_04_deferred_blob_gc` | execute the reusable command script directly through its `/bin/bash` shebang | 397.104 -> 393.631 ms/step* |
+| 05 | `iteration_05_direct_executable_script` | persistent try worker: one namespace/overlay per session with framed command IPC and safe fallback | 393.631 -> 151.531 ms/step* |
 
 The first optimization is intentionally conservative: opaque `run_shell` and
 `run_tests` still use full syscall tracing. The second optimization preserves
@@ -20,10 +21,11 @@ negative lookup semantics through `AgentTX.path_exists()` and explicit ledger
 effects. The third optimization only changes temporary command-script lifecycle;
 commands still execute through the same try wrapper and close-time cleanup. The
 fourth optimization only changes when unreachable content blobs are scanned and
-removed; rollback still performs GC before returning. The fifth optimization
-removes one redundant shell parse while preserving the same script body. Full causal
-recovery remains correct; the no-trace ablation still retains the derived report as
-expected.
+removed; rollback still performs GC before returning. The fifth optimization removes one redundant shell parse while preserving the
+same script body. The sixth optimization keeps one try namespace/overlay alive
+per session and stops it at rollback/commit/reset boundaries; a worker failure
+falls back to the original per-call path. Full causal recovery remains correct;
+the no-trace ablation still retains the derived report as expected.
 
 *The 495.843 ms/step baseline uses two repeats; the 437.534 ms/step value uses two
 current repeats, while the intermediate 500.906 ms/step point is a single run. A

@@ -1,6 +1,6 @@
 """Shared/incremental semisolate pool backed by binpash/try -N DIR."""
 from __future__ import annotations
-import base64, hashlib, json, os, re, shlex, shutil, stat, struct, subprocess, tempfile, time
+import hashlib, os, re, shlex, shutil, stat, subprocess, tempfile, time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Sequence
@@ -116,9 +116,6 @@ class SharedSemisolate:
     _cached_summary: Dict[str, SummaryEntry] = field(default_factory=dict)
     _cached_digests: Dict[str, str] = field(default_factory=dict)
     _cmd_script: Optional[Path] = None
-    persistent_worker: bool = True
-    _worker_process: Optional[subprocess.Popen] = None
-    _worker_script: Optional[Path] = None
     layers: Optional[LayerStore] = None
 
     def __post_init__(self) -> None:
@@ -157,7 +154,6 @@ class SharedSemisolate:
         except FileNotFoundError:
             self._cached_summary = {}
             return self._cached_summary
-        self._stop_worker()
         cp = self._run_try(["summary", str(self.sandbox_dir)])
         self._cached_summary = parse_try_summary(cp.stdout)
         return self._cached_summary
@@ -254,113 +250,6 @@ class SharedSemisolate:
         script.write_text(body, encoding="utf-8")
         return script
 
-    def _ensure_worker(self) -> None:
-        if self._worker_process is not None and self._worker_process.poll() is None:
-            return
-        if self._cmd_script is None:
-            raise RuntimeError("command script must exist before starting worker")
-        worker_source = Path(__file__).with_name("try_worker.py")
-        self._worker_script = self._cmd_script.parent / "worker.py"
-        self._worker_script.write_bytes(worker_source.read_bytes())
-        self._worker_script.chmod(0o700)
-        assert self.sandbox_dir is not None
-        flags = ["-N", str(self.sandbox_dir)]
-        if self.hide_network:
-            flags.insert(0, "-x")
-        process = subprocess.Popen(
-            [str(self.try_bin), *flags, "--", "python3", str(self._worker_script)],
-            cwd=str(self.workspace),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            bufsize=0,
-        )
-        self._worker_process = process
-        assert process.stdin is not None and process.stdout is not None
-        try:
-            ready = self._read_worker_frame(process.stdout)
-            if ready.get("ready") is not True:
-                raise RuntimeError("try worker did not become ready")
-        except Exception:
-            self._stop_worker()
-            raise
-
-    @staticmethod
-    def _read_worker_frame(stream) -> dict:
-        def read_exact(size: int) -> bytes:
-            chunks = bytearray()
-            while len(chunks) < size:
-                chunk = stream.read(size - len(chunks))
-                if not chunk:
-                    raise RuntimeError("try worker exited before responding")
-                chunks.extend(chunk)
-            return bytes(chunks)
-
-        header = read_exact(4)
-        (size,) = struct.unpack("!I", header)
-        if size > 128 * 1024 * 1024:
-            raise RuntimeError("try worker response is too large")
-        body = read_exact(size)
-        value = json.loads(body.decode("utf-8"))
-        if not isinstance(value, dict):
-            raise RuntimeError("invalid try worker response")
-        return value
-
-    def _run_worker(
-        self, command: Sequence[str], cwd: Path
-    ) -> subprocess.CompletedProcess:
-        self._ensure_worker()
-        assert self._worker_process is not None
-        assert self._worker_process.stdin is not None
-        request = json.dumps(
-            {"argv": list(command), "cwd": str(cwd)},
-            separators=(",", ":"),
-        ).encode("utf-8")
-        self._worker_process.stdin.write(struct.pack("!I", len(request)))
-        self._worker_process.stdin.write(request)
-        self._worker_process.stdin.flush()
-        response = self._read_worker_frame(self._worker_process.stdout)
-        if "error" in response:
-            raise RuntimeError(str(response["error"]))
-        stdout = base64.b64decode(response.get("stdout", ""))
-        stderr_value = response.get("stderr", "")
-        if isinstance(stderr_value, str) and response.get("returncode") is not None:
-            try:
-                stderr = base64.b64decode(stderr_value)
-            except Exception:
-                stderr = stderr_value.encode("utf-8", "replace")
-        else:
-            stderr = b""
-        return subprocess.CompletedProcess(
-            list(command),
-            int(response.get("returncode", 1)),
-            stdout.decode("utf-8", "replace"),
-            stderr.decode("utf-8", "replace"),
-        )
-
-    def _stop_worker(self) -> None:
-        process = self._worker_process
-        self._worker_process = None
-        self._worker_script = None
-        if process is None:
-            return
-        try:
-            if process.poll() is None and process.stdin is not None:
-                request = json.dumps({"op": "shutdown"}, separators=(",", ":")).encode("utf-8")
-                process.stdin.write(struct.pack("!I", len(request)))
-                process.stdin.write(request)
-                process.stdin.flush()
-                if process.stdout is not None:
-                    self._read_worker_frame(process.stdout)
-            process.wait(timeout=2)
-        except Exception:
-            process.terminate()
-            try:
-                process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=2)
-
     def run(
         self, argv: Sequence[str], *, trace_reads: Optional[bool] = None
     ) -> StepResult:
@@ -411,16 +300,7 @@ class SharedSemisolate:
             ]
 
         t0 = time.perf_counter()
-        if self.persistent_worker:
-            try:
-                cp = self._run_worker(command, self.workspace)
-            except Exception:
-                # A worker failure must not change correctness. Restarting the
-                # worker is deferred; this step uses the original try path.
-                self._stop_worker()
-                cp = self._run_try([*flags, "--", *command], cwd=self.workspace)
-        else:
-            cp = self._run_try([*flags, "--", *command], cwd=self.workspace)
+        cp = self._run_try([*flags, "--", *command], cwd=self.workspace)
         duration = time.perf_counter() - t0
 
         trace_effects: List[Effect] = []
@@ -562,7 +442,6 @@ class SharedSemisolate:
         historical entries. The caller's WAL protects both images if the
         process is interrupted in the middle of this reconstruction.
         """
-        self._stop_worker()
         assert self.sandbox_dir is not None and self.layers is not None
         snapshot = self.layers.root / f"before_{before_step_id:04d}"
         if not snapshot.exists():
@@ -589,7 +468,6 @@ class SharedSemisolate:
 
     def commit(self, paths: Optional[Sequence[str]] = None) -> subprocess.CompletedProcess:
         """Commit all effects, or only exact ledger-selected paths, to the host."""
-        self._stop_worker()
         assert self.sandbox_dir is not None
         if paths is not None and not paths:
             return subprocess.CompletedProcess([], 0, "", "")
@@ -631,7 +509,6 @@ class SharedSemisolate:
 
     def reset(self) -> None:
         """Hard reset overlay (legacy). Prefer rollback_steps for surgical restore."""
-        self._stop_worker()
         assert self.sandbox_dir is not None
         subprocess.run(["chmod", "-R", "u+rwX", str(self.sandbox_dir)], check=False)
         for child in list(self.sandbox_dir.iterdir()):
@@ -651,7 +528,6 @@ class SharedSemisolate:
         self, step_ids: List[int], paths: Sequence[str]
     ) -> None:
         """Restore only causal write/delete paths and retain independent steps."""
-        self._stop_worker()
         assert self.sandbox_dir is not None and self.layers is not None
         if not step_ids:
             return
@@ -662,7 +538,6 @@ class SharedSemisolate:
 
     def rollback_steps(self, step_ids: List[int]) -> None:
         """Restore upperdir to snapshot taken before min(step_ids)."""
-        self._stop_worker()
         assert self.sandbox_dir is not None and self.layers is not None
         if not step_ids:
             return
@@ -677,7 +552,6 @@ class SharedSemisolate:
         if self._closed:
             return
         self._closed = True
-        self._stop_worker()
         if not destroy and self.layers is not None:
             # Blob reachability is unchanged during normal execution; defer
             # this directory scan until the session is explicitly retained.

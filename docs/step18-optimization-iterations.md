@@ -107,6 +107,34 @@ The full after standard deviation was 1.286 ms/step across two repeats. This is
 retained as a low-risk directional optimization; an interleaved run is still
 needed before making a final performance claim.
 
+## Iteration 05 ? current: persistent try worker
+
+The pre-image for this change is `iteration_05_direct_executable_script`. The
+previous implementation invoked try once per tool call, so every step paid for a
+new mount namespace, overlay setup, device setup, and teardown. The current
+implementation starts `try -N` once per `SharedSemisolate` and runs a small framed
+stdin worker inside that namespace. Each request executes the already-reused
+command script and returns its exit code, stdout, and stderr; trace commands still
+write the same raw log path for the existing parser.
+
+Commit, rollback, reset, and close stop the worker before modifying or unmounting
+the sandbox. If the worker exits or violates the protocol, the current step falls
+back to the original one-shot try invocation and the next step can restart the
+worker. This keeps the optimization fail-safe while retaining the existing CLI
+try path.
+
+The controlled 64-call measurements were:
+
+| mode | before | current | delta | recovery |
+|---|---:|---:|---:|:---:|
+| AgentTX without read tracing | 318.575 ms/step | 66.975 ms/step | -79.0% | expected ablation failure |
+| AgentTX full | 393.631 ms/step | 151.531 ms/step | -61.5% | passed |
+
+The full after standard deviation was 5.013 ms/step across two repeats. The
+worker reduces the dominant per-call try setup cost; the remaining gap includes
+command execution, upperdir snapshots, ledger persistence, and optional strace.
+
+
 ## Next optimization candidates
 
 The source history now supports a clean before/after experiment for the higher-
@@ -122,5 +150,6 @@ Artifacts:
 - `src/agenttx/optimization_history/iteration_02_known_read_effect_bypass/`
 - `src/agenttx/optimization_history/iteration_03_persistent_command_script/`
 - `src/agenttx/optimization_history/iteration_04_deferred_blob_gc/`
+- `src/agenttx/optimization_history/iteration_05_direct_executable_script/`
 - `experiments/results/long_workload_matrix.{csv,json,md}`
 - `experiments/results/optimization_iterations.{csv,json,md}`

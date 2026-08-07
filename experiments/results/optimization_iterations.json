@@ -58,5 +58,17 @@
     "after_stdev_ms_per_step": 1.286,
     "correct": true,
     "note": "directional two-repeat measurement; no-trace 324.325 -> 318.575 ms/step; full recovery and evidence suite passed"
+  },
+  {
+    "iteration": 5,
+    "snapshot": "iteration_05_direct_executable_script",
+    "optimization": "persistent try worker with framed command IPC",
+    "before_full_ms_per_step": 393.631,
+    "after_full_ms_per_step": 151.531,
+    "before_repeats": 2,
+    "after_repeats": 2,
+    "after_stdev_ms_per_step": 5.013,
+    "correct": true,
+    "note": "directional two-repeat measurement; no-trace 318.575 -> 66.975 ms/step; full recovery and evidence suite passed; worker fallback retained"
   }
 ]

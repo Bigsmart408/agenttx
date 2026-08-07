@@ -1,0 +1,21 @@
+{
+  "iteration": 5,
+  "name": "direct-executable-command-script",
+  "captured_before": "persistent-try-worker",
+  "baseline": {
+    "workload": "long_coding_trajectory",
+    "length": 64,
+    "repeats": 2,
+    "agenttx_without_read_tracing_ms_per_step_mean": 318.575,
+    "agenttx_full_ms_per_step_mean": 393.631,
+    "agenttx_full_ms_per_step_stdev": 1.286,
+    "recovery_agenttx_full": true,
+    "recovery_agenttx_without_read_tracing": false
+  },
+  "files": [
+    "runtime.py",
+    "semisolate.py",
+    "layers.py",
+    "harness.py"
+  ]
+}

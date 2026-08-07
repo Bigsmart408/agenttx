@@ -2,7 +2,7 @@
   {
     "exp": "cascade_rollback",
     "ok": true,
-    "wall_s": 1.841258894011844,
+    "wall_s": 1.2698421260283794,
     "aborted": [
       1,
       2,
@@ -30,7 +30,7 @@
   {
     "exp": "selective_commit_via_rollback",
     "ok": true,
-    "wall_s": 1.4435279829776846,
+    "wall_s": 0.78328303899616,
     "aborted": [
       2,
       3
@@ -46,7 +46,7 @@
   {
     "exp": "frontier_selective_commit",
     "ok": true,
-    "wall_s": 1.2455799909948837,
+    "wall_s": 0.7352244920039084,
     "fs_selective": true,
     "host_after_commit": {
       "keep0.txt": true,
@@ -58,7 +58,7 @@
   {
     "exp": "host_pollution_vs_bare",
     "ok": true,
-    "wall_s": 2.1916117439977825,
+    "wall_s": 1.0748263870191295,
     "bare_polluted_mid_traj": true,
     "agenttx_polluted_mid_traj": false,
     "agenttx_polluted_before_commit": false,
@@ -68,7 +68,7 @@
   {
     "exp": "mistake_recovery",
     "ok": true,
-    "wall_s": 4.3703948839975055,
+    "wall_s": 3.375124209007481,
     "bad_test_rc": 1,
     "good_test_rc": 0,
     "host_saw_bug_before_rollback": false,
@@ -85,9 +85,9 @@
   {
     "exp": "policy_blocks_dangerous_commit",
     "ok": true,
-    "wall_s": 0.8876713749777991,
+    "wall_s": 0.6915968469984364,
     "commit_blocked": true,
-    "block_reason": "commit blocked by policy: /tmp/agenttx-ev-pol-vr_easf8/ws/secrets/key.pem (denied by deny_globs)",
+    "block_reason": "commit blocked by policy: /tmp/agenttx-ev-pol-rqcdprkc/ws/secrets/key.pem (denied by deny_globs)",
     "host_had_secret_when_blocked": false,
     "host_ok_after_selective_commit": true,
     "host_secret_after_selective_commit": false,
@@ -97,7 +97,7 @@
     "exp": "isolation_matrix",
     "mode": "bare",
     "repeats": 2,
-    "wall_s_mean": 1.098306975516607,
+    "wall_s_mean": 1.1097492809931282,
     "failures_mean": 0.0,
     "host_polluted_before_commit_rate": 1.0,
     "ok": true,
@@ -107,7 +107,7 @@
     "exp": "isolation_matrix",
     "mode": "agenttx",
     "repeats": 2,
-    "wall_s_mean": 10.390389926498756,
+    "wall_s_mean": 3.7097128969908226,
     "failures_mean": 0.0,
     "host_polluted_before_commit_rate": 0.0,
     "ok": true,
