@@ -12,6 +12,7 @@ def test_optimization_history_preserves_preimages_and_manifests() -> None:
         "iteration_01_known_write_trace_bypass",
         "iteration_02_known_read_effect_bypass",
         "iteration_03_persistent_command_script",
+        "iteration_04_deferred_blob_gc",
     ):
         snapshot = root / name
         assert (snapshot / "runtime.py").exists()

@@ -244,9 +244,9 @@ class SharedSemisolate:
             self._cmd_script.touch(mode=0o700)
         script = self._cmd_script
         if len(argv) >= 3 and Path(argv[0]).name == "bash" and argv[1] == "-c":
-            body = "#!/bin/bash\nset -e\n" + argv[2] + "\n"
+            body = "#!/usr/bin/env bash\nset -e\n" + argv[2] + "\n"
         else:
-            body = "#!/bin/bash\nset -e\n" + " ".join(shlex.quote(a) for a in argv) + "\n"
+            body = "#!/usr/bin/env bash\nset -e\n" + " ".join(shlex.quote(a) for a in argv) + "\n"
         script.write_text(body, encoding="utf-8")
         return script
 
@@ -270,9 +270,7 @@ class SharedSemisolate:
         if self.hide_network:
             flags.insert(0, "-x")
         script = self._write_cmd_script(argv)
-        # The script already has a fixed bash shebang and executable mode;
-        # executing it directly avoids an extra shell parse in every try call.
-        command = [str(script)]
+        command = ["bash", str(script)]
         trace_upper: Optional[Path] = None
         if should_trace_reads:
             strace_bin = shutil.which("strace")

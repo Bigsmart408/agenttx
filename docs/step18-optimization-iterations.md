@@ -87,6 +87,26 @@ The full after standard deviation was 0.891 ms/step across two repeats. The
 change is retained as a low-risk directional optimization; it does not claim a
 final statistical improvement until an interleaved run is collected.
 
+## Iteration 04 ? current: direct executable command scripts
+
+The pre-image for this change is `iteration_04_deferred_blob_gc`. AgentTX already
+kept one executable command script per semisolate, but invoked it as
+`bash /tmp/.../cmd.sh`, causing an extra shell parse for every try call. The
+current script uses a fixed `/bin/bash` shebang and executable mode, so the try
+command executes the script path directly. The command body, quoting fallback,
+trace placement, and cleanup lifecycle are unchanged.
+
+The controlled 64-call measurements were:
+
+| mode | before | current | delta | recovery |
+|---|---:|---:|---:|:---:|
+| AgentTX without read tracing | 324.325 ms/step | 318.575 ms/step | -1.8% | expected ablation failure |
+| AgentTX full | 397.104 ms/step | 393.631 ms/step | -0.9% | passed |
+
+The full after standard deviation was 1.286 ms/step across two repeats. This is
+retained as a low-risk directional optimization; an interleaved run is still
+needed before making a final performance claim.
+
 ## Next optimization candidates
 
 The source history now supports a clean before/after experiment for the higher-
@@ -101,5 +121,6 @@ Artifacts:
 - `src/agenttx/optimization_history/iteration_01_known_write_trace_bypass/`
 - `src/agenttx/optimization_history/iteration_02_known_read_effect_bypass/`
 - `src/agenttx/optimization_history/iteration_03_persistent_command_script/`
+- `src/agenttx/optimization_history/iteration_04_deferred_blob_gc/`
 - `experiments/results/long_workload_matrix.{csv,json,md}`
 - `experiments/results/optimization_iterations.{csv,json,md}`

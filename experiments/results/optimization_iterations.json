@@ -46,5 +46,17 @@
     "after_stdev_ms_per_step": 0.891,
     "correct": true,
     "note": "directional two-repeat measurement; no-trace 325.434 -> 324.325 ms/step; full recovery and evidence suite passed"
+  },
+  {
+    "iteration": 4,
+    "snapshot": "iteration_04_deferred_blob_gc",
+    "optimization": "execute reusable command script directly via shebang",
+    "before_full_ms_per_step": 397.104,
+    "after_full_ms_per_step": 393.631,
+    "before_repeats": 2,
+    "after_repeats": 2,
+    "after_stdev_ms_per_step": 1.286,
+    "correct": true,
+    "note": "directional two-repeat measurement; no-trace 324.325 -> 318.575 ms/step; full recovery and evidence suite passed"
   }
 ]

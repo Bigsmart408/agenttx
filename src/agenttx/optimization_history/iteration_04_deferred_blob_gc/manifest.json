@@ -1,0 +1,21 @@
+{
+  "iteration": 4,
+  "name": "deferred-blob-gc",
+  "captured_before": "direct-executable-command-script",
+  "baseline": {
+    "workload": "long_coding_trajectory",
+    "length": 64,
+    "repeats": 2,
+    "agenttx_without_read_tracing_ms_per_step_mean": 324.325,
+    "agenttx_full_ms_per_step_mean": 397.104,
+    "agenttx_full_ms_per_step_stdev": 0.891,
+    "recovery_agenttx_full": true,
+    "recovery_agenttx_without_read_tracing": false
+  },
+  "files": [
+    "runtime.py",
+    "semisolate.py",
+    "layers.py",
+    "harness.py"
+  ]
+}

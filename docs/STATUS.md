@@ -48,7 +48,7 @@ Last updated: 2026-08-07 (VM `/home/bfq/agenttx`).
 | Baseline comparison matrix | Step 15 fixed causal-retention workload | `comparison_matrix.{csv,json,md}`, `step15-comparison-experiments.md` |
 | Longer 64-call Agent workload | Step 16 deterministic multi-file refactor, failing CI, independent edits, derived artifact | `long_workload_matrix.{csv,json,md}`, `step16-long-agent-workloads.md` |
 | Long workload scaling + variance | Step 17 lengths 54/64/96, two repeats; refreshed trace and snapshot measurements | `long_workload_scaling.{csv,json,md}`, `step17-evaluation-scaling.md` |
-| Optimization iteration history | P1 before/after source snapshots, known-tool tracing bypass, persistent command-script reuse, and deferred blob GC | `src/agenttx/optimization_history/`, `step18-optimization-iterations.md` |
+| Optimization iteration history | P1 before/after source snapshots, known-tool tracing bypass, persistent command-script reuse, deferred blob GC, and direct script execution | `src/agenttx/optimization_history/`, `step18-optimization-iterations.md` |
 
 **Evidence suite highlights (2026-08-07):**
 - Cascade rollback: host clean until commit; only intended files land.
@@ -62,7 +62,7 @@ Last updated: 2026-08-07 (VM `/home/bfq/agenttx`).
 - Evidence suite rerun: all cascade rollback, selective/frontier commit, host-pollution, mistake-recovery, policy, and isolation checks passed.
 - Long workload: 64 deterministic tool calls, multi-file refactor plus failing CI and independent docs/config edits; full AgentTX retains the independent files and removes the faulty formatter plus derived report, while no-trace retains the report.
 - Scaling/variance: long workload lengths 54/64/96 with two repeats; full AgentTX is 456.5?495.8 ms/step and read tracing contributes 8.0% on a 20-step no-op trace.
-- Optimization history: every hot-path iteration now preserves its prior source under `src/agenttx/optimization_history`; explicit effects for known `read_file` plus write/delete trace bypass preserved correctness, and persistent command-script reuse directionally reduced full 64-call cost from 406.1 to 397.1 ms/step in iteration 03 (two repeats; not a final statistical claim).
+- Optimization history: every hot-path iteration now preserves its prior source under `src/agenttx/optimization_history`; explicit effects for known `read_file` plus write/delete trace bypass preserved correctness, and persistent command-script reuse directionally reduced full 64-call cost from 397.1 to 393.6 ms/step in iteration 04 (two repeats; not a final statistical claim).
 
 **Refactor compare (DeepSeek):**
 - AgentTX-LLM: ~14s, host clean before commit, tests pass.
