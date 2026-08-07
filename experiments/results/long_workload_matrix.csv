@@ -1,0 +1,13 @@
+causal_retention_correct,check_rc,failures_mean,fault_step,final_rc,host_polluted,host_polluted_before_recovery,ledger_effects,ledger_steps,length,mode,note,per_step_ms_mean,read_effects,repair_step,repeats,rollback_targets,suite,wall_s,wall_s_mean,wall_s_stdev
+,,2,,0,True,,,,64,bare,same deterministic trajectory; expected failures are the missing architecture read and injected CI failure,48.137,,,1,,overhead,,3.080787,0.0
+,,34,,0,False,,,,64,per_call_try,same deterministic trajectory; expected failures are the missing architecture read and injected CI failure,267.891,,,1,,overhead,,17.145046,0.0
+,,34,,0,False,,,,64,shared_try,same deterministic trajectory; expected failures are the missing architecture read and injected CI failure,256.675,,,1,,overhead,,16.427205,0.0
+,,2,,0,False,,,,64,shared_checkpoint,same deterministic trajectory; expected failures are the missing architecture read and injected CI failure,318.572,,,1,,overhead,,20.388618,0.0
+,,2,,0,False,,56,64,64,agenttx_without_read_tracing,same deterministic trajectory; expected failures are the missing architecture read and injected CI failure,321.311,15,,1,,overhead,,20.563881,0.0
+,,2,,0,False,,1092,64,64,agenttx_full,same deterministic trajectory; expected failures are the missing architecture read and injected CI failure,437.399,1051,,1,,overhead,,27.993542,0.0
+False,,,27,0,,True,,,64,bare,host is already modified before recovery; no causal rollback,,,38,,,recovery,3.110589807998622,,
+False,,,27,,,False,,,64,per_call_try,"each call is isolated, so the prefix and independent edits never form one state",,,38,,,recovery,10.019471909996355,,
+False,,,27,,,False,,,64,shared_try,shared overlay preserves the prefix but recovery is whole-session discard,,,38,,,recovery,9.851007227000082,,
+False,1,,27,,,False,,,64,shared_checkpoint,full checkpoint rollback removes independent docs/config along with the fault,,,38,,whole-session,recovery,12.22389439799008,,
+False,1,,27,0,,False,,,64,agenttx_without_read_tracing,read tracing disabled: derived build/format-report.txt is retained,,,38,,[27],recovery,21.06298990600044,,
+True,0,,27,0,,False,,,64,agenttx_full,read tracing links the derived artifact to the faulty formatter,,,38,,"[27, 29, 30]",recovery,27.80384822402266,,

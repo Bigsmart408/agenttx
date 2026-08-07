@@ -86,3 +86,24 @@ Interpretation is intentionally split: Session try and bubblewrap are useful
 isolation/abort references but do not implement tool-boundary causal recovery;
 `agenttx_without_read_tracing` is an ablation and should fail to remove the
 derived `b` result. See `docs/step15-comparison-experiments.md`.
+
+## Step 16 ? longer Agent workload
+
+The original 28-step coding trace remains available as a smoke test. The longer
+workload adds a multi-file refactor, an injected failing CI loop, an artifact
+that reads the faulty file, independent docs/config edits, deletion, and a
+repair suffix. It is parameterized by `--length` (default 64; minimum 54).
+
+```bash
+PYTHONPATH=src:. python3 -m pytest -q tests/test_long_workload.py
+PYTHONPATH=src:. python3 experiments/scripts/bench_long_trajectory.py \
+  --length 64 --repeats 1
+```
+
+The benchmark compares `bare`, `per_call_try`, `shared_try`,
+`shared_checkpoint`, `agenttx_without_read_tracing`, and `agenttx_full`. It
+records runtime, host pollution, ledger/read-effect counts, and whether causal
+rollback removes the faulty formatter plus its derived report while retaining
+independent docs/config files. Results are written to
+`experiments/results/long_workload_matrix.{csv,json,md}`. See
+`docs/step16-long-agent-workloads.md`.

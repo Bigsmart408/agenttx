@@ -37,11 +37,15 @@ class CodingAgentHarness:
         session_dir: Optional[Path] = None,
         policy: Optional[CommitPolicy] = None,
         auto_commit: bool = False,
+        trace_reads: bool = True,
     ) -> None:
         self.workdir = Path(workdir).resolve()
         self.policy = policy or CommitPolicy(workdir=self.workdir)
         self.auto_commit = auto_commit
-        self.tx = AgentTX.begin(workdir=self.workdir, session_dir=session_dir)
+        self.trace_reads = trace_reads
+        self.tx = AgentTX.begin(
+            workdir=self.workdir, session_dir=session_dir, trace_reads=trace_reads
+        )
         self.tools: Dict[str, ToolFn] = {
             "write_file": self._write_file,
             "append_file": self._append_file,
