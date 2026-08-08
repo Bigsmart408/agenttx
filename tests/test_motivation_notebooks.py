@@ -51,3 +51,16 @@ def test_report_notebook_has_narrative_cells() -> None:
     assert "Problem" in markdown
     assert "Motivation" in markdown
     assert "Correctness" in markdown
+
+
+def test_fast_style_scaling_notebooks_use_line_plots() -> None:
+    scaling = _code(ROOT / "motivation" / "plot_scaling.ipynb")
+    tail = _code(ROOT / "motivation" / "plot_tail_scaling.ipynb")
+    assert "motivation_scaling.csv" in scaling
+    assert "motivation_tail_scaling.csv" in tail
+    assert "ax.plot" in scaling
+    assert "ax.plot" in tail
+    assert "Trajectory length (# calls)" in scaling
+    assert "Trajectory length (# calls)" in tail
+    assert "ax.bar" not in scaling
+    assert "ax.bar" not in tail

@@ -1,0 +1,10 @@
+suite,mode,length,repeats,wall_mean_s,wall_stdev_s,wall_p50_s,wall_p95_s,per_step_mean_ms,failures_mean,host_polluted,per_step_stdev_ms
+motivation_runtime_comparison,bare,54,2,3.228746,0.197319,3.228746,3.354319,59.792,2.0,True,3.654
+motivation_runtime_comparison,agenttx_without_read_tracing,54,2,4.226966,0.116546,4.226966,4.301136,78.277,2.0,False,2.158
+motivation_runtime_comparison,agenttx_full,54,2,8.446721,0.641024,8.446721,8.854666,156.421,2.0,False,11.871
+motivation_runtime_comparison,bare,64,2,3.222834,0.036851,3.222834,3.246286,50.357,2.0,True,0.576
+motivation_runtime_comparison,agenttx_without_read_tracing,64,2,4.117267,0.038309,4.117267,4.141647,64.332,2.0,False,0.599
+motivation_runtime_comparison,agenttx_full,64,2,8.92925,0.141351,8.92925,9.019205,139.52,2.0,False,2.209
+motivation_runtime_comparison,bare,96,2,3.299026,0.074219,3.299026,3.346259,34.365,2.0,True,0.773
+motivation_runtime_comparison,agenttx_without_read_tracing,96,2,4.869616,0.116037,4.869616,4.943461,50.725,2.0,False,1.209
+motivation_runtime_comparison,agenttx_full,96,2,10.273951,0.617409,10.273951,10.666868,107.02,2.0,False,6.431

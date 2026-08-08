@@ -62,6 +62,26 @@ The plotting notebooks write `motivation/FIG-Motivation-Optimization.pdf`
 and `motivation/FIG-Motivation-Tail.pdf`; the report notebook is intended for
 interactive inspection and does not duplicate the source result files.
 
+## FAST-style multi-length line experiments
+
+The FAST'25 Pan paper uses compact 2x2 panels, marker-and-line curves, and
+point annotations over several workload parameters. AgentTX now has the same
+presentation for a more informative length sweep:
+
+```bash
+PYTHONPATH=src:. python motivation/bench_scaling.py \
+  --lengths 54 64 96 --repeats 2
+PYTHONPATH=src:. python motivation/bench_tail_scaling.py \
+  --lengths 54 64 96 --repeats 2
+```
+
+`plot_scaling.ipynb` reads `motivation_scaling.csv` and shows per-call cost,
+end-to-end cost, overhead relative to bare execution, and the read-trace
+penalty. `plot_tail_scaling.ipynb` reads `motivation_tail_scaling.csv` and
+shows p50/p95 call and trajectory tails. Their paper figures are
+`FIG-Motivation-Scaling.{pdf,png}` and
+`FIG-Motivation-Tail-Scaling.{pdf,png}`.
+
 ## Motivation storyline
 
 1. The unoptimized path traces every tool and pays setup/teardown repeatedly.

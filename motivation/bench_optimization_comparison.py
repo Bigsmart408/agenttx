@@ -75,6 +75,7 @@ def run_comparison(length: int, repeats: int, modes: Sequence[str]) -> List[dict
                 "wall_p50_s": round(percentile(walls, 0.50), 6),
                 "wall_p95_s": round(percentile(walls, 0.95), 6),
                 "per_step_mean_ms": round(statistics.mean(per_step), 3),
+                "per_step_stdev_ms": round(statistics.stdev(per_step), 3) if len(per_step) > 1 else 0.0,
                 "failures_mean": round(statistics.mean(float(sample["failures"]) for sample in samples), 3),
                 "host_polluted": samples[-1].get("host_polluted", "") if samples else "",
             }
