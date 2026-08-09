@@ -31,7 +31,7 @@ is temporally subsequent but causally unrelated to a failure.  The key insight
 is to organize an Agent Effect Transaction around causal dependencies among
 versioned effects, making causality the recovery unit inside one trajectory.
 \system realizes this insight through effect capture, a causal ledger, shared
-speculation, selective reconstruction, and durable publication.  Persistent
+speculation, selective reconstruction, and durable publication; persistent
 workers and incremental snapshots separately reduce long-trajectory overhead.
 Across 144 controlled runs, \system retained all independent work and removed
 all invalid descendants; temporal recovery retained only 41\% at 64 calls.  At
@@ -300,8 +300,8 @@ effect names identify overlapping objects.  For an active earlier step $j<i$,
 the transaction adds $j\in P_i$ when:
 \begin{itemize}
   \item $s_j$ writes or deletes $p$, and $s_i$ reads, negatively looks up,
-        writes, or deletes an overlapping $q$; or
-  \item $s_j$ negatively looks up $p$, and $s_i$ later writes overlapping $q$.
+        writes, or deletes an overlapping $q$.
+  \item $s_j$ negatively looks up $p$, and $s_i$ later writes an overlapping $q$.
 \end{itemize}
 The first rule captures read-after-write and write serialization.  The second
 captures assumptions based on absence.  The identity relation is part of the
@@ -492,6 +492,7 @@ still dominate the tail.
 We expect a correct causal policy to retain independent work and remove invalid
 descendants.  A no-dependency ablation should retain apparent work but miss
 derived corruption.
+
 We execute real filesystem effect DAGs rather than simulate graph nodes.  The
 sweep varies length (16/32/64), shape (chain/fan-out/layered), requested fault
 position (10/50/75\%), and independent-work ratio (25/50/75\%).  Causal,
