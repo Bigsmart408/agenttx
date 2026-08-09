@@ -6,7 +6,7 @@ Last updated: 2026-08-09 (VM `/home/bfq/agenttx`).
 
 ### Problem framing
 - Chose **Problem A: Agent Effect Transactions** (trajectory-level speculation / rollback / selective commit), not per-call `try` wrapping.
-- Design notes in `docs/problem.md`, `docs/architecture.md`; paper-facing systems obstacles in `docs/research-challenges.md`.
+- Design notes in `docs/problem.md`, `docs/architecture.md`; paper-facing systems obstacles in `docs/research-challenges.md`; experiment terminology and evidence chain in `docs/experiments-explained.md`.
 
 ### Runtime (v0)
 - **Effect ledger** with automatically captured workspace reads, negative lookups, writes, and deletes; parent/child path dependency edges; cascade / temporal rollback; and a commit frontier.

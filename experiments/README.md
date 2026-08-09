@@ -1,5 +1,9 @@
 # Experiments
 
+The Chinese experiment guide `docs/experiments-explained.md` explains the
+terminology first, then connects the motivation, optimization, causal-recovery,
+real-agent, robustness, and token experiments into one paper evidence chain.
+
 ## Step 1 — `try` overhead curve
 
 Goal: quantify why naive per-tool-call `try` is not enough for AgentTX.

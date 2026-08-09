@@ -6,6 +6,10 @@ trajectory multiplies per-tool overhead: syscall tracing, temporary command
 scripts, blob-store maintenance, shell parsing, try namespace setup, and full
 upperdir traversal.
 
+For a Chinese, paper-oriented explanation of terminology, baseline semantics,
+experimental design, results, and claim boundaries, start with
+`docs/experiments-explained.md`.
+
 ## Reproduce the current comparison
 
 The runtime comparison reuses the deterministic 64-call workload and current
