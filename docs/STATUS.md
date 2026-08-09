@@ -54,6 +54,7 @@ Last updated: 2026-08-09 (VM `/home/bfq/agenttx`).
 | Quantitative causal retention | Step 20 controlled DAG sweep over size, shape, fault position, and independence; causal/temporal/whole-session plus dependency-capture ablation | `causal_retention.{csv,json,md}`, `causal_retention_raw.csv`, `step20-causal-retention-evaluation.md` |
 | Real-agent causal recovery | Step 21 DeepSeek ledger inspection, faulty-root selection, causal rollback, independent-work retention, and repaired commit over three fresh sessions | `real_agent_recovery.{csv,json,md}`, `step21-real-agent-causal-recovery.md` |
 | Uniform commit-policy enforcement | Step 22 direct runtime, CLI subprocess, and session-reload checks prove denied paths cannot bypass policy | `test_runtime_integration.py`, `test_recovery.py`, `step22-runtime-commit-policy.md` |
+| Hard-link alias boundary | Step 23 probe shows lower hard links split on OverlayFS copy-up: alias reads stay stale and selective commit breaks inode identity | `hardlink_alias_probe.{json,md}`, `step23-hardlink-overlay-boundary.md` |
 
 **Evidence suite highlights (2026-08-07):**
 - Cascade rollback: host clean until commit; only intended files land.
@@ -73,6 +74,7 @@ Last updated: 2026-08-09 (VM `/home/bfq/agenttx`).
 - Quantitative causal retention: 144 real-overlay runs across 48 aggregated configurations all kept the host clean. Causal recovery retained 100% of independent work and removed 100% of invalid descendants; at 64 calls temporal rollback retained 41.0%, whole-session discard retained 0%, and causal rollback without dependency capture removed only 4.0% of invalid work. Causal rollback p95 at 64 calls was 272.7 ms.
 - Real-agent causal recovery: `deepseek-chat` inspected the AgentTX ledger and selected the injected faulty root in all 3 fresh sessions. Full recovery, correct target selection, independent-note retention, invalid-artifact removal, and post-commit tests were 100%; host leak before commit was 0%, with wall p50/p95 29.0/30.8 s.
 - Commit policy invariant: direct runtime and CLI commits now fail closed on denied paths before WAL/materialization. Custom allow/deny globs are stored in `agenttx.json` and remain enforced after reload; blocked commits leave the host clean and frontier unchanged.
+- Hard-link boundary: on the Linux 5.15 `try` OverlayFS path, writing one name of a lower hard link leaves the sibling alias stale in the speculative view and splits the inode at selective commit. Ledger-only canonicalization cannot restore POSIX semantics; causal-by-default remains blocked on a different substrate or kernel/FUSE support.
 
 **Refactor compare (DeepSeek):**
 - AgentTX-LLM: ~14s, host clean before commit, tests pass.
@@ -87,7 +89,7 @@ Last updated: 2026-08-09 (VM `/home/bfq/agenttx`).
 ## Remaining / open
 
 ### High priority (systems)
-1. **Causal rollback as the default API** - explicit rollback_causal now retains independent work, hierarchical paths, and symlink aliases; switching the default still needs bind-mount/hard-link alias coverage and replay evaluation.
+1. **Causal rollback as the default API** - explicit rollback_causal now retains independent work, hierarchical paths, and symlink aliases. Step 23 shows lower hard-link semantics are broken by OverlayFS copy-up before ledger analysis; switching the default is paused pending a different substrate or kernel/FUSE support, plus bind-mount coverage.
 2. **Scalable snapshots** - content-addressed blobs reduce repeated file storage (9.0% physical/logical bytes in the Step 12 workload), but directory traversal and historical/WAL copies still grow with speculative state.
 3. **Crash-atomic filesystem commit** - a durable WAL now restores interrupted host materialization on reload; an in-flight external observer can still see partial paths, so kernel-level atomicity remains out of scope.
 4. **Lower overlay overhead** - known-tool tracing bypass, a longer-lived try worker, and incremental snapshots are measured and preserved in iteration history; shared pool remains substantially slower than bare execution, so ledger and overlay traversal costs remain open.
@@ -122,6 +124,7 @@ python experiments/scripts/bench_long_trajectory.py --length 64 --repeats 1
 python experiments/scripts/bench_long_scaling.py --lengths 54 64 96 --repeats 2
 python experiments/scripts/bench_robustness.py --tail-length 64 --tail-repeats 3 --long-steps 256 --long-resume-at 128 --agents 4 --concurrent-steps 16
 python experiments/scripts/bench_causal_retention.py --repeats 3
+python experiments/scripts/probe_hardlink_alias.py
 PYTHONPATH=src:. /home/bfq/miniconda3/envs/agenttx/bin/python experiments/scripts/bench_real_agent.py --repeats 3 --max-turns 35
 PYTHONPATH=src:. /home/bfq/miniconda3/envs/agenttx/bin/python experiments/scripts/bench_real_agent_recovery.py --repeats 3 --max-turns 30
 PYTHONPATH=src:. python3 motivation/bench_optimization_comparison.py --length 64 --repeats 2

@@ -53,12 +53,12 @@ The remaining gaps are no longer “missing the whole system.” They cluster in
 - **Where:** `AgentTX.rollback` → `rollback_from` → `Ledger.cascade_rollback_targets` (all later steps).
 - **Causal path:** `rollback_causal` / CLI `--causal` only.
 - **Risk:** Paper/product claim (“non-contiguous causal recovery”) is opt-in; default API discards independent later work — closer to checkpoint abort than AET.
-- **Blocker for flipping default (acknowledged in STATUS):** bind-mount / hard-link alias coverage + broader replay eval.
+- **Blocker for flipping default:** Step 23 empirically shows that lower hard links split during OverlayFS copy-up: an alias read sees stale data and selective commit breaks inode identity. This cannot be repaired by ledger edges alone; bind mounts also remain untested.
 
 #### G3. Alias model is symlink-ancestor only
 - **Where:** `AgentTX._resolve_alias_ancestors` walks lexical symlink ancestors in merged view; ledger uses `_paths_overlap` prefixes.
 - **Missing:** hard-link aliases, bind mounts, `mount --bind`, cross-device path equivalence, non-ancestor symlink *targets* used as alternate names without ancestor walk coverage in all cases.
-- **Risk:** Causal rollback / selective commit can retain or drop the wrong set when agents use link farms or bind-mounted tool caches.
+- **Measured boundary:** `hardlink_alias_probe.{json,md}` demonstrates that the current substrate diverges from POSIX hard-link visibility before causal analysis. A FUSE/kernel-aware or different snapshot substrate is required for faithful support; bind-mounted tool caches remain a separate risk.
 
 #### G4. Trace completeness is partial and Linux-only
 - **Where:** `trace.py` (`open`/`openat`/`openat2` focused); `SharedSemisolate` requires `strace` unless `trace_reads=False`.

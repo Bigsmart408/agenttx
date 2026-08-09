@@ -1,0 +1,29 @@
+{
+  "before": {
+    "same_inode": true,
+    "link_count": 2
+  },
+  "expected_posix_alias_read": "new\n",
+  "overlay_alias_read": "old\n",
+  "reader_parents": [],
+  "writer_effects": [
+    {
+      "path": "first.txt",
+      "kind": "W"
+    }
+  ],
+  "reader_effects": [
+    {
+      "path": "alias.txt",
+      "kind": "R"
+    }
+  ],
+  "after_partial_commit": {
+    "first_content": "new\n",
+    "alias_content": "old\n",
+    "same_inode": false,
+    "first_link_count": 1,
+    "alias_link_count": 1
+  },
+  "overlay_matches_posix_hardlink_semantics": false
+}
