@@ -20,9 +20,20 @@ TOOLS = [
     _tool("run_shell", "Run a bash command in the workspace cwd.", {"cmd": {"type": "string"}}, ["cmd"]),
     _tool("run_tests", "Run the project test command.", {"cmd": {"type": "string"}}),
     _tool("delete_file", "Delete a file under the workspace.", {"path": {"type": "string"}}, ["path"]),
+    _tool(
+        "inspect_ledger",
+        "Inspect AgentTX step ids, dependency parents, effects, and rollback status before choosing a recovery action.",
+        {},
+    ),
+    _tool(
+        "rollback_causal",
+        "Roll back one faulty step and every ledger descendant while retaining independent later work.",
+        {"step_id": {"type": "integer"}},
+        ["step_id"],
+    ),
     _tool("finish", "Finish the task and optionally request commit.", {"summary": {"type": "string"}, "commit": {"type": "boolean"}}, ["summary"]),
 ]
-SYSTEM = "You are a coding agent in an AgentTX-protected workspace. Use tools for edits. Call finish when done."
+SYSTEM = "You are a coding agent in an AgentTX-protected workspace. Use tools for edits. When recovering from a failed action, inspect the effect ledger and prefer causal rollback so independent later work survives. Call finish when done."
 
 @dataclass
 class AgentRunResult:
@@ -32,6 +43,7 @@ class AgentRunResult:
     summary: str = ""
     committed: bool = False
     ledger: dict = field(default_factory=dict)
+    control_events: List[dict] = field(default_factory=list)
 
 class LLMToolAgent:
     def __init__(self, workdir, model=None, session_dir=None, max_turns=30, api_base=None, api_key=None):
@@ -41,6 +53,7 @@ class LLMToolAgent:
         self.api_base = api_base or os.environ.get("OPENAI_BASE_URL") or os.environ.get("OPENAI_API_BASE")
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
         self.harness = CodingAgentHarness(workdir=self.workdir, session_dir=session_dir, policy=CommitPolicy(workdir=self.workdir))
+        self.control_events: List[dict] = []
 
     def close(self, destroy=True):
         self.harness.close(destroy=destroy)
@@ -57,6 +70,43 @@ class LLMToolAgent:
     def _dispatch(self, name, args):
         if name == "finish":
             return json.dumps({"ok": True, **args})
+        if name == "inspect_ledger":
+            ledger = self.harness.tx.ledger.to_dict()
+            steps = [
+                {
+                    "step_id": step["step_id"],
+                    "tool_name": step["tool_name"],
+                    "status": step["status"],
+                    "parents": step.get("parents", []),
+                    "effects": step.get("effects", []),
+                }
+                for step in ledger.get("steps", [])
+            ]
+            event = {"tool": name, "step_count": len(steps)}
+            self.control_events.append(event)
+            return json.dumps(
+                {
+                    "committed_frontier": ledger.get("committed_frontier", -1),
+                    "steps": steps,
+                }
+            )
+        if name == "rollback_causal":
+            step_id = int(args["step_id"])
+            targets = self.harness.tx.rollback_causal(step_id)
+            active = [
+                step.step_id
+                for step in self.harness.tx.ledger.steps
+                if step.status != "rolled_back"
+                and step.step_id > self.harness.tx.ledger.committed_frontier
+            ]
+            event = {
+                "tool": name,
+                "step_id": step_id,
+                "targets": list(targets),
+                "active_step_ids": active,
+            }
+            self.control_events.append(event)
+            return json.dumps({"ok": True, **event})
         if name == "run_tests" and "cmd" not in args:
             args = {**args, "cmd": "PYTHONPATH=. python -m pytest -q"}
         rec = self.harness.call_tool(name, args)
@@ -72,6 +122,7 @@ class LLMToolAgent:
     def run(self, task, commit=False):
         if not self.api_key:
             raise RuntimeError("No API key. Set OPENAI_API_KEY or OPENROUTER_API_KEY.")
+        self.control_events = []
         client = self._client()
         messages = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": task}]
         tool_calls = 0
@@ -108,9 +159,23 @@ class LLMToolAgent:
             if finished:
                 break
         committed = False
-        if want_commit and self.harness.tx.ledger.steps:
-            up_to = max(s.step_id for s in self.harness.tx.ledger.steps if s.status != "rolled_back")
+        active = [
+            step.step_id
+            for step in self.harness.tx.ledger.steps
+            if step.status != "rolled_back"
+            and step.step_id > self.harness.tx.ledger.committed_frontier
+        ]
+        if want_commit and active:
+            up_to = max(active)
             self.harness.policy.assert_committable(self.harness.tx.ledger, up_to)
             self.harness.tx.commit(up_to)
             committed = True
-        return AgentRunResult(messages=messages, tool_calls=tool_calls, finished=finished, summary=summary, committed=committed, ledger=self.harness.tx.ledger.to_dict())
+        return AgentRunResult(
+            messages=messages,
+            tool_calls=tool_calls,
+            finished=finished,
+            summary=summary,
+            committed=committed,
+            ledger=self.harness.tx.ledger.to_dict(),
+            control_events=list(self.control_events),
+        )

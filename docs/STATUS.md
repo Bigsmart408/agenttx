@@ -52,6 +52,7 @@ Last updated: 2026-08-09 (VM `/home/bfq/agenttx`).
 | Robustness evaluation | Step 19 deterministic p50/p95 tails, worker crash injection/fallback, reloadable long session, concurrent isolated agents, and real LLM-agent repeats | `robustness.{csv,json,md}`, `real_agent_robustness.{csv,json,md}`, `step19-robustness-evaluation.md` |
 | Motivation optimization chain | Paper-oriented summary and rerunnable current baseline comparison for all hot-path iterations | `motivation/`, `motivation_optimization_history.{csv,json,md}`, `motivation_runtime_comparison.{csv,json,md}` |
 | Quantitative causal retention | Step 20 controlled DAG sweep over size, shape, fault position, and independence; causal/temporal/whole-session plus dependency-capture ablation | `causal_retention.{csv,json,md}`, `causal_retention_raw.csv`, `step20-causal-retention-evaluation.md` |
+| Real-agent causal recovery | Step 21 DeepSeek ledger inspection, faulty-root selection, causal rollback, independent-work retention, and repaired commit over three fresh sessions | `real_agent_recovery.{csv,json,md}`, `step21-real-agent-causal-recovery.md` |
 
 **Evidence suite highlights (2026-08-07):**
 - Cascade rollback: host clean until commit; only intended files land.
@@ -69,6 +70,7 @@ Last updated: 2026-08-09 (VM `/home/bfq/agenttx`).
 - Robustness evaluation: Step 19 records deterministic per-call/per-run p50 and p95 (no-trace 17.114/334.112 ms; full-trace 22.761/743.230 ms), verifies worker fallback plus restart after injected crash, reloads and commits a 256-step session, and runs 4 concurrent agents with no cross-contamination. The real-agent extension ran three `deepseek-chat` refactors with wall p50/p95 12.328/14.155 s, 100% success, and zero pre-commit host leaks.
 - Motivation chain: `motivation/` now provides a one-command current baseline comparison and a paper-ready history summary joining all optimization iterations with deterministic and real-agent robustness results.
 - Quantitative causal retention: 144 real-overlay runs across 48 aggregated configurations all kept the host clean. Causal recovery retained 100% of independent work and removed 100% of invalid descendants; at 64 calls temporal rollback retained 41.0%, whole-session discard retained 0%, and causal rollback without dependency capture removed only 4.0% of invalid work. Causal rollback p95 at 64 calls was 272.7 ms.
+- Real-agent causal recovery: `deepseek-chat` inspected the AgentTX ledger and selected the injected faulty root in all 3 fresh sessions. Full recovery, correct target selection, independent-note retention, invalid-artifact removal, and post-commit tests were 100%; host leak before commit was 0%, with wall p50/p95 29.0/30.8 s.
 
 **Refactor compare (DeepSeek):**
 - AgentTX-LLM: ~14s, host clean before commit, tests pass.
@@ -91,7 +93,7 @@ Last updated: 2026-08-09 (VM `/home/bfq/agenttx`).
 6. **Non-filesystem effects** - network/cloud side effects (currently coarse hide_network only).
 
 ### Evaluation gaps
-8. Harder / longer agent workloads: deterministic 54/64/96-call scaling, a reloadable 256-step session, and controlled 16/32/64-call causal DAGs are covered by Steps 16-20; real multi-package LLM agents remain.
+8. Harder / longer agent workloads: deterministic 54/64/96-call scaling, a reloadable 256-step session, controlled 16/32/64-call causal DAGs, and real-agent requested recovery are covered by Steps 16-21; real multi-package LLM agents remain.
 9. External baselines: BranchFS/Waypoint/Sandlock/YoloFS/DeltaBox/Crab/Cordon remain artifact- or environment-blocked; current VM matrix covers the runnable references and records the blockers.
 10. Stronger Aider (or other agents) bakeoff with fair timeouts and success criteria.
 11. Statistical repeats / variance reporting for real LLM runs (cost-aware) remains open; deterministic runtime tails now have p50/p95 coverage.
@@ -119,6 +121,7 @@ python experiments/scripts/bench_long_scaling.py --lengths 54 64 96 --repeats 2
 python experiments/scripts/bench_robustness.py --tail-length 64 --tail-repeats 3 --long-steps 256 --long-resume-at 128 --agents 4 --concurrent-steps 16
 python experiments/scripts/bench_causal_retention.py --repeats 3
 PYTHONPATH=src:. /home/bfq/miniconda3/envs/agenttx/bin/python experiments/scripts/bench_real_agent.py --repeats 3 --max-turns 35
+PYTHONPATH=src:. /home/bfq/miniconda3/envs/agenttx/bin/python experiments/scripts/bench_real_agent_recovery.py --repeats 3 --max-turns 30
 PYTHONPATH=src:. python3 motivation/bench_optimization_comparison.py --length 64 --repeats 2
 PYTHONPATH=src:. python3 motivation/summarize_optimization_history.py
 AIDER_TIMEOUT_S=180 python experiments/scripts/bench_refactor_compare.py

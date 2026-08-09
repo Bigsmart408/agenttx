@@ -12,7 +12,7 @@ Companion graphic: Cursor canvas `agenttx-code-graphic` (architecture + gap map)
 
 ## 1. Executive summary
 
-AgentTX has grown from a Step 1–4 scaffold into a working trajectory runtime: shared `try` session, effect ledger, selective/historical commit, causal rollback, strace deps, content-addressed / incremental snapshots, persistent try worker, WAL recovery, and a sizable evaluation matrix (Steps 5–19).
+AgentTX has grown from a Step 1–4 scaffold into a working trajectory runtime: shared `try` session, effect ledger, selective/historical commit, causal rollback, strace deps, content-addressed / incremental snapshots, persistent try worker, WAL recovery, and a sizable evaluation matrix (Steps 5–21).
 
 The remaining gaps are no longer “missing the whole system.” They cluster into:
 
@@ -83,10 +83,10 @@ The remaining gaps are no longer “missing the whole system.” They cluster in
 - **Missing:** network/cloud/API side-effect ledger, DNS, credentials helpers, package registries, container pulls.
 - **Impact:** Coding agents that `curl | bash` or hit SaaS APIs are outside the transaction story.
 
-#### G7. LLM agent cannot drive recovery
-- **Where:** `agents/llm_agent.py` tools = read/write/append/shell/tests/delete/`finish(commit?)` only.
-- **Missing tools:** `rollback`, `rollback_causal`, inspect ledger/frontier, selective commit planning.
-- **Impact:** Runtime has AET primitives; the “real agent” loop cannot ask for the distinguishing recovery operation — eval mostly tests isolation + final commit, not agent-guided causal repair.
+#### G7. LLM recovery control is implemented; commit planning remains thin
+- **Implemented:** `agents/llm_agent.py` now exposes ledger/frontier inspection and `rollback_causal(step_id)`. Step 21 exercises both with a real DeepSeek agent over three fresh failure-and-recovery sessions.
+- **Remaining:** the model still lacks a structured selective-commit preview, path-by-path justification, and human approval workflow.
+- **Impact:** The agent can now request the distinguishing AET recovery operation, but the post-recovery commit UX is still a benchmark-controlled policy step.
 
 #### G8. Policy model is path-glob only
 - **Where:** `policy.py` allow/deny globs + cache ignores.
@@ -129,7 +129,7 @@ Read tracing dominates the gap (`~63` → `~148` ms/step). Worker iteration remo
 `docs/related-work-2026.md` positions BranchFS / Waypoint / YoloFS / DeltaBox / Crab / Sandlock / ActPlane well, but runnable VM matrix still blocked for several artifacts/environments. Without head-to-head numbers, novelty vs YoloFS/BranchFS stays qualitative.
 
 #### G14. Real multi-package / hostile agent workloads thin
-Real DeepSeek refactor robustness looks strong (`host leak 0`, `tests pass 1.0` over 3 repeats) but task is still the seeded multi-file refactor — not multi-package, not adversarial tool misuse, not long CI-fix loops with mid-flight causal rollback *requested by the agent*.
+Real DeepSeek refactor robustness looks strong (`host leak 0`, `tests pass 1.0` over 3 repeats), and Step 21 now covers mid-flight causal rollback requested by the agent with 3/3 successful root selections and repairs. The tasks remain seeded single-package fixtures — not multi-package, not adversarial tool misuse, and not long open-ended CI-fix loops.
 
 #### G15. Concurrent agents only in disjoint workspaces
 Robustness suite runs concurrent agents into separate subdirs/sessions. Shared-workspace multi-agent interference / commit fencing is unproven.
@@ -152,7 +152,7 @@ Constraints keep writes on VM; a stale local scaffold can mislead reviewers (obs
 ## 4. Gap map (code → claim)
 
 ```
-Agent / LLM tools ──G7──▶ missing recovery tools
+Agent / LLM tools ──G7──▶ recovery implemented; commit planning thin
         │
         ▼
    Harness + Policy ──G1/G8──▶ CLI skips policy; policy=path globs only
@@ -183,7 +183,7 @@ Ordered for research payoff:
 1. **Close G1** — enforce `CommitPolicy` inside `commit_frontier` (or CLI-equivalent), so all entry points fail closed.  
 2. **Prepare G2** — alias/hardlink/bind coverage + replay suite, then switch default rollback to causal (keep temporal as flag).  
 3. **Formalize G4** — syscall coverage matrix; fail-closed or explicit “untracked” effect kind when unsupported ops occur.  
-4. **Expose G7** — ledger inspect + causal rollback tools to the LLM agent; add a recovery-centric live eval.  
+4. **Extend G7** — add selective-commit preview and path-level rationale to the now-working recovery control plane.
 5. **Paper + G13** — write HLS draft while standing up BranchFS/Waypoint where artifacts allow; keep blocked baselines in an appendix table.  
 6. **Perf G11** — treat “full tracing cost” as a first-class design point (sampling, trusted-manifest, or kernel support), not only micro-optimizations.
 
@@ -191,6 +191,6 @@ Ordered for research payoff:
 
 ## 6. Review verdict
 
-AgentTX is past “prototype that barely commits.” The core AET loop is implemented and evidenced. The important remaining gaps are **defaults and completeness** (causal-by-default, alias/trace coverage, policy on all commit paths), **scope** (non-FS effects, agent-driven recovery), and **external credibility** (bakeoffs + paper), plus an honest performance tax under full tracing.
+AgentTX is past “prototype that barely commits.” The core AET loop and agent-requested causal recovery are implemented and evidenced. The important remaining gaps are **defaults and completeness** (causal-by-default, alias/trace coverage, policy on all commit paths), **scope** (non-FS effects and harder multi-package/adversarial agents), and **external credibility** (bakeoffs + paper), plus an honest performance tax under full tracing.
 
-No code was changed for this review.
+This review is updated as implementation and evaluation gaps close.

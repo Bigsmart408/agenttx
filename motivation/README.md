@@ -85,6 +85,21 @@ benchmark checks both the speculative merged view and the host state after
 commit, so retention numbers are tied to actual AgentTX recovery rather than a
 symbolic DAG simulation.
 
+## Real-agent recovery experiment
+
+The live recovery benchmark adds the decision-making layer: a seeded failure
+contains one faulty producer, independent later work, a derived artifact, and a
+failing test. The LLM must inspect the AgentTX ledger, select the faulty step,
+invoke causal rollback, and finish with the independent work preserved.
+
+```bash
+PYTHONPATH=src:. python experiments/scripts/bench_real_agent_recovery.py \
+  --repeats 3 --max-turns 30
+```
+
+Results are stored in `real_agent_recovery.{csv,json,md}`. Credentials are read
+from the local environment and never written to an artifact.
+
 ## FAST-style multi-length line experiments
 
 The FAST'25 Pan paper uses compact 2x2 panels, marker-and-line curves, and

@@ -1,0 +1,4 @@
+repeat,model,wall_s,finished,tool_calls,ledger_steps,inspect_calls,rollback_calls,injected_root_step,chosen_step,rollback_targets,selected_root,causal_targets_correct,host_polluted_before_commit,committed,independent_retained,derived_removed,pipeline_restored,recovery_note_written,tests_rc,success,error
+0,deepseek-chat,30.97586,True,22,23,1,1,0,0,"[0, 2, 3, 4, 5, 8, 10]",True,True,False,True,True,True,True,True,0,True,
+1,deepseek-chat,26.384269,True,17,18,1,1,0,0,"[0, 2, 3, 4, 5, 8, 10]",True,True,False,True,True,True,True,True,0,True,
+2,deepseek-chat,28.95681,True,21,21,2,1,0,0,"[0, 2, 3, 4, 5, 8, 9, 11]",True,True,False,True,True,True,True,True,0,True,
