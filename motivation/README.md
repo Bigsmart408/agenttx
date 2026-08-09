@@ -100,6 +100,26 @@ PYTHONPATH=src:. python experiments/scripts/bench_real_agent_recovery.py \
 Results are stored in `real_agent_recovery.{csv,json,md}`. Credentials are read
 from the local environment and never written to an artifact.
 
+## Avoided token replay after recovery
+
+The retention experiment connects causal filesystem recovery to LLM cost. A
+fixed failure DAG contains valid work before and after the fault. AgentTX causal
+rollback retains both documents; an optimistic temporal checkpoint loses the
+later one; whole branch/session abort loses both. Real DeepSeek `write_file`
+calls regenerate only the lost artifacts, and response usage reports the exact
+replay tokens.
+
+```bash
+PYTHONPATH=src:. /home/bfq/miniconda3/envs/agenttx/bin/python \
+  experiments/scripts/bench_token_recovery.py \
+  --document-lines 12 24 48 --repeats 3
+```
+
+The central metric is *avoided replay tokens*, not total end-to-end recovery
+tokens. Results live in `token_recovery.{csv,json,md}` and
+`token_recovery_raw.csv`; design and limitations are in
+`docs/step24-token-replay-evaluation.md`.
+
 ## FAST-style multi-length line experiments
 
 The FAST'25 Pan paper uses compact 2x2 panels, marker-and-line curves, and

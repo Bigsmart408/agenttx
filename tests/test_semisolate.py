@@ -72,6 +72,30 @@ def test_try_commit_error_text_is_not_treated_as_success(
     assert result.returncode == 1
 
 
+def test_try_starts_in_workspace_when_inherited_pwd_is_stale(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    caller = tmp_path / "caller"
+    workspace = tmp_path / "workspace"
+    caller.mkdir()
+    workspace.mkdir()
+    monkeypatch.chdir(caller)
+    monkeypatch.setenv("PWD", str(caller))
+    pool = SharedSemisolate(
+        workspace=workspace,
+        trace_reads=False,
+        persistent_worker=False,
+    )
+
+    try:
+        result = pool.run(["bash", "-c", "pwd"])
+    finally:
+        pool.close(destroy=True)
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == str(workspace)
+
+
 def test_snapshots_deduplicate_unchanged_files_without_aliasing(
     tmp_path: Path,
 ) -> None:

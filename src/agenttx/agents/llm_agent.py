@@ -44,6 +44,9 @@ class AgentRunResult:
     committed: bool = False
     ledger: dict = field(default_factory=dict)
     control_events: List[dict] = field(default_factory=list)
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
 
 class LLMToolAgent:
     def __init__(self, workdir, model=None, session_dir=None, max_turns=30, api_base=None, api_key=None):
@@ -129,8 +132,16 @@ class LLMToolAgent:
         finished = False
         summary = ""
         want_commit = commit
+        prompt_tokens = 0
+        completion_tokens = 0
+        total_tokens = 0
         for _ in range(self.max_turns):
             resp = client.chat.completions.create(model=self.model, messages=messages, tools=TOOLS, tool_choice="auto")
+            usage = getattr(resp, "usage", None)
+            if usage is not None:
+                prompt_tokens += int(getattr(usage, "prompt_tokens", 0) or 0)
+                completion_tokens += int(getattr(usage, "completion_tokens", 0) or 0)
+                total_tokens += int(getattr(usage, "total_tokens", 0) or 0)
             msg = resp.choices[0].message
             messages.append({
                 "role": "assistant",
@@ -178,4 +189,7 @@ class LLMToolAgent:
             committed=committed,
             ledger=self.harness.tx.ledger.to_dict(),
             control_events=list(self.control_events),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens or prompt_tokens + completion_tokens,
         )

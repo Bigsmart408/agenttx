@@ -134,3 +134,24 @@ Performance changes preserve a source snapshot before each iteration under
 harness effects explicit and keep opaque shell/test tracing intact. See
 `docs/step18-optimization-iterations.md` for before/after measurements and the
 remaining incremental-snapshot/worker optimizations.
+
+## Step 24 — real-agent replay-token savings
+
+This experiment isolates the LLM work discarded by recovery granularity. It
+uses the real AgentTX overlay and dependency graph for all policies, then asks
+`deepseek-chat` to regenerate only valid documents that the selected policy
+lost. The sweep varies each document from 12 to 48 distinct entries and records
+actual API prompt/completion/total tokens, tool calls, retries, p50/p95, tests,
+and pre-commit host leakage.
+
+```bash
+PYTHONPATH=src:. /home/bfq/miniconda3/envs/agenttx/bin/python \
+  experiments/scripts/bench_token_recovery.py \
+  --document-lines 12 24 48 --repeats 3
+```
+
+Results are written to `experiments/results/token_recovery.{csv,json,md}` and
+`token_recovery_raw.csv`. `temporal_checkpoint` and `whole_branch_abort` are
+recovery-granularity emulations, not executions of external artifacts. See
+`docs/step24-token-replay-evaluation.md` for the metric boundary and SOTA
+mapping.

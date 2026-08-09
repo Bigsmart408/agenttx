@@ -149,7 +149,22 @@ class SharedSemisolate:
         return self.sandbox_dir
 
     def _run_try(self, args: Sequence[str], cwd: Optional[Path] = None) -> subprocess.CompletedProcess:
-        return subprocess.run([str(self.try_bin), *args], cwd=str(cwd or self.workspace), text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        start_dir = Path(cwd or self.workspace).resolve()
+        env = os.environ.copy()
+        # Upstream try records its chroot START_DIR from the shell's $PWD.
+        # subprocess cwd= changes the kernel cwd but deliberately leaves the
+        # inherited environment untouched, so a stale PWD would make commands
+        # start in the benchmark runner/repository instead of the workspace.
+        env["PWD"] = str(start_dir)
+        return subprocess.run(
+            [str(self.try_bin), *args],
+            cwd=str(start_dir),
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
 
     def refresh_summary(self) -> Dict[str, SummaryEntry]:
         assert self.sandbox_dir is not None
@@ -273,6 +288,7 @@ class SharedSemisolate:
         process = subprocess.Popen(
             [str(self.try_bin), *flags, "--", "python3", str(self._worker_script)],
             cwd=str(self.workspace),
+            env={**os.environ, "PWD": str(self.workspace)},
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
