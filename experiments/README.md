@@ -159,3 +159,20 @@ Results are written to `experiments/results/token_recovery.{csv,json,md}` and
 recovery-granularity emulations, not executions of external artifacts. See
 `docs/step24-token-replay-evaluation.md` for the metric boundary and SOTA
 mapping.
+
+## Paper-facing notebooks
+
+The result files remain the source of truth. The notebooks under `motivation/`
+are deterministic presentation layers and can be executed independently:
+
+- `plot_causal_retention.ipynb` — controlled DAG retention/removal and rollback
+  latency;
+- `plot_token_recovery.ipynb` — real replay tokens, regenerated documents, and
+  replay p95;
+- `plot_real_agent_recovery.ipynb` — live LLM root selection, rollback targets,
+  latency, and recovery invariants;
+- `plot_robustness.ipynb` — p50/p95, worker crash, 256-step resume, and four
+  concurrently isolated agents.
+
+The hardlink-alias probe is deliberately not plotted: it is a single semantic
+counterexample defining the inode-alias boundary, not a quantitative sweep.

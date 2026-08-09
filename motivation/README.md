@@ -51,6 +51,13 @@ result artifacts:
 - `plot_causal_retention.ipynb` quantifies the central recovery claim: useful
   work retained, invalid descendants removed, joint recovery utility, and
   rollback p95 across controlled effect DAGs.
+- `plot_token_recovery.ipynb` connects retained work to real DeepSeek replay
+  tokens, regenerated documents, and p95 recovery latency.
+- `plot_real_agent_recovery.ipynb` exposes the live agent's recovery decision,
+  trajectory variability, rollback targets, and semantic success conditions.
+- `plot_robustness.ipynb` covers p50/p95 latency, worker-crash fallback,
+  long-session resume, and concurrent-agent isolation without combining their
+  heterogeneous latencies into one score.
 - `report.ipynb` is a short narrative notebook that tabulates the same
   measurements for paper drafting.
 
@@ -64,11 +71,19 @@ jupyter nbconvert --to notebook --execute motivation/plot_tail.ipynb \
   --output motivation/plot_tail.executed.ipynb
 jupyter nbconvert --to notebook --execute motivation/plot_causal_retention.ipynb \
   --output motivation/plot_causal_retention.executed.ipynb
+jupyter nbconvert --to notebook --execute motivation/plot_token_recovery.ipynb \
+  --output motivation/plot_token_recovery.executed.ipynb
+jupyter nbconvert --to notebook --execute motivation/plot_real_agent_recovery.ipynb \
+  --output motivation/plot_real_agent_recovery.executed.ipynb
+jupyter nbconvert --to notebook --execute motivation/plot_robustness.ipynb \
+  --output motivation/plot_robustness.executed.ipynb
 jupyter nbconvert --to notebook --execute motivation/report.ipynb \
   --output motivation/report.executed.ipynb
 ```
 
 The causal-retention notebook writes `motivation/FIG-Causal-Retention.{pdf,png}`;
+the three new evaluation notebooks write `FIG-Token-Recovery.{pdf,png}`,
+`FIG-Real-Agent-Recovery.{pdf,png}`, and `FIG-Robustness.{pdf,png}`;
 the report notebook is intended for interactive inspection and does not
 duplicate the source result files.
 

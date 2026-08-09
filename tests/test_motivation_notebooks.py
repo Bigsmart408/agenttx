@@ -74,3 +74,30 @@ def test_causal_retention_notebook_uses_controlled_dag_results() -> None:
     assert "rollback_ms_p95" in source
     assert "ax.plot" in source
     assert "ax.bar" not in source
+
+
+def test_new_recovery_notebooks_use_their_source_results() -> None:
+    token = _code(ROOT / "motivation" / "plot_token_recovery.ipynb")
+    real_agent = _code(ROOT / "motivation" / "plot_real_agent_recovery.ipynb")
+    robustness = _code(ROOT / "motivation" / "plot_robustness.ipynb")
+
+    assert "token_recovery.csv" in token
+    assert "total_tokens_mean" in token
+    assert "regenerated_documents_mean" in token
+    assert "FIG-Token-Recovery.pdf" in token
+
+    assert "real_agent_recovery.csv" in real_agent
+    assert "causal_targets_correct" in real_agent
+    assert "independent_retained" in real_agent
+    assert "FIG-Real-Agent-Recovery.pdf" in real_agent
+
+    assert "robustness.json" in robustness
+    assert "worker_crash" in robustness
+    assert "long_session" in robustness
+    assert "concurrent_agents" in robustness
+    assert "FIG-Robustness.pdf" in robustness
+
+    for source in (token, real_agent, robustness):
+        assert "Path.cwd()" in source
+        assert "ax.plot" in source
+        assert "ax.bar" not in source
