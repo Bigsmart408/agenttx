@@ -22,7 +22,7 @@ Last updated: 2026-08-09 (VM `/home/bfq/agenttx`).
 - Commit restores selected file/directory metadata after materialization and converts upstream false-success error text into a failed commit.
 - Commit WAL snapshots selected host paths and the upperdir before materialization; reload restores interrupted partial commits or finalizes a durably persisted frontier.
 - Automatic strace-based dependency capture records successful workspace reads and ENOENT/ENOTDIR negative lookups, preserving both symlink request and resolved fd paths; tracing is default-on and fails closed unless explicitly disabled.
-- **Coding harness** + commit **policy** (allow/deny, ignore caches).
+- Runtime-enforced commit **policy** (allow/deny, ignore caches) shared by direct API, CLI, coding harness, and LLM agent; custom rules persist across session reload.
 - **LLM tool agent** (`scripts/agenttx-agent`) with OpenAI-compatible / DeepSeek config in `~/.agenttx_llm.env` (not in git).
 
 ### Experiments / evidence
@@ -53,6 +53,7 @@ Last updated: 2026-08-09 (VM `/home/bfq/agenttx`).
 | Motivation optimization chain | Paper-oriented summary and rerunnable current baseline comparison for all hot-path iterations | `motivation/`, `motivation_optimization_history.{csv,json,md}`, `motivation_runtime_comparison.{csv,json,md}` |
 | Quantitative causal retention | Step 20 controlled DAG sweep over size, shape, fault position, and independence; causal/temporal/whole-session plus dependency-capture ablation | `causal_retention.{csv,json,md}`, `causal_retention_raw.csv`, `step20-causal-retention-evaluation.md` |
 | Real-agent causal recovery | Step 21 DeepSeek ledger inspection, faulty-root selection, causal rollback, independent-work retention, and repaired commit over three fresh sessions | `real_agent_recovery.{csv,json,md}`, `step21-real-agent-causal-recovery.md` |
+| Uniform commit-policy enforcement | Step 22 direct runtime, CLI subprocess, and session-reload checks prove denied paths cannot bypass policy | `test_runtime_integration.py`, `test_recovery.py`, `step22-runtime-commit-policy.md` |
 
 **Evidence suite highlights (2026-08-07):**
 - Cascade rollback: host clean until commit; only intended files land.
@@ -71,6 +72,7 @@ Last updated: 2026-08-09 (VM `/home/bfq/agenttx`).
 - Motivation chain: `motivation/` now provides a one-command current baseline comparison and a paper-ready history summary joining all optimization iterations with deterministic and real-agent robustness results.
 - Quantitative causal retention: 144 real-overlay runs across 48 aggregated configurations all kept the host clean. Causal recovery retained 100% of independent work and removed 100% of invalid descendants; at 64 calls temporal rollback retained 41.0%, whole-session discard retained 0%, and causal rollback without dependency capture removed only 4.0% of invalid work. Causal rollback p95 at 64 calls was 272.7 ms.
 - Real-agent causal recovery: `deepseek-chat` inspected the AgentTX ledger and selected the injected faulty root in all 3 fresh sessions. Full recovery, correct target selection, independent-note retention, invalid-artifact removal, and post-commit tests were 100%; host leak before commit was 0%, with wall p50/p95 29.0/30.8 s.
+- Commit policy invariant: direct runtime and CLI commits now fail closed on denied paths before WAL/materialization. Custom allow/deny globs are stored in `agenttx.json` and remain enforced after reload; blocked commits leave the host clean and frontier unchanged.
 
 **Refactor compare (DeepSeek):**
 - AgentTX-LLM: ~14s, host clean before commit, tests pass.

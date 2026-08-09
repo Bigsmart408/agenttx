@@ -1,8 +1,8 @@
 # AgentTX code review — current gaps
 
-**Date:** 2026-08-08  
+**Date:** 2026-08-09
 **Repo:** `/home/bfq/agenttx`  
-**HEAD:** `8a6138a` (`Add motivation optimization experiments`)  
+**Reviewed through:** `e78416a` (`Add agent-driven causal recovery`)
 **Scope:** Defect-first / gap review of the *current* implementation.  
 **Non-goal:** This document does **not** prescribe immediate patches; it inventories gaps for planning.
 
@@ -44,11 +44,10 @@ The remaining gaps are no longer “missing the whole system.” They cluster in
 
 ### P0 — Correctness / safety surface
 
-#### G1. CLI commit bypasses commit policy
-- **Where:** `src/agenttx/cli.py` `cmd_commit` calls `tx.commit(...)` directly.
-- **Contrast:** `CodingAgentHarness` / `LLMToolAgent` call `CommitPolicy.assert_committable` first.
-- **Risk:** Any `agenttx commit` CLI user can materialize denied paths (e.g. `*.pem` under deny globs) that the harness would block.
-- **Review ask:** Policy should be a runtime invariant on the commit path, not an optional harness wrapper.
+#### G1. Runtime commit-policy invariant implemented
+- **Implemented:** `AgentTX.commit_frontier` now checks the session `CommitPolicy` before path planning, WAL creation, or host materialization, so direct API, CLI, harness, and LLM entry points share one fail-closed invariant.
+- **Reload safety:** custom allow/deny globs are persisted in `agenttx.json` and reconstructed by `AgentTX.load`; old sessions receive the default policy.
+- **Evidence:** Step 22 covers direct runtime denial, a separate CLI commit process, and stricter-policy reload. The broader expressiveness gap remains G8 rather than an entry-point bypass.
 
 #### G2. Default rollback is still temporal, not causal
 - **Where:** `AgentTX.rollback` → `rollback_from` → `Ledger.cascade_rollback_targets` (all later steps).
@@ -155,7 +154,7 @@ Constraints keep writes on VM; a stale local scaffold can mislead reviewers (obs
 Agent / LLM tools ──G7──▶ recovery implemented; commit planning thin
         │
         ▼
-   Harness + Policy ──G1/G8──▶ CLI skips policy; policy=path globs only
+   Harness + Policy ──G1/G8──▶ runtime invariant done; policy=path globs only
         │
         ▼
    AgentTX runtime ──G2──▶ default rollback temporal
@@ -180,12 +179,11 @@ Ledger Trace      Semisolate/Worker
 
 Ordered for research payoff:
 
-1. **Close G1** — enforce `CommitPolicy` inside `commit_frontier` (or CLI-equivalent), so all entry points fail closed.  
-2. **Prepare G2** — alias/hardlink/bind coverage + replay suite, then switch default rollback to causal (keep temporal as flag).  
-3. **Formalize G4** — syscall coverage matrix; fail-closed or explicit “untracked” effect kind when unsupported ops occur.  
-4. **Extend G7** — add selective-commit preview and path-level rationale to the now-working recovery control plane.
-5. **Paper + G13** — write HLS draft while standing up BranchFS/Waypoint where artifacts allow; keep blocked baselines in an appendix table.  
-6. **Perf G11** — treat “full tracing cost” as a first-class design point (sampling, trusted-manifest, or kernel support), not only micro-optimizations.
+1. **Prepare G2** — alias/hardlink/bind coverage + replay suite, then switch default rollback to causal (keep temporal as flag).
+2. **Formalize G4** — syscall coverage matrix; fail-closed or explicit “untracked” effect kind when unsupported ops occur.
+3. **Extend G7** — add selective-commit preview and path-level rationale to the now-working recovery control plane.
+4. **Paper + G13** — write HLS draft while standing up BranchFS/Waypoint where artifacts allow; keep blocked baselines in an appendix table.
+5. **Perf G11** — treat “full tracing cost” as a first-class design point (sampling, trusted-manifest, or kernel support), not only micro-optimizations.
 
 ---
 

@@ -45,7 +45,10 @@ class CodingAgentHarness:
         self.auto_commit = auto_commit
         self.trace_reads = trace_reads
         self.tx = AgentTX.begin(
-            workdir=self.workdir, session_dir=session_dir, trace_reads=trace_reads
+            workdir=self.workdir,
+            session_dir=session_dir,
+            trace_reads=trace_reads,
+            commit_policy=self.policy,
         )
         self.tools: Dict[str, ToolFn] = {
             "write_file": self._write_file,
@@ -126,7 +129,6 @@ class CodingAgentHarness:
         committed = False
         if do_commit:
             up_to = max((r.step_id for r in records), default=-1)
-            self.policy.assert_committable(self.tx.ledger, up_to)
             self.tx.commit(up_to)
             committed = True
         return TrajectoryResult(records=records, wall_s=wall, committed=committed)

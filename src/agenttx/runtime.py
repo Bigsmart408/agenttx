@@ -13,6 +13,7 @@ from typing import List, Optional, Sequence
 from .commit_wal import CommitWAL
 from .effects import effects_from_paths
 from .ledger import Effect, EffectKind, Ledger
+from .policy import CommitPolicy
 from .semisolate import SharedSemisolate
 
 
@@ -74,10 +75,13 @@ class AgentTX:
     pool: Optional[SharedSemisolate] = None
     hide_network: bool = False
     trace_reads: bool = True
+    commit_policy: Optional[CommitPolicy] = None
     _meta_path: Optional[Path] = None
 
     def __post_init__(self) -> None:
         self.workspace = Path(self.workspace).resolve()
+        if self.commit_policy is None:
+            self.commit_policy = CommitPolicy(workdir=self.workspace)
 
     @classmethod
     def begin(
@@ -86,6 +90,7 @@ class AgentTX:
         session_dir: Optional[Path] = None,
         hide_network: bool = False,
         trace_reads: bool = True,
+        commit_policy: Optional[CommitPolicy] = None,
     ) -> "AgentTX":
         workdir = Path(workdir).resolve() if workdir else Path.cwd()
         pool = SharedSemisolate(
@@ -103,23 +108,36 @@ class AgentTX:
             pool=pool,
             hide_network=hide_network,
             trace_reads=trace_reads,
+            commit_policy=commit_policy,
         )
         tx._recover_commit_wal()
         tx._persist()
         return tx
 
     @classmethod
-    def load(cls, session_dir: Path) -> "AgentTX":
+    def load(
+        cls,
+        session_dir: Path,
+        commit_policy: Optional[CommitPolicy] = None,
+    ) -> "AgentTX":
         session_dir = Path(session_dir)
         meta = session_dir / "agenttx.json"
         if not meta.exists():
             raise FileNotFoundError(f"no agenttx.json in {session_dir}")
         data = json.loads(meta.read_text(encoding="utf-8"))
+        policy_data = data.get("commit_policy", {})
+        if commit_policy is None and policy_data:
+            commit_policy = CommitPolicy(
+                workdir=Path(data["workspace"]),
+                allow_globs=list(policy_data.get("allow_globs", ["**/*"])),
+                deny_globs=list(policy_data.get("deny_globs", [])),
+            )
         tx = cls(
             workspace=Path(data["workspace"]),
             ledger=Ledger.from_dict(data.get("ledger", {})),
             hide_network=bool(data.get("hide_network", False)),
             trace_reads=bool(data.get("trace_reads", True)),
+            commit_policy=commit_policy,
         )
         tx.pool = SharedSemisolate(
             workspace=tx.workspace,
@@ -164,11 +182,16 @@ class AgentTX:
 
     def _persist(self) -> None:
         assert self.pool is not None
+        assert self.commit_policy is not None
         meta = self.pool.session_dir / "agenttx.json"
         payload = {
             "workspace": str(self.workspace),
             "hide_network": self.hide_network,
             "trace_reads": self.trace_reads,
+            "commit_policy": {
+                "allow_globs": list(self.commit_policy.allow_globs),
+                "deny_globs": list(self.commit_policy.deny_globs),
+            },
             "ledger": self.ledger.to_dict(),
         }
         _atomic_write_json(meta, payload)
@@ -455,6 +478,8 @@ class AgentTX:
             up_to = max(active)
         if up_to <= self.ledger.committed_frontier:
             return self.ledger.committed_frontier
+        assert self.commit_policy is not None
+        self.commit_policy.assert_committable(self.ledger, up_to)
         paths, conflicts = self._commit_path_plan(up_to)
         historical_step = self._historical_snapshot_step(up_to) if conflicts else None
         assert self.pool is not None

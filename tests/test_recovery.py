@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 import agenttx.runtime as runtime_module
+from agenttx.policy import CommitPolicy, DEFAULT_DENY
 from agenttx.runtime import AgentTX
 
 
@@ -77,6 +78,32 @@ def test_trace_mode_survives_session_reload(tmp_path: Path) -> None:
         assert resumed.trace_reads is False
         assert resumed.pool is not None
         assert resumed.pool.trace_reads is False
+    finally:
+        resumed.close(destroy=True)
+
+
+def test_commit_policy_survives_session_reload(tmp_path: Path) -> None:
+    workspace = tmp_path / "policy-ws"
+    session = tmp_path / "policy-session"
+    workspace.mkdir()
+    policy = CommitPolicy(
+        workdir=workspace,
+        deny_globs=[*DEFAULT_DENY, "*.txt"],
+    )
+    tx = AgentTX.begin(
+        workdir=workspace,
+        session_dir=session,
+        commit_policy=policy,
+    )
+    tx.run_tool("write", ["bash", "-c", "echo blocked > blocked.txt"])
+    tx.close(destroy=False)
+
+    resumed = AgentTX.load(session)
+    try:
+        assert "*.txt" in resumed.commit_policy.deny_globs
+        with pytest.raises(PermissionError, match="commit blocked by policy"):
+            resumed.commit()
+        assert not (workspace / "blocked.txt").exists()
     finally:
         resumed.close(destroy=True)
 

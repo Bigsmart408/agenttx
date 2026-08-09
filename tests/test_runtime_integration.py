@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -40,6 +42,55 @@ def test_selective_commit_materializes_only_frontier_paths(tmp_path: Path) -> No
         assert (ws / "b.txt").read_text(encoding="utf-8") == "two\n"
     finally:
         tx.close(destroy=True)
+
+
+def test_direct_runtime_commit_enforces_default_policy(tmp_path: Path) -> None:
+    ws, tx = _begin(tmp_path, "policy-default")
+    try:
+        record = tx.run_tool(
+            "write-secret", ["bash", "-c", "echo secret > private.pem"]
+        )
+        assert record.returncode == 0
+        with pytest.raises(PermissionError, match="commit blocked by policy"):
+            tx.commit(record.step_id)
+        assert tx.ledger.committed_frontier == -1
+        assert tx.ledger.steps[record.step_id].status == "speculative"
+        assert not (ws / "private.pem").exists()
+    finally:
+        tx.close(destroy=True)
+
+
+def test_cli_commit_cannot_bypass_default_policy(tmp_path: Path) -> None:
+    ws, tx = _begin(tmp_path, "policy-cli")
+    assert tx.pool is not None
+    session = tx.pool.session_dir
+    tx.run_tool("write-secret", ["bash", "-c", "echo secret > private.pem"])
+    tx.close(destroy=False)
+
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "agenttx",
+                "commit",
+                "--session",
+                str(session),
+            ],
+            cwd=str(ROOT),
+            env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        assert result.returncode != 0
+        assert "commit blocked by policy" in result.stderr
+        assert not (ws / "private.pem").exists()
+    finally:
+        resumed = AgentTX.load(session)
+        resumed.close(destroy=True)
 
 
 def test_selective_commit_materializes_new_parent_directories(tmp_path: Path) -> None:
