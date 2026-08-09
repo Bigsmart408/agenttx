@@ -35,7 +35,7 @@ def test_motivation_notebooks_are_valid_and_use_agenttx_results() -> None:
     assert "motivation_runtime_comparison.csv" in plot
     assert "robustness.json" in tail
     assert "real_agent_robustness.json" in tail
-    assert "Optimization chain" in plot
+    assert "chain:" in plot
     assert "Real-agent refactor" in tail
 
 
@@ -64,3 +64,13 @@ def test_fast_style_scaling_notebooks_use_line_plots() -> None:
     assert "Trajectory length (# calls)" in tail
     assert "ax.bar" not in scaling
     assert "ax.bar" not in tail
+
+
+def test_causal_retention_notebook_uses_controlled_dag_results() -> None:
+    source = _code(ROOT / "motivation" / "plot_causal_retention.ipynb")
+    assert "causal_retention.csv" in source
+    assert "independent_retention_mean" in source
+    assert "target_removed_mean" in source
+    assert "rollback_ms_p95" in source
+    assert "ax.plot" in source
+    assert "ax.bar" not in source

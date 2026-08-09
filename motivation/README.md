@@ -35,14 +35,18 @@ The source pre-images remain under
 
 ## Notebook views
 
-The three notebooks use the OSDI-Pa paper plotting conventions (compact
-multi-panel figures, `bmh` grid styling, Roman-compatible fonts, and 300-dpi
-PDF export), but consume AgentTX-specific result artifacts:
+The notebooks use compact FAST/USENIX multi-panel line plots,
+Roman-compatible fonts, and 300-dpi PDF export, but consume AgentTX-specific
+result artifacts:
 
 - `plot.ipynb` combines the before/after optimization chain with the current
   bare/per-call/shared/AgentTX baselines.
 - `plot_tail.ipynb` shows deterministic p50/p95 tails alongside repeated
   real-agent task latency and success.
+- `plot_scaling.ipynb` and `plot_tail_scaling.ipynb` report length scaling.
+- `plot_causal_retention.ipynb` quantifies the central recovery claim: useful
+  work retained, invalid descendants removed, joint recovery utility, and
+  rollback p95 across controlled effect DAGs.
 - `report.ipynb` is a short narrative notebook that tabulates the same
   measurements for paper drafting.
 
@@ -54,13 +58,32 @@ jupyter nbconvert --to notebook --execute motivation/plot.ipynb \
   --output motivation/plot.executed.ipynb
 jupyter nbconvert --to notebook --execute motivation/plot_tail.ipynb \
   --output motivation/plot_tail.executed.ipynb
+jupyter nbconvert --to notebook --execute motivation/plot_causal_retention.ipynb \
+  --output motivation/plot_causal_retention.executed.ipynb
 jupyter nbconvert --to notebook --execute motivation/report.ipynb \
   --output motivation/report.executed.ipynb
 ```
 
-The plotting notebooks write `motivation/FIG-Motivation-Optimization.pdf`
-and `motivation/FIG-Motivation-Tail.pdf`; the report notebook is intended for
-interactive inspection and does not duplicate the source result files.
+The causal-retention notebook writes `motivation/FIG-Causal-Retention.{pdf,png}`;
+the report notebook is intended for interactive inspection and does not
+duplicate the source result files.
+
+## Quantitative causal-retention experiment
+
+The controlled effect-DAG benchmark sweeps trajectory length, dependency
+shape, fault position, and independent-work ratio. Causal, temporal, and
+whole-session recovery receive the same declared read effects; a fourth mode
+deliberately removes dependency capture to isolate why tracing/manifests are
+necessary.
+
+```bash
+PYTHONPATH=src:. python experiments/scripts/bench_causal_retention.py --repeats 3
+```
+
+It writes `causal_retention.{csv,json,md}` plus per-repeat raw CSV data. The
+benchmark checks both the speculative merged view and the host state after
+commit, so retention numbers are tied to actual AgentTX recovery rather than a
+symbolic DAG simulation.
 
 ## FAST-style multi-length line experiments
 
