@@ -1,0 +1,627 @@
+\documentclass[letterpaper,twocolumn,10pt]{article}
+\usepackage{usenix-2020-09}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{balance}
+\usepackage{url}
+\usepackage{microtype}
+\usepackage{xspace}
+
+\graphicspath{{../motivation/}}
+\setlist[itemize]{leftmargin=*,nosep}
+\newcommand{\system}{\textsc{AgentTX}\xspace}
+\newcommand{\aet}{\textsc{AET}\xspace}
+\newcommand{\trycmd}{\texttt{try}\xspace}
+
+\begin{document}
+\date{}
+\title{\Large \bf \system: Causal Effect Transactions for Long-Running Coding Agents}
+\author{Anonymous submission}
+\maketitle
+
+\begin{abstract}
+Coding agents execute long sequences of opaque tools that read, create, delete,
+and rewrite shared files.  Existing choices leave an undesirable gap: direct
+execution exposes the host to every intermediate mistake, while per-call
+sandboxes and whole-session checkpoints either break trajectory state or
+discard useful work after a failure.  We present \system, a runtime that treats
+an agent trajectory as a causal effect transaction.  At tool boundaries,
+\system captures read, negative-lookup, write, and delete effects, constructs a
+cross-step dependency DAG, and keeps mutations in a shared unprivileged
+semisolate.  A failed producer can be rolled back together with only its causal
+descendants; independent later work remains available.  A commit frontier,
+policy engine, content-addressed snapshots, and a write-ahead log make selected
+effects durable without exposing unapproved state.  Our Linux prototype is
+built on \trycmd and supports arbitrary subprocesses.  Across 144 controlled
+recovery runs, causal rollback retained all independent work and removed all
+invalid descendants; temporal rollback retained 41\% at 64 calls, while a
+dependency-capture ablation removed only 4\% of invalid work.  In a controlled
+real-agent replay study, causal retention avoided 1,336--2,891 tokens at the
+largest input.  Persistent workers reduce the full 64-call path to 148 ms per
+step, 43\% below naive per-call isolation, although it remains about 3$\times$
+slower than unsafe bare execution.
+\end{abstract}
+
+\section{Introduction}
+
+Coding agents increasingly act as long-running systems programs.  A single task
+may inspect a repository, edit several files, invoke compilers and tests, remove
+artifacts, revise a failed approach, and finally publish a subset of the work.
+The operating system sees a sequence of ordinary processes, but the user sees
+one adaptive trajectory whose intermediate effects should remain provisional.
+Today, every tool often writes directly to the host.  A wrong cleanup command,
+generated configuration, or faulty refactor therefore becomes visible before
+the agent or user has approved it.
+
+Sandboxing one command at a time prevents immediate pollution, but does not
+provide a transaction for the trajectory.  Later tools must observe earlier
+speculative files, and repeating namespace and overlay setup on every call is
+expensive.  A session sandbox preserves state, yet its native recovery unit is
+the entire session.  Temporal checkpoints improve that unit to a prefix, but a
+rollback still discards every later action, including actions unrelated to the
+failure.  Branch abstractions similarly select a whole branch rather than a
+non-contiguous subset within one branch~\cite{branchfs,waypoint,deltabox}.
+
+The key observation is that time is not causality.  Suppose an agent writes a
+faulty formatter, later generates a report by reading it, and independently
+updates release notes between the two.  Recovery should remove the formatter
+and report while retaining the release notes.  Doing so requires the runtime to
+discover effects of opaque commands, identify dependencies despite filesystem
+aliases, and reconstruct a state that never existed at a single point in time.
+
+We propose an \emph{agent effect transaction} (\aet), in which tool calls are
+the visible boundaries and filesystem effects are the transactional objects.
+\system captures successful reads and negative lookups from system calls,
+derives writes and deletes from an overlay, and records a causal effect DAG.
+All changes remain in a shared semisolate until an explicit commit.  On failure,
+\system computes the transitive causal closure and restores only paths written
+by that closure.  It fails closed if a retained effect overlaps a reconstructed
+path.  A commit frontier independently advances approved effects while later
+steps remain speculative.
+
+We implement \system as a roughly 3.5 K-line Python runtime on Linux.  It builds
+on the unprivileged semisolate and effect-control primitives of
+\trycmd~\cite{try-osdi26}; our contribution is the trajectory-level ledger,
+causal recovery, historical frontier materialization, policy enforcement, and
+durable commit recovery.  A persistent worker amortizes namespace setup, while
+incremental content-addressed snapshots preserve pre-step states.  A commit WAL
+restores the host and upper layer after an interrupted multi-path commit.
+
+Our current evaluation provides three main findings.  First, full \system is
+substantially faster than naive per-call isolation on a 64-call coding workload,
+although full tracing still costs about 3$\times$ bare execution.  Second,
+controlled real-overlay DAG experiments show that full causal recovery retains
+100\% of independent work and removes 100\% of invalid descendants; either
+temporal recovery or missing dependency capture loses one side of this goal.
+Third, the retained work translates into measurable model cost: at 48 entries
+per document, \system avoids 1,336 replay tokens relative to an optimistic
+checkpoint and 2,891 relative to whole-branch abort.
+
+This paper makes the following contributions:
+\begin{itemize}
+  \item It defines the \aet abstraction, including an effect DAG, a causal
+        rollback set, and a commit frontier for long adaptive trajectories.
+  \item It presents an unprivileged runtime that combines opaque-command effect
+        capture with selective reconstruction, durable snapshots, policy, and a
+        crash-recoverable commit path.
+  \item It evaluates both runtime and semantic outcomes, including optimization
+        history, dependency ablation, 144 controlled recovery runs, real-agent
+        recovery, replay tokens, worker crashes, session reload, and concurrency.
+\end{itemize}
+
+\section{Background and Problem}
+
+\subsection{Agent Trajectories and Effects}
+
+We model an agent trajectory as an ordered sequence of tool calls
+$T=\langle s_0, s_1, \ldots, s_n\rangle$.  A tool call can be a structured API,
+a shell script, a compiler, or an arbitrary third-party program.  The agent
+framework knows the boundary and requested arguments, but generally does not
+know the complete set of files read or changed by descendants of the process.
+The OS observes these effects but lacks the trajectory semantics needed to
+decide which state is approved or which later work depends on a mistake.
+
+For each step, \system records effects $E_i$ over workspace paths.  Effects are
+successful reads ($R$), negative lookups ($N$), writes ($W$), and deletes ($D$).
+Negative lookup is important: if step $i$ observes that a generated file does
+not exist and step $j$ later creates it, $j$ may invalidate the assumption made
+by $i$.  Directory ancestry is also relevant because changing a parent can
+alter the meaning or reachability of a child.
+
+\subsection{Isolation and Recovery Granularity}
+
+Table~\ref{tab:granularity} separates isolation from recovery semantics.  Bare
+execution has neither.  A per-call semisolate can discard one command, but it
+must explicitly carry successful state between calls and repeatedly pays setup
+cost.  A session sandbox stages a whole trajectory but naturally commits or
+aborts the session.  Temporal checkpoints retain a prefix.  None of these
+selects a producer and its non-contiguous descendants while preserving
+independent later work.
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{lllll}
+\toprule
+Mode & Speculative unit & Native recovery unit & Later independent work & Host before approval \\
+\midrule
+Bare & none & none & survives by immediate mutation & polluted \\
+Per-call semisolate & one call & one call & no continuous shared state & clean \\
+Session semisolate & trajectory & whole session & discarded on abort & clean \\
+Temporal checkpoint & trajectory prefix & suffix after checkpoint & discarded with suffix & clean \\
+\system & trajectory effect DAG & failed causal closure & retained when non-overlapping & clean \\
+\bottomrule
+\end{tabular}
+\caption{Isolation does not imply trajectory-level causal recovery.  The
+checkpoint and whole-session rows describe recovery granularity; they are not
+claims about a particular external artifact.}
+\label{tab:granularity}
+\end{table*}
+
+Semisolates and \trycmd provide powerful language-agnostic capture and optional
+application of effects~\cite{try-osdi26}.  \system deliberately reuses this
+substrate.  The missing abstraction is orchestration across a long trajectory:
+assigning step identities, recovering dependency edges, preserving historical
+states, selecting a non-contiguous rollback set, and durably advancing a commit
+frontier.
+
+\subsection{Goals and Scope}
+
+\system targets filesystem effects of trusted but fallible coding agents.  It
+must keep the host clean before approval, preserve normal POSIX tools, recover
+independent work, survive runtime crashes, and require no privileged daemon.
+The current prototype does not mediate irreversible network or cloud effects,
+does not capture process memory, and is not a security boundary against an
+adversarial process.  These boundaries distinguish recovery from confinement.
+
+\section{Observations and Motivation}
+
+\subsection{Why Simple Isolation Is Insufficient}
+
+We first run the same deterministic 64-call coding workload under six modes.
+The workload includes repository exploration, a multi-file refactor, an
+injected failing CI path, an artifact derived from the faulty file, independent
+documentation and configuration changes, and a repair suffix.  Bare execution
+is fastest at 49.7 ms per step but modifies the host immediately.  Per-call
+\trycmd costs 260.7 ms per step.  Full \system costs 148.5 ms per step and keeps
+the host clean, while the no-trace ablation costs 62.6 ms but cannot recover
+read-derived descendants correctly.
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.96\textwidth]{FIG-Motivation-Optimization.pdf}
+  \caption{Optimization history on the long deterministic workload.  The red
+  curve records the full path after each preserved source iteration.  A
+  persistent \trycmd worker removes repeated namespace setup and is the largest
+  endpoint improvement.  Values are VM-local; the final point is still above
+  unsafe bare execution.}
+  \label{fig:motivation-opt}
+\end{figure*}
+
+Figure~\ref{fig:motivation-opt} records the implementations before each hot-path
+optimization.  Declared effects for trusted tools avoid unnecessary tracing;
+reusable command scripts, deferred blob collection, and direct script execution
+remove smaller repeated costs.  A persistent worker reduces 393.6 to 151.5 ms
+per step by amortizing namespace and overlay setup.  Incremental snapshot replay
+reduces the snapshot stage from 0.384 to 0.158 s, but we do not present that
+substage result as an equivalent endpoint speedup.
+
+\subsection{Why Temporal Recovery Wastes Work}
+
+Consider steps $s_0:W(a)$, $s_1:R(a),W(b)$, and $s_2:W(c)$, followed by a
+failure attributed to $s_0$.  A whole-session abort loses $a$, $b$, and $c$.
+A temporal rollback to before $s_0$ has the same outcome.  The desired state
+removes $a$ and derived $b$ but retains independent $c$.  Longer trajectories
+interleave many such branches, so the useful work lost by a time boundary grows
+with the distance between failure and diagnosis.
+
+This distinction affects more than files.  Recreating valid artifacts requires
+the agent to reread context, regenerate content, invoke tools, and rerun checks.
+File retention is therefore a mechanism-level metric; avoided replay tokens are
+one direct user-visible consequence.
+
+\subsection{Three Systems Challenges}
+
+\paragraph{Dependency discovery.}
+Opaque commands hide their producer-consumer relationships.  Missing an edge
+keeps an invalid descendant; adding every temporal edge degenerates to suffix
+rollback.
+
+\paragraph{Object identity.}
+Paths are names, not stable objects.  Directory hierarchy, symlinks, hard links,
+renames, and OverlayFS copy-up can make lexical comparison either miss or invent
+dependencies.
+
+\paragraph{Selective reconstruction.}
+The desired post-recovery state may never have existed at a point in time.  The
+runtime must undo a non-contiguous set, preserve later independent effects,
+handle repeated writes and deletions, and remain recoverable across a partial
+host commit.
+
+These challenges motivate a trajectory abstraction in which dependency capture
+and state reconstruction are designed together.
+
+\section{Agent Effect Transactions}
+
+\subsection{Overview}
+
+\begin{figure*}[t]
+\centering
+\setlength{\fboxsep}{7pt}
+\small
+\fbox{Agent tool loop}
+$\longrightarrow$
+\fbox{Tool interceptor}
+$\longrightarrow$
+\fbox{Shared semisolate}
+$\longrightarrow$
+\fbox{R/N/W/D effects}
+$\longrightarrow$
+\fbox{Causal ledger}
+\\[8pt]
+\hspace{2.5cm}
+$\searrow$ \fbox{Causal rollback + selective reconstruction}
+\hspace{0.5cm}
+$\searrow$ \fbox{Policy + commit WAL}
+$\longrightarrow$ \fbox{Host filesystem}
+\caption{\system overview.  Commands execute against one shared speculative
+view.  The ledger determines causal recovery and the commit frontier; the host
+changes only after policy approval and WAL preparation.}
+\label{fig:overview}
+\end{figure*}
+
+Figure~\ref{fig:overview} shows the lifecycle.  A session owns a shared upper
+layer, a pre-step snapshot store, a ledger, and durable metadata.  Each command
+starts from the current merged view.  After execution, \system captures effects,
+adds one ledger node, persists the ledger, and leaves the upper layer
+speculative.  The agent or user can request causal rollback or advance a commit
+frontier.
+
+\subsection{Effect DAG}
+
+Each ledger node $s_i=(i,\mathrm{tool}_i,E_i,P_i,\mathrm{status}_i)$ contains
+effects and parent step identifiers.  Define $\mathrm{overlap}(p,q)$ when the
+normalized paths are equal or one is an ancestor of the other.  For an active
+earlier step $j<i$, \system adds $j\in P_i$ when:
+\begin{itemize}
+  \item $s_j$ writes or deletes $p$, and $s_i$ reads, negatively looks up,
+        writes, or deletes an overlapping $q$; or
+  \item $s_j$ negatively looks up $p$, and $s_i$ later writes overlapping $q$.
+\end{itemize}
+The first rule captures read-after-write and write serialization.  The second
+captures assumptions based on absence.  Alias canonicalization may add another
+effect path before edge construction.
+
+For a failed step $f$, causal rollback selects
+\begin{equation}
+  C(f)=\{f\}\cup\{s_i\mid P_i\cap C(f)\neq\emptyset\}^{*},
+\end{equation}
+the transitive descendant closure among active, uncommitted steps.  Temporal
+rollback remains available as the suffix $\{s_i\mid i\ge f\}$ for comparison
+and compatibility.
+
+\subsection{Selective Reconstruction}
+
+Let $W(C)$ be paths written or deleted by steps in $C(f)$.  \system restores
+each path in $W(C)$ from the snapshot captured before the earliest selected
+step.  Before reconstruction, it checks every effect of retained active steps.
+If a retained path overlaps $W(C)$, the runtime rejects the operation rather
+than guessing a merge.  This fail-closed rule trades availability for a simple
+safety invariant:
+
+\begin{quote}
+After a successful causal rollback, no effect written by $C(f)$ is visible, and
+every non-overlapping retained effect remains visible in the speculative view.
+\end{quote}
+
+The ledger marks selected nodes rolled back only after state reconstruction
+succeeds.  Snapshots for invalidated steps can then be reclaimed.
+
+\subsection{Commit Frontier}
+
+The committed frontier $F$ is the largest approved step identifier.  Advancing
+to $F'$ selects active $W/D$ effects in $(F,F']$.  Effects after $F'$ remain in
+the upper layer.  If later steps touch a selected path, \system uses the
+pre-later-step snapshot to materialize the historical version and then restores
+the later speculative state.  Policy is evaluated before any WAL or host
+materialization.  Rolled-back holes do not block monotonic frontier progress.
+
+\section{Design and Implementation}
+
+\subsection{Tool-Boundary Effect Capture}
+
+Writes and deletes are obtained by fingerprinting the unmounted upper layer
+before and after a command.  Fingerprints include content and metadata, thereby
+capturing repeated chmod, chown, touch, empty-directory, symlink, and whiteout
+effects.  Linux OverlayFS may encode deletions as character-device or
+\texttt{.wh.*} whiteouts; both forms are normalized to $D$ effects.
+
+Successful reads and ENOENT/ENOTDIR lookups are captured with
+\texttt{strace}~\cite{strace}.  The parser follows process creation, tracks each
+process working directory, resolves \texttt{*at} operations relative to file
+descriptors, and records both requested and returned paths when a symlink
+changes the pathname.  Only workspace-local paths enter the ledger.  Trusted
+structured tools can declare effects directly and bypass tracing.  Unsupported
+or missing tracing fails closed unless the caller explicitly chooses the
+no-trace ablation.
+
+\subsection{Shared Semisolate and Persistent Worker}
+
+All calls in a session reuse one \trycmd \texttt{-N} upper layer, so a later
+command observes earlier speculative state.  The optimized path starts a Python
+worker inside a persistent semisolate and exchanges length-prefixed requests and
+responses.  A worker failure falls back to the original one-shot path for the
+current command; the next command starts a fresh worker.  The launcher also
+synchronizes \texttt{\$PWD} with the protected workspace because changing a
+subprocess cwd alone leaves a stale environment variable that upstream
+\trycmd may use as its chroot start directory.
+
+\subsection{Snapshots and Aliases}
+
+Before step $i$, the layer store records \texttt{before\_i}.  Regular files are
+stored as immutable content-addressed blobs and hard-linked into snapshots.
+After the first step, an incremental snapshot clones the prior tree and replays
+only paths changed by the previous call.  Native whiteouts and mode-000 trees
+are preserved.  Causal rollback restores only selected logical paths; temporal
+rollback swaps the full upper tree to one pre-step image.
+
+Path hierarchy is handled by the overlap predicate.  For symlinks, \system
+resolves lexical ancestors in the merged host/upper view and records both alias
+and canonical effects.  Hard links expose a substrate boundary: on the tested
+Linux 5.15 OverlayFS path, writing one lower hard-link name copy-ups and splits
+that inode, so a sibling alias still reads old content.  Ledger-only
+canonicalization cannot repair semantics already lost below interception.
+
+\subsection{Durable Commit and Policy}
+
+Commit uses anchored include filters to materialize only selected paths.
+Directory and file metadata are restored after materialization.  Before touching
+the host, a WAL saves the selected host paths, the upper layer, the target
+frontier, and the prior ledger.  WAL phases distinguish prepared, applying,
+materialized, and committed states.  On session load, \system either restores
+the prior host/upper state or finalizes a durably persisted frontier.  Session
+metadata itself is written by same-directory atomic replace followed by file
+and directory fsync.
+
+A shared allow/deny policy is enforced by the runtime, CLI, coding harness, and
+LLM agent.  Denied paths fail before WAL preparation.  Policy rules persist in
+session metadata, preventing a reload from bypassing the original approval
+boundary.  The WAL makes recovery deterministic after a crash, but does not
+make a multi-path host update invisible to an external concurrent observer.
+
+\section{Evaluation}
+
+Our evaluation asks:
+\begin{itemize}
+  \item What overhead does trajectory isolation and dependency capture add?
+  \item Does causal rollback remove invalid work while retaining independent
+        work, and are both the dependency graph and policy necessary?
+  \item Can a live LLM use the recovery control plane, and does retained work
+        reduce replay tokens?
+  \item Does the optimized runtime survive worker failure, reload, long
+        sessions, and concurrent agents?
+\end{itemize}
+
+\subsection{Setup and Methodology}
+
+Experiments run on the project VM with Linux 5.15, the upstream \trycmd
+semisolate, OverlayFS, \texttt{strace}, and Python 3.11 for the evaluation
+environment.  Deterministic workloads report repeats, p50, and p95 where
+available.  Real-agent experiments use \texttt{deepseek-chat}.  All correctness
+experiments inspect both the speculative merged view and the host before and
+after commit.
+
+Runnable baselines include bare, per-call \trycmd, session/shared \trycmd,
+shared checkpoint components, bubblewrap where applicable, full \system, and a
+no-read-tracing ablation.  Temporal checkpoint and whole-branch/session abort in
+the retention and token studies are recovery-granularity emulations over the
+same underlying trajectory; we do not attribute their numbers to external
+artifacts.  BranchFS, Waypoint, and other recent systems are discussed
+qualitatively because their dependencies are unavailable on this VM.
+
+\subsection{Runtime Overhead and Scaling}
+
+The current 64-call comparison is summarized in
+Table~\ref{tab:runtime}.  Bare is not correctness-equivalent: it has a host
+pollution rate of one.  Full \system is 43\% faster than per-call isolation, but
+still 2.99$\times$ the bare per-step latency.  The gap between full and no-trace
+reflects both system-call tracing and the larger read-effect graph.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lrr}
+\toprule
+Mode & ms/step & Host clean \\
+\midrule
+Bare & 49.7 & no \\
+Per-call \trycmd & 260.7 & yes \\
+Shared \trycmd & 254.0 & yes \\
+Shared checkpoint & 63.5 & yes \\
+\system no-trace & 62.6 & yes \\
+\system full & 148.5 & yes \\
+\bottomrule
+\end{tabular}
+\caption{Current 64-call deterministic workload.  Lower latency alone does not
+imply equivalent recovery semantics.}
+\label{tab:runtime}
+\end{table}
+
+At lengths 54, 64, and 96, full \system costs 156.4, 139.5, and 107.0 ms per
+step; total wall time still grows from 8.45 to 10.27 s.  The falling per-step
+number therefore indicates amortized fixed cost, not faster long workloads.
+Full-path step p50 is 19.6--24.4 ms, while p95 is 684.8--724.0 ms, showing that
+tests, traces, and state boundaries dominate the tail.
+
+\subsection{Causal Retention and Dependency Ablation}
+
+We execute real filesystem effect DAGs rather than simulate graph nodes.  The
+sweep varies length (16/32/64), shape (chain/fan-out/layered), requested fault
+position (10/50/75\%), and independent-work ratio (25/50/75\%).  Four modes
+receive the same declared reads: causal, temporal, whole-session, and causal
+without dependency capture.  Three repeats yield 144 real-overlay runs over 48
+aggregated configurations; all keep the host clean before commit.
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.98\textwidth]{FIG-Causal-Retention.pdf}
+  \caption{Causal recovery retains useful work and removes invalid descendants.
+  At 64 calls, temporal recovery retains 41\% of independent work and
+  whole-session recovery retains none.  Removing dependency capture preserves
+  apparent work but removes only 4\% of the invalid subgraph.}
+  \label{fig:causal}
+\end{figure*}
+
+Figure~\ref{fig:causal} shows that full causal rollback retains 100\% of
+independent work and removes 100\% of invalid descendants in every configuration.
+At 64 calls, temporal rollback removes invalid work but retains only 41\% of
+independent work; whole-session discard retains 0\%.  The no-dependency ablation
+retains independent files but removes only 4\% of invalid work.  Thus selecting
+a small rollback set is not sufficient: dependency discovery and causal policy
+are jointly necessary.  Causal rollback p95 at 64 calls is 272.7 ms.
+
+\subsection{Real-Agent Recovery}
+
+We seed a repository with a faulty pipeline, an independent release note, an
+artifact derived from the fault, and failing tests.  A live LLM must inspect the
+ledger, select the earliest faulty producer, invoke causal rollback, retain the
+note, remove the artifact, repair the task, and pass tests.  Across three fresh
+sessions, root selection, target selection, independent retention, invalid
+removal, commit, and tests succeed in all runs.  The host leak rate is zero and
+wall p50/p95 is 29.0/30.8 s.  This experiment validates that the control plane is
+usable by a real tool-selecting agent, but it is not yet a large-repository or
+multi-package benchmark.
+
+\subsection{Avoided Replay Tokens}
+
+The token study isolates model work caused by recovery granularity.  A fixed
+five-step trajectory contains two valid documents separated by a faulty
+producer and its descendants.  Causal rollback retains both documents; an
+optimistic temporal checkpoint loses one; whole-branch abort loses two.  A real
+LLM regenerates only missing documents at 12, 24, and 48 entries, with three
+repeats per cell.
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.98\textwidth]{FIG-Token-Recovery.pdf}
+  \caption{Real LLM replay caused by recovery granularity.  Causal rollback
+  retains both valid documents and requires no document-regeneration call.
+  ``Zero'' excludes diagnosis, tests, rollback, and all tokens already consumed
+  before failure.}
+  \label{fig:tokens}
+\end{figure*}
+
+All 27 samples succeed with zero host leak.  At 48 entries, temporal recovery
+replays 1,335.7 mean tokens and whole abort replays 2,891.0; \system avoids both
+costs because no valid document is discarded (Figure~\ref{fig:tokens}).  These
+numbers are \emph{avoided replay tokens}, not total session-token savings, and
+the compared policies are granularity emulations rather than external systems.
+
+\subsection{Robustness and Resource Cost}
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.96\textwidth]{FIG-Robustness.pdf}
+  \caption{Tail, failure, long-session, and concurrency checks.  Heterogeneous
+  scenarios are kept in separate panels instead of collapsed into one score.}
+  \label{fig:robust}
+\end{figure*}
+
+An injected persistent-worker crash falls back to one-shot \trycmd for the
+current request and restarts the worker for the next.  A 256-step session is
+closed at step 128, reloaded, completed, and commits all 256 files with step
+p50/p95 36.3/72.3 ms.  Four concurrent agents, each writing 16 files in a
+separate workspace subtree, all commit without cross-contamination in 3.105 s.
+This test does not establish fencing for concurrent writes to the same path.
+
+Content-addressed snapshots store 9.1 MB of unique blobs for 100.7 MB of logical
+snapshot payload (9.0\%).  This reduces repeated content but does not eliminate
+directory traversal, historical snapshot, or WAL-copy costs.  Crash-injection
+tests also verify interrupted host materialization, persisted policies, native
+whiteouts, mode-000 trees, and metadata restoration.
+
+\section{Discussion and Limitations}
+
+\paragraph{Why not make causal rollback the default?}
+The explicit API is correct for path hierarchy and symlink aliases, but lower
+hard links split during OverlayFS copy-up on our substrate~\cite{overlayfs}.
+Because a sibling name can observe stale content before ledger analysis,
+default-on causal recovery requires a different FUSE/kernel substrate or
+stronger object mediation.  Bind-mount coverage is also incomplete.
+
+\paragraph{Why trace instead of infer commands?}
+Command strings are not a reliable specification of transitive compiler, test,
+or script reads.  System-call tracing observes actual accesses but adds
+workload-dependent cost and remains Linux-specific.  An eBPF implementation
+could reduce collection overhead and improve deployment, but would not remove
+the need to define alias and unsupported-syscall semantics.
+
+\paragraph{What state is outside the transaction?}
+The current \aet covers workspace-local filesystem effects.  Network requests,
+emails, package registries, cloud control planes, process memory, and terminal
+state may be irreversible or require subsystem-specific compensation.  Systems
+that capture full process/session state are complementary, not dominated by
+\system.
+
+\paragraph{Is commit atomic?}
+The WAL guarantees deterministic recovery of the session and host after an
+interrupted commit.  It does not provide kernel-level all-path atomic visibility
+to external observers during materialization.  Workloads requiring that
+property need a rename-based publication protocol or a transactional substrate.
+
+\paragraph{How strong is the current evidence?}
+Deterministic workloads cover up to 256 steps and controlled DAGs up to 64 calls.
+Real-agent runs are seeded and use one model.  Several recent external systems
+cannot run on the current VM because of FUSE, CRIU, kernel, compiler, or
+privilege requirements.  A final submission needs broader repositories,
+interleaved statistical runs, and artifact-level comparisons where available.
+
+\section{Related Work}
+
+\paragraph{Effect capture and semisolates.}
+\trycmd introduces unprivileged semisolates for opaque commands, including
+effect introspection, optional application, and stacking~\cite{try-osdi26}.
+\system uses these mechanisms as its execution substrate.  Its focus is the
+long-lived trajectory: automatic cross-step dependencies, non-contiguous causal
+recovery, frontier materialization, policy persistence, and commit WAL.
+
+\paragraph{Agent-native filesystems and branches.}
+YoloFS stages mutations, exposes snapshots, and uses progressive permission to
+improve agent/user control~\cite{yolofs}.  Its filesystem mediation and
+permission interface are broader than \system's current substrate.  BranchFS
+provides nested copy-on-write branch contexts with atomic leaf commit/abort and
+first-commit-wins coordination~\cite{branchfs}.  These systems select snapshots
+or branches; \system selects a causal subgraph inside one evolving trajectory.
+
+\paragraph{Checkpoint and restore.}
+Waypoint combines filesystem deltas with process, memory, shell, and terminal
+state for branchable sessions~\cite{waypoint}.  DeltaBox accelerates complete
+sandbox checkpoint/rollback using incremental filesystem and process
+state~\cite{deltabox}.  Crab observes turn-level effects to avoid checkpoints
+that do not contain recovery-relevant state~\cite{crab}.  Their state coverage
+or checkpoint efficiency is complementary to \system.  \system instead answers
+which non-contiguous filesystem effects to remove after a failure has been
+identified.
+
+\section{Conclusion}
+
+Long-running coding agents need a transaction boundary larger than one command
+and a recovery unit smaller than one session.  \system represents a trajectory
+as a causal effect transaction: opaque tool effects form a dependency DAG,
+mutations remain speculative in a shared semisolate, causal rollback removes a
+failed producer and its descendants, and a durable commit frontier publishes
+approved effects.  The prototype demonstrates perfect useful-work retention and
+invalid-descendant removal in the current controlled DAG suite, converts that
+retention into measurable replay-token savings, and survives worker crashes,
+session reload, and disjoint concurrency.  The remaining agenda is equally
+clear: stronger object-identity semantics, lower tracing and snapshot overhead,
+non-filesystem compensation, and broader external baseline evaluation.
+
+\balance
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}
