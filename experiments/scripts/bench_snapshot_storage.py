@@ -74,7 +74,7 @@ def main() -> int:
         out = ROOT / "experiments" / "results"
         out.mkdir(parents=True, exist_ok=True)
         with (out / "snapshot_storage.csv").open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=list(row))
+            writer = csv.DictWriter(handle, fieldnames=list(row), lineterminator="\n")
             writer.writeheader()
             writer.writerow(row)
         (out / "snapshot_storage.md").write_text(

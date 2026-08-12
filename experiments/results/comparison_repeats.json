@@ -1,0 +1,233 @@
+{
+  "suite": "comparison_repeats",
+  "repeats": 50,
+  "n_calls": 10,
+  "overhead": [
+    {
+      "mode": "bare",
+      "supported": true,
+      "samples": 50,
+      "repeats_requested": 50,
+      "n_calls": 10,
+      "wall_s_mean": 0.016317,
+      "wall_s_stdev": 0.001021,
+      "wall_s_p50": 0.016195,
+      "wall_s_p95": 0.016685,
+      "wall_s_p99": 0.02003,
+      "per_step_ms_mean": 1.632,
+      "per_step_ms_p50": 1.619,
+      "per_step_ms_p95": 1.668,
+      "per_step_ms_p99": 2.003,
+      "note": ""
+    },
+    {
+      "mode": "per_call_try",
+      "supported": true,
+      "samples": 50,
+      "repeats_requested": 50,
+      "n_calls": 10,
+      "wall_s_mean": 2.453645,
+      "wall_s_stdev": 0.028538,
+      "wall_s_p50": 2.457419,
+      "wall_s_p95": 2.505646,
+      "wall_s_p99": 2.521124,
+      "per_step_ms_mean": 245.365,
+      "per_step_ms_p50": 245.742,
+      "per_step_ms_p95": 250.565,
+      "per_step_ms_p99": 252.112,
+      "note": ""
+    },
+    {
+      "mode": "session_try",
+      "supported": true,
+      "samples": 50,
+      "repeats_requested": 50,
+      "n_calls": 10,
+      "wall_s_mean": 0.24,
+      "wall_s_stdev": 0.004286,
+      "wall_s_p50": 0.239817,
+      "wall_s_p95": 0.245375,
+      "wall_s_p99": 0.252843,
+      "per_step_ms_mean": 24.0,
+      "per_step_ms_p50": 23.982,
+      "per_step_ms_p95": 24.537,
+      "per_step_ms_p99": 25.284,
+      "note": ""
+    },
+    {
+      "mode": "shared_try",
+      "supported": true,
+      "samples": 50,
+      "repeats_requested": 50,
+      "n_calls": 10,
+      "wall_s_mean": 2.371801,
+      "wall_s_stdev": 0.027955,
+      "wall_s_p50": 2.358766,
+      "wall_s_p95": 2.42729,
+      "wall_s_p99": 2.446674,
+      "per_step_ms_mean": 237.18,
+      "per_step_ms_p50": 235.877,
+      "per_step_ms_p95": 242.729,
+      "per_step_ms_p99": 244.667,
+      "note": ""
+    },
+    {
+      "mode": "shared_checkpoint",
+      "supported": true,
+      "samples": 50,
+      "repeats_requested": 50,
+      "n_calls": 10,
+      "wall_s_mean": 0.371957,
+      "wall_s_stdev": 0.005418,
+      "wall_s_p50": 0.370782,
+      "wall_s_p95": 0.376797,
+      "wall_s_p99": 0.395283,
+      "per_step_ms_mean": 37.196,
+      "per_step_ms_p50": 37.078,
+      "per_step_ms_p95": 37.68,
+      "per_step_ms_p99": 39.528,
+      "note": ""
+    },
+    {
+      "mode": "bubblewrap",
+      "supported": true,
+      "samples": 50,
+      "repeats_requested": 50,
+      "n_calls": 10,
+      "wall_s_mean": 0.008505,
+      "wall_s_stdev": 0.000289,
+      "wall_s_p50": 0.008444,
+      "wall_s_p95": 0.008713,
+      "wall_s_p99": 0.009751,
+      "per_step_ms_mean": 0.85,
+      "per_step_ms_p50": 0.844,
+      "per_step_ms_p95": 0.871,
+      "per_step_ms_p99": 0.975,
+      "note": ""
+    },
+    {
+      "mode": "agenttx_without_read_tracing",
+      "supported": true,
+      "samples": 50,
+      "repeats_requested": 50,
+      "n_calls": 10,
+      "wall_s_mean": 0.405469,
+      "wall_s_stdev": 0.005283,
+      "wall_s_p50": 0.404533,
+      "wall_s_p95": 0.409227,
+      "wall_s_p99": 0.428798,
+      "per_step_ms_mean": 40.547,
+      "per_step_ms_p50": 40.453,
+      "per_step_ms_p95": 40.923,
+      "per_step_ms_p99": 42.88,
+      "note": ""
+    },
+    {
+      "mode": "agenttx_full",
+      "supported": true,
+      "samples": 50,
+      "repeats_requested": 50,
+      "n_calls": 10,
+      "wall_s_mean": 0.496889,
+      "wall_s_stdev": 0.004711,
+      "wall_s_p50": 0.495987,
+      "wall_s_p95": 0.508998,
+      "wall_s_p99": 0.511457,
+      "per_step_ms_mean": 49.689,
+      "per_step_ms_p50": 49.599,
+      "per_step_ms_p95": 50.9,
+      "per_step_ms_p99": 51.146,
+      "note": ""
+    }
+  ],
+  "recovery": [
+    {
+      "mode": "bare",
+      "samples": 50,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 0.0,
+      "notes": [
+        "host writes visible before recovery; whole cleanup loses c"
+      ]
+    },
+    {
+      "mode": "per_call_try",
+      "samples": 50,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "isolated calls cannot pass a from step 0 to step 1"
+      ]
+    },
+    {
+      "mode": "session_try",
+      "samples": 50,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "one session can see state, but abort discards the whole session"
+      ]
+    },
+    {
+      "mode": "shared_try",
+      "samples": 50,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "shared upperdir preserves state, but recovery is whole-session discard"
+      ]
+    },
+    {
+      "mode": "shared_checkpoint",
+      "samples": 50,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "full checkpoint restore removes independent c with the failed prefix"
+      ]
+    },
+    {
+      "mode": "bubblewrap",
+      "samples": 50,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "whole-session namespace abort; no causal retention"
+      ]
+    },
+    {
+      "mode": "agenttx_without_read_tracing",
+      "samples": 50,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "causal targets=[0]; read tracing=False"
+      ]
+    },
+    {
+      "mode": "agenttx_full",
+      "samples": 50,
+      "supported_rate": 1.0,
+      "causal_correct_count": 50,
+      "causal_correct_rate": 1.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "causal targets=[0, 1]; read tracing=True"
+      ]
+    }
+  ]
+}

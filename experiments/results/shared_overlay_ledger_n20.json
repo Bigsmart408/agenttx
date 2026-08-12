@@ -6,7 +6,7 @@
       "tool_name": "shell",
       "effects": [
         {
-          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "path": "/tmp/agenttx-shared-bench-mghd3mib/shared_overlay-2/out.txt",
           "kind": "W"
         }
       ],
@@ -18,7 +18,7 @@
       "tool_name": "shell",
       "effects": [
         {
-          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "path": "/tmp/agenttx-shared-bench-mghd3mib/shared_overlay-2/out.txt",
           "kind": "W"
         }
       ],
@@ -32,11 +32,12 @@
       "tool_name": "shell",
       "effects": [
         {
-          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "path": "/tmp/agenttx-shared-bench-mghd3mib/shared_overlay-2/out.txt",
           "kind": "W"
         }
       ],
       "parents": [
+        0,
         1
       ],
       "status": "speculative"
@@ -46,11 +47,13 @@
       "tool_name": "shell",
       "effects": [
         {
-          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "path": "/tmp/agenttx-shared-bench-mghd3mib/shared_overlay-2/out.txt",
           "kind": "W"
         }
       ],
       "parents": [
+        0,
+        1,
         2
       ],
       "status": "speculative"
@@ -60,11 +63,14 @@
       "tool_name": "shell",
       "effects": [
         {
-          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "path": "/tmp/agenttx-shared-bench-mghd3mib/shared_overlay-2/out.txt",
           "kind": "W"
         }
       ],
       "parents": [
+        0,
+        1,
+        2,
         3
       ],
       "status": "speculative"
@@ -74,11 +80,15 @@
       "tool_name": "shell",
       "effects": [
         {
-          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "path": "/tmp/agenttx-shared-bench-mghd3mib/shared_overlay-2/out.txt",
           "kind": "W"
         }
       ],
       "parents": [
+        0,
+        1,
+        2,
+        3,
         4
       ],
       "status": "speculative"
@@ -88,11 +98,16 @@
       "tool_name": "shell",
       "effects": [
         {
-          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "path": "/tmp/agenttx-shared-bench-mghd3mib/shared_overlay-2/out.txt",
           "kind": "W"
         }
       ],
       "parents": [
+        0,
+        1,
+        2,
+        3,
+        4,
         5
       ],
       "status": "speculative"
@@ -102,11 +117,17 @@
       "tool_name": "shell",
       "effects": [
         {
-          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "path": "/tmp/agenttx-shared-bench-mghd3mib/shared_overlay-2/out.txt",
           "kind": "W"
         }
       ],
       "parents": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
         6
       ],
       "status": "speculative"
@@ -116,11 +137,18 @@
       "tool_name": "shell",
       "effects": [
         {
-          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "path": "/tmp/agenttx-shared-bench-mghd3mib/shared_overlay-2/out.txt",
           "kind": "W"
         }
       ],
       "parents": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
         7
       ],
       "status": "speculative"
@@ -130,11 +158,19 @@
       "tool_name": "shell",
       "effects": [
         {
-          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "path": "/tmp/agenttx-shared-bench-mghd3mib/shared_overlay-2/out.txt",
           "kind": "W"
         }
       ],
       "parents": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
         8
       ],
       "status": "speculative"
@@ -144,11 +180,20 @@
       "tool_name": "shell",
       "effects": [
         {
-          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "path": "/tmp/agenttx-shared-bench-mghd3mib/shared_overlay-2/out.txt",
           "kind": "W"
         }
       ],
       "parents": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
         9
       ],
       "status": "speculative"
@@ -158,11 +203,21 @@
       "tool_name": "shell",
       "effects": [
         {
-          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "path": "/tmp/agenttx-shared-bench-mghd3mib/shared_overlay-2/out.txt",
           "kind": "W"
         }
       ],
       "parents": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
         10
       ],
       "status": "speculative"
@@ -172,11 +227,22 @@
       "tool_name": "shell",
       "effects": [
         {
-          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "path": "/tmp/agenttx-shared-bench-mghd3mib/shared_overlay-2/out.txt",
           "kind": "W"
         }
       ],
       "parents": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
         11
       ],
       "status": "speculative"
@@ -186,11 +252,23 @@
       "tool_name": "shell",
       "effects": [
         {
-          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "path": "/tmp/agenttx-shared-bench-mghd3mib/shared_overlay-2/out.txt",
           "kind": "W"
         }
       ],
       "parents": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
         12
       ],
       "status": "speculative"
@@ -200,11 +278,24 @@
       "tool_name": "shell",
       "effects": [
         {
-          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "path": "/tmp/agenttx-shared-bench-mghd3mib/shared_overlay-2/out.txt",
           "kind": "W"
         }
       ],
       "parents": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
         13
       ],
       "status": "speculative"
@@ -214,11 +305,25 @@
       "tool_name": "shell",
       "effects": [
         {
-          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "path": "/tmp/agenttx-shared-bench-mghd3mib/shared_overlay-2/out.txt",
           "kind": "W"
         }
       ],
       "parents": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
         14
       ],
       "status": "speculative"
@@ -228,11 +333,26 @@
       "tool_name": "shell",
       "effects": [
         {
-          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "path": "/tmp/agenttx-shared-bench-mghd3mib/shared_overlay-2/out.txt",
           "kind": "W"
         }
       ],
       "parents": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
         15
       ],
       "status": "speculative"
@@ -242,11 +362,27 @@
       "tool_name": "shell",
       "effects": [
         {
-          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "path": "/tmp/agenttx-shared-bench-mghd3mib/shared_overlay-2/out.txt",
           "kind": "W"
         }
       ],
       "parents": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
         16
       ],
       "status": "speculative"
@@ -256,11 +392,28 @@
       "tool_name": "shell",
       "effects": [
         {
-          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "path": "/tmp/agenttx-shared-bench-mghd3mib/shared_overlay-2/out.txt",
           "kind": "W"
         }
       ],
       "parents": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
         17
       ],
       "status": "speculative"
@@ -270,11 +423,29 @@
       "tool_name": "shell",
       "effects": [
         {
-          "path": "/tmp/agenttx-shared-bench-vzbufhwl/shared_overlay-2/out.txt",
+          "path": "/tmp/agenttx-shared-bench-mghd3mib/shared_overlay-2/out.txt",
           "kind": "W"
         }
       ],
       "parents": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
         18
       ],
       "status": "speculative"

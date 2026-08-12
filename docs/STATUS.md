@@ -51,6 +51,7 @@ Last updated: 2026-08-09 (VM `/home/bfq/agenttx`).
 | Optimization iteration history | P1 before/after source snapshots, known-tool tracing bypass, persistent command-script reuse, deferred blob GC, direct script execution, persistent try worker, and incremental upperdir snapshots | `src/agenttx/optimization_history/`, `step18-optimization-iterations.md` |
 | Robustness evaluation | Step 19 deterministic p50/p95 tails, worker crash injection/fallback, reloadable long session, concurrent isolated agents, and real LLM-agent repeats | `robustness.{csv,json,md}`, `real_agent_robustness.{csv,json,md}`, `step19-robustness-evaluation.md` |
 | Motivation optimization chain | Paper-oriented summary and rerunnable current baseline comparison for all hot-path iterations | `motivation/`, `motivation_optimization_history.{csv,json,md}`, `motivation_runtime_comparison.{csv,json,md}` |
+| tiao2 remote comparison refresh | ARM64 VM rerun of comparison, long-workload scaling, causal retention, tracing, snapshot, robustness, and external-baseline probes | `docs/tiao2-comparison-run.md`, refreshed `experiments/results/*` |
 | Quantitative causal retention | Step 20 controlled DAG sweep over size, shape, fault position, and independence; causal/temporal/whole-session plus dependency-capture ablation | `causal_retention.{csv,json,md}`, `causal_retention_raw.csv`, `step20-causal-retention-evaluation.md` |
 | Real-agent causal recovery | Step 21 DeepSeek ledger inspection, faulty-root selection, causal rollback, independent-work retention, and repaired commit over three fresh sessions | `real_agent_recovery.{csv,json,md}`, `step21-real-agent-causal-recovery.md` |
 | Uniform commit-policy enforcement | Step 22 direct runtime, CLI subprocess, and session-reload checks prove denied paths cannot bypass policy | `test_runtime_integration.py`, `test_recovery.py`, `step22-runtime-commit-policy.md` |
@@ -101,7 +102,7 @@ Last updated: 2026-08-09 (VM `/home/bfq/agenttx`).
 
 ### Evaluation gaps
 8. Harder / longer agent workloads: deterministic 54/64/96-call scaling, a reloadable 256-step session, controlled 16/32/64-call causal DAGs, and real-agent requested recovery are covered by Steps 16-21; real multi-package LLM agents remain.
-9. External baselines: BranchFS/Waypoint/Sandlock/YoloFS/DeltaBox/Crab/Cordon remain artifact- or environment-blocked; current VM matrix covers the runnable references and records the blockers.
+9. External baselines: tiao2 now runs the previously missing bubblewrap lower bound. BranchFS was cloned but its ARM64 build is blocked by the host Cargo 1.75/fuser API mismatch; Waypoint is blocked by the missing CRIU executable; Sandlock/YoloFS/DeltaBox/Crab/Cordon remain artifact- or environment-blocked. See `docs/tiao2-comparison-run.md` for command-level evidence.
 10. Stronger Aider (or other agents) bakeoff with fair timeouts and success criteria.
 11. Statistical repeats / variance reporting for real LLM runs (cost-aware) remains open; deterministic runtime tails now have p50/p95 coverage.
     Step 24 adds three repeats and p50/p95 for controlled LLM replay cost; broader autonomous multi-model repeats remain open.

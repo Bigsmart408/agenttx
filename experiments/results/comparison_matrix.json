@@ -5,9 +5,9 @@
     "supported": true,
     "repeats": 3,
     "n_calls": 10,
-    "wall_s_mean": 0.030735,
-    "wall_s_stdev": 0.001041,
-    "per_step_ms": 3.073,
+    "wall_s_mean": 0.016411,
+    "wall_s_stdev": 0.000338,
+    "per_step_ms": 1.641,
     "note": ""
   },
   {
@@ -16,9 +16,9 @@
     "supported": true,
     "repeats": 3,
     "n_calls": 10,
-    "wall_s_mean": 2.608234,
-    "wall_s_stdev": 0.021426,
-    "per_step_ms": 260.823,
+    "wall_s_mean": 2.390725,
+    "wall_s_stdev": 0.006043,
+    "per_step_ms": 239.072,
     "note": ""
   },
   {
@@ -27,9 +27,9 @@
     "supported": true,
     "repeats": 3,
     "n_calls": 10,
-    "wall_s_mean": 0.25024,
-    "wall_s_stdev": 0.025951,
-    "per_step_ms": 25.024,
+    "wall_s_mean": 0.234114,
+    "wall_s_stdev": 0.002231,
+    "per_step_ms": 23.411,
     "note": ""
   },
   {
@@ -38,9 +38,9 @@
     "supported": true,
     "repeats": 3,
     "n_calls": 10,
-    "wall_s_mean": 2.552706,
-    "wall_s_stdev": 0.066535,
-    "per_step_ms": 255.271,
+    "wall_s_mean": 2.35546,
+    "wall_s_stdev": 0.017137,
+    "per_step_ms": 235.546,
     "note": ""
   },
   {
@@ -49,9 +49,9 @@
     "supported": true,
     "repeats": 3,
     "n_calls": 10,
-    "wall_s_mean": 2.616077,
-    "wall_s_stdev": 0.068924,
-    "per_step_ms": 261.608,
+    "wall_s_mean": 0.366428,
+    "wall_s_stdev": 0.001472,
+    "per_step_ms": 36.643,
     "note": ""
   },
   {
@@ -60,9 +60,9 @@
     "supported": true,
     "repeats": 3,
     "n_calls": 10,
-    "wall_s_mean": 0.017312,
-    "wall_s_stdev": 0.000762,
-    "per_step_ms": 1.731,
+    "wall_s_mean": 0.008478,
+    "wall_s_stdev": 0.000189,
+    "per_step_ms": 0.848,
     "note": ""
   },
   {
@@ -71,9 +71,9 @@
     "supported": true,
     "repeats": 3,
     "n_calls": 10,
-    "wall_s_mean": 2.761809,
-    "wall_s_stdev": 0.080699,
-    "per_step_ms": 276.181,
+    "wall_s_mean": 0.399126,
+    "wall_s_stdev": 0.001698,
+    "per_step_ms": 39.913,
     "note": ""
   },
   {
@@ -82,9 +82,9 @@
     "supported": true,
     "repeats": 3,
     "n_calls": 10,
-    "wall_s_mean": 3.077769,
-    "wall_s_stdev": 0.107471,
-    "per_step_ms": 307.777,
+    "wall_s_mean": 0.488148,
+    "wall_s_stdev": 0.001926,
+    "per_step_ms": 48.815,
     "note": ""
   },
   {

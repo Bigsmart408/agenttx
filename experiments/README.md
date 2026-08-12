@@ -176,3 +176,12 @@ are deterministic presentation layers and can be executed independently:
 
 The hardlink-alias probe is deliberately not plotted: it is a single semantic
 counterexample defining the inode-alias boundary, not a quantitative sweep.
+
+## tiao2 remote comparison refresh
+
+The ARM64 `tiao2` run, including the root-compatible `try` profile, refreshed
+the primary comparison matrix, 64-step workload, scaling, causal-retention,
+tracing, snapshot, and robustness artifacts.  It also records the attempted
+BranchFS build and the Waypoint/CRIU blocker without fabricating external
+numbers.  See [`docs/tiao2-comparison-run.md`](../docs/tiao2-comparison-run.md)
+for the exact host profile, commands, results, and external-baseline status.

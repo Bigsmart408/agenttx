@@ -1,0 +1,17 @@
+causal_correct_count,causal_correct_rate,host_clean_rate,mode,n_calls,note,notes,per_step_ms_mean,per_step_ms_p50,per_step_ms_p95,per_step_ms_p99,repeats_requested,samples,suite,supported,supported_rate,wall_s_mean,wall_s_p50,wall_s_p95,wall_s_p99,wall_s_stdev
+,,,bare,10,,,1.632,1.619,1.668,2.003,50,50,overhead,True,,0.016317,0.016195,0.016685,0.02003,0.001021
+,,,per_call_try,10,,,245.365,245.742,250.565,252.112,50,50,overhead,True,,2.453645,2.457419,2.505646,2.521124,0.028538
+,,,session_try,10,,,24.0,23.982,24.537,25.284,50,50,overhead,True,,0.24,0.239817,0.245375,0.252843,0.004286
+,,,shared_try,10,,,237.18,235.877,242.729,244.667,50,50,overhead,True,,2.371801,2.358766,2.42729,2.446674,0.027955
+,,,shared_checkpoint,10,,,37.196,37.078,37.68,39.528,50,50,overhead,True,,0.371957,0.370782,0.376797,0.395283,0.005418
+,,,bubblewrap,10,,,0.85,0.844,0.871,0.975,50,50,overhead,True,,0.008505,0.008444,0.008713,0.009751,0.000289
+,,,agenttx_without_read_tracing,10,,,40.547,40.453,40.923,42.88,50,50,overhead,True,,0.405469,0.404533,0.409227,0.428798,0.005283
+,,,agenttx_full,10,,,49.689,49.599,50.9,51.146,50,50,overhead,True,,0.496889,0.495987,0.508998,0.511457,0.004711
+0,0.0,0.0,bare,,,['host writes visible before recovery; whole cleanup loses c'],,,,,,50,recovery,,1.0,,,,,
+0,0.0,1.0,per_call_try,,,['isolated calls cannot pass a from step 0 to step 1'],,,,,,50,recovery,,1.0,,,,,
+0,0.0,1.0,session_try,,,"['one session can see state, but abort discards the whole session']",,,,,,50,recovery,,1.0,,,,,
+0,0.0,1.0,shared_try,,,"['shared upperdir preserves state, but recovery is whole-session discard']",,,,,,50,recovery,,1.0,,,,,
+0,0.0,1.0,shared_checkpoint,,,['full checkpoint restore removes independent c with the failed prefix'],,,,,,50,recovery,,1.0,,,,,
+0,0.0,1.0,bubblewrap,,,['whole-session namespace abort; no causal retention'],,,,,,50,recovery,,1.0,,,,,
+0,0.0,1.0,agenttx_without_read_tracing,,,['causal targets=[0]; read tracing=False'],,,,,,50,recovery,,1.0,,,,,
+50,1.0,1.0,agenttx_full,,,"['causal targets=[0, 1]; read tracing=True']",,,,,,50,recovery,,1.0,,,,,
