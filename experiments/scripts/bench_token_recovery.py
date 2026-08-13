@@ -26,12 +26,17 @@ from experiments.scripts.bench_real_agent import (  # noqa: E402
     load_llm_env,
 )
 from experiments.scripts.bench_robustness import percentile  # noqa: E402
+from experiments.scripts.runtime_preflight import (  # noqa: E402
+    format_preflight,
+    runtime_preflight,
+)
 from experiments.workloads.token_recovery_agent import (  # noqa: E402
     CORRECT_PIPELINE,
     DOCUMENT_LINES,
     inject_token_recovery_trajectory,
     seed_token_recovery_repo,
 )
+from agenttx.providers import configured_provider, provider_names, provider_result_dir, resolve_provider  # noqa: E402
 
 
 MODES = ("causal", "temporal_checkpoint", "whole_branch_abort")
@@ -165,6 +170,7 @@ def run_once(
     mode: str,
     repeat: int,
     model: Optional[str],
+    provider: Optional[str],
     document_lines: int = DOCUMENT_LINES,
 ) -> dict:
     from agenttx.agents.llm_agent import LLMToolAgent
@@ -202,6 +208,7 @@ def run_once(
             workdir=workdir,
             session_dir=scratch / "session",
             model=model,
+            provider=provider,
         )
         injected = inject_token_recovery_trajectory(agent, document_lines)
         graph_valid = bool(
@@ -296,9 +303,8 @@ def run_once(
         "mode": mode,
         "document_lines": document_lines,
         "repeat": repeat,
-        "model": model
-        or os.environ.get("AGENTTX_MODEL")
-        or os.environ.get("OPENAI_MODEL", "default"),
+        "provider": resolve_provider(provider).name,
+        "model": model or resolve_provider(provider).model,
         "wall_s": round(time.perf_counter() - started, 6),
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
@@ -333,6 +339,7 @@ def summarize(rows: Sequence[dict]) -> List[dict]:
             item = {
                 "document_lines": document_lines,
                 "mode": mode,
+                "provider": samples[0].get("provider", ""),
                 "model": samples[0]["model"],
                 "repeats": len(samples),
                 "success_rate": round(
@@ -389,8 +396,8 @@ def summarize(rows: Sequence[dict]) -> List[dict]:
     return summary
 
 
-def write_outputs(raw_rows: Sequence[dict], summary_rows: Sequence[dict]) -> None:
-    output = ROOT / "experiments" / "results"
+def write_outputs(raw_rows: Sequence[dict], summary_rows: Sequence[dict], provider: Optional[str] = None) -> None:
+    output = provider_result_dir(ROOT, provider)
     output.mkdir(parents=True, exist_ok=True)
     raw_fields = list(raw_rows[0]) if raw_rows else []
     with (output / "token_recovery_raw.csv").open(
@@ -421,7 +428,7 @@ def write_outputs(raw_rows: Sequence[dict], summary_rows: Sequence[dict]) -> Non
     lines = [
         "# Real-agent replay-token cost after recovery",
         "",
-        "Actual API usage from controlled DeepSeek `write_file` replay calls. Common deterministic validation and AgentTX runtime work are excluded, so the metric isolates LLM work that must be regenerated only because a recovery policy discarded an otherwise valid artifact.",
+        f"Actual API usage from controlled `{summary_rows[0]['provider'] if summary_rows else 'provider'}` `write_file` replay calls. Common deterministic validation and AgentTX runtime work are excluded, so the metric isolates LLM work that must be regenerated only because a recovery policy discarded an otherwise valid artifact.",
         "",
         "`temporal_checkpoint` is an optimistic immediate pre-fault checkpoint policy; `whole_branch_abort` represents coarse leaf/session abort. These are native recovery-granularity emulations, not executions of external artifacts.",
         "",
@@ -453,13 +460,33 @@ def main() -> int:
         "--document-lines", nargs="+", type=int, default=[DOCUMENT_LINES]
     )
     parser.add_argument("--model", default=None)
+    parser.add_argument("--provider", choices=provider_names(), default=None)
+    parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="check strace/try/overlay support without contacting an API",
+    )
+    parser.add_argument(
+        "--allow-skip",
+        action="store_true",
+        help="return success when credentials are absent (optional CI only)",
+    )
     args = parser.parse_args()
     if args.repeats <= 0 or min(args.document_lines) <= 0:
         parser.error("repeats and document-lines must be positive")
     load_llm_env()
-    if not (os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY")):
-        print("skip: no OPENAI_API_KEY or OPENROUTER_API_KEY", file=sys.stderr)
-        return 0
+    preflight = runtime_preflight(ROOT)
+    print(format_preflight(preflight), file=sys.stderr)
+    if args.preflight_only:
+        return 0 if preflight["ok"] else 2
+    if not preflight["ok"]:
+        print("blocked: AgentTX substrate preflight failed", file=sys.stderr)
+        return 2
+    if not configured_provider(args.provider):
+        profile = resolve_provider(args.provider)
+        message = "skip" if args.allow_skip else "blocked"
+        print(f"{message}: no {profile.name.upper()}_API_KEY", file=sys.stderr)
+        return 0 if args.allow_skip else 2
 
     rows: List[dict] = []
     for document_lines in args.document_lines:
@@ -469,6 +496,7 @@ def main() -> int:
                     mode,
                     repeat,
                     args.model,
+                    args.provider,
                     document_lines,
                 )
                 rows.append(row)
@@ -479,7 +507,7 @@ def main() -> int:
                 if row["error"]:
                     print(f"error: {row['error']}", file=sys.stderr, flush=True)
     summary_rows = summarize(rows)
-    write_outputs(rows, summary_rows)
+    write_outputs(rows, summary_rows, args.provider)
     return 0 if rows and all(row["success"] for row in rows) else 2
 
 

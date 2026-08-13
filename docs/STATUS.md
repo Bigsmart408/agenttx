@@ -1,6 +1,6 @@
 # AgentTX status — done vs remaining
 
-Last updated: 2026-08-09 (VM `/home/bfq/agenttx`).
+Last updated: 2026-08-12 (VM `/home/pengpeng/agenttx`).
 
 ## Completed
 
@@ -57,6 +57,7 @@ Last updated: 2026-08-09 (VM `/home/bfq/agenttx`).
 | Uniform commit-policy enforcement | Step 22 direct runtime, CLI subprocess, and session-reload checks prove denied paths cannot bypass policy | `test_runtime_integration.py`, `test_recovery.py`, `step22-runtime-commit-policy.md` |
 | Hard-link alias boundary | Step 23 probe shows lower hard links split on OverlayFS copy-up: alias reads stay stale and selective commit breaks inode identity | `hardlink_alias_probe.{json,md}`, `step23-hardlink-overlay-boundary.md` |
 | Avoided LLM replay tokens | Step 24 controlled real-DeepSeek replay sweep over 12/24/48-line artifacts and three recovery granularities | `token_recovery.{csv,json,md}`, `token_recovery_raw.csv`, `step24-token-replay-evaluation.md` |
+| Full autonomous recovery tokens | Step 26 complete post-policy LLM diagnosis/tool/validation/repair loop; root preflight and 79-test suite pass on x86, credentialed sweep pending | `bench_token_end_to_end.py`, `plot_token_end_to_end.ipynb`, `step26-end-to-end-token-comparison.md` |
 
 **Evidence suite highlights (2026-08-07):**
 - Cascade rollback: host clean until commit; only intended files land.
@@ -78,6 +79,7 @@ Last updated: 2026-08-09 (VM `/home/bfq/agenttx`).
 - Commit policy invariant: direct runtime and CLI commits now fail closed on denied paths before WAL/materialization. Custom allow/deny globs are stored in `agenttx.json` and remain enforced after reload; blocked commits leave the host clean and frontier unchanged.
 - Hard-link boundary: on the Linux 5.15 `try` OverlayFS path, writing one name of a lower hard link leaves the sibling alias stale in the speculative view and splits the inode at selective commit. Ledger-only canonicalization cannot restore POSIX semantics; causal-by-default remains blocked on a different substrate or kernel/FUSE support.
 - Token replay: 27/27 controlled `deepseek-chat` recovery samples passed with zero pre-commit host leaks. Causal rollback retained both valid artifacts and required no LLM replay; optimistic temporal recovery replayed one document (692.3/971.3/1,335.7 mean tokens at 12/24/48 lines), while whole branch/session abort replayed two (1,435.7/1,886.7/2,891.0). These are avoided replay tokens, not total end-to-end recovery tokens or external-artifact results.
+- End-to-end token comparison: Step 26 charges the complete post-policy autonomous recovery loop and records prompt/completion/total usage, tool/model calls, regeneration, success, leakage, and latency. The x86 conda environment, root-compatible `try` substrate, root preflight, and 79-test suite are ready; the 27-sample numeric sweep remains pending only because no API credential is configured, and no placeholders were added.
 - Workspace-start invariant: real-agent benchmark construction exposed stale inherited `$PWD` despite `subprocess cwd=`. One-shot and persistent-worker launches now synchronize `PWD` with the protected workspace, with a regression test for a different caller directory.
 
 **Refactor compare (DeepSeek):**
@@ -105,7 +107,7 @@ Last updated: 2026-08-09 (VM `/home/bfq/agenttx`).
 9. External baselines: tiao2 now runs the previously missing bubblewrap lower bound. BranchFS was cloned but its ARM64 build is blocked by the host Cargo 1.75/fuser API mismatch; Waypoint is blocked by the missing CRIU executable; Sandlock/YoloFS/DeltaBox/Crab/Cordon remain artifact- or environment-blocked. See `docs/tiao2-comparison-run.md` for command-level evidence.
 10. Stronger Aider (or other agents) bakeoff with fair timeouts and success criteria.
 11. Statistical repeats / variance reporting for real LLM runs (cost-aware) remains open; deterministic runtime tails now have p50/p95 coverage.
-    Step 24 adds three repeats and p50/p95 for controlled LLM replay cost; broader autonomous multi-model repeats remain open.
+    Step 24 adds three repeats and p50/p95 for controlled LLM replay cost. Step 26 defines the paired full autonomous recovery sweep; its credentialed numeric run is blocked only on API credentials on x86, while broader multi-model repeats remain open.
 
 ### Product / paper
 12. OSDI paper draft (HLS: problem → root cause → AET → design points → eval).
@@ -118,8 +120,8 @@ Last updated: 2026-08-09 (VM `/home/bfq/agenttx`).
 ```bash
 source ~/.agenttx_llm.env
 export PATH="$HOME/miniconda3/envs/agenttx/bin:$PATH"
-export PYTHONPATH=/home/bfq/agenttx/src:/home/bfq/agenttx
-cd /home/bfq/agenttx
+export PYTHONPATH=/home/pengpeng/agenttx/src:/home/pengpeng/agenttx
+cd /home/pengpeng/agenttx
 
 python -m pytest -q
 python experiments/scripts/bench_evidence_suite.py
@@ -130,9 +132,10 @@ python experiments/scripts/bench_long_scaling.py --lengths 54 64 96 --repeats 2
 python experiments/scripts/bench_robustness.py --tail-length 64 --tail-repeats 3 --long-steps 256 --long-resume-at 128 --agents 4 --concurrent-steps 16
 python experiments/scripts/bench_causal_retention.py --repeats 3
 python experiments/scripts/probe_hardlink_alias.py
-PYTHONPATH=src:. /home/bfq/miniconda3/envs/agenttx/bin/python experiments/scripts/bench_token_recovery.py --document-lines 12 24 48 --repeats 3
-PYTHONPATH=src:. /home/bfq/miniconda3/envs/agenttx/bin/python experiments/scripts/bench_real_agent.py --repeats 3 --max-turns 35
-PYTHONPATH=src:. /home/bfq/miniconda3/envs/agenttx/bin/python experiments/scripts/bench_real_agent_recovery.py --repeats 3 --max-turns 30
+PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python experiments/scripts/bench_token_recovery.py --document-lines 12 24 48 --repeats 3
+PYTHONPATH=src:. python3 experiments/scripts/bench_token_end_to_end.py --document-lines 12 24 48 --repeats 3 --max-turns 20
+PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python experiments/scripts/bench_real_agent.py --repeats 3 --max-turns 35
+PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python experiments/scripts/bench_real_agent_recovery.py --repeats 3 --max-turns 30
 PYTHONPATH=src:. python3 motivation/bench_optimization_comparison.py --length 64 --repeats 2
 PYTHONPATH=src:. python3 motivation/summarize_optimization_history.py
 AIDER_TIMEOUT_S=180 python experiments/scripts/bench_refactor_compare.py

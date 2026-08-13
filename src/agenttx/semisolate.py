@@ -92,6 +92,26 @@ def _default_try_bin() -> Path:
         return wrapper
     raise FileNotFoundError("scripts/try-wrapper.sh not found")
 
+
+def _probe_try_backend(try_bin: Path, workspace: Path) -> tuple[bool, str]:
+    """Return whether try can execute one no-op in this host namespace."""
+    probe = Path(tempfile.mkdtemp(prefix="agenttx-try-probe-", dir="/tmp"))
+    sandbox = probe / "sandbox"
+    sandbox.mkdir()
+    try:
+        env = {**os.environ, "PWD": str(workspace)}
+        result = subprocess.run(
+            [str(try_bin), "-N", str(sandbox), "--", "/bin/true"],
+            cwd=str(workspace), env=env, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, timeout=30, check=False,
+        )
+        detail = (result.stderr or result.stdout or "").strip().splitlines()
+        return result.returncode == 0, detail[-1] if detail else f"rc={result.returncode}"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
+
 @dataclass
 class StepResult:
     step_index: int
@@ -140,6 +160,13 @@ class SharedSemisolate:
         else:
             self.sandbox_dir = Path(self.sandbox_dir)
             self.sandbox_dir.mkdir(parents=True, exist_ok=True)
+
+        try_ok, detail = _probe_try_backend(self.try_bin, self.workspace)
+        if not try_ok:
+            raise RuntimeError(
+                "try overlay backend is unavailable; run the AgentTX runtime "
+                f"with root on this host. try probe: {detail}"
+            )
         if self.layers is None:
             self.layers = LayerStore(self.sandbox_dir / "layers")
 

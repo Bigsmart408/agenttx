@@ -556,6 +556,25 @@ repository、恶意 prompt 或长时间开放式 CI 修复。
 这里的 0 只表示没有文档需要重新生成。测试、回滚、commit、Agent 诊断以及错误
 发生前已经消耗的 token 都不是 0，也没有被计入“可避免 replay”结论。
 
+### 10.4 完整自主恢复 token 对比（Step 26）
+
+Step 24 用于机制归因，但实验部分还需要回答更直接的用户成本问题：将模型诊断、
+tool schema/result、规划、验证和重建内容全部计费后，因果恢复是否仍然节省 token？
+Step 26 在同一个五步 fault DAG、同一模型、prompt、工具集合、最大轮数、commit
+边界和 validator 下，让 `causal`、`temporal_checkpoint` 与
+`whole_branch_abort` 分别进入完整 `LLMToolAgent` 恢复循环。
+
+每个样本记录 prompt/completion/total API token、model/tool call、recovery ledger
+step、重建文档数、成功率、host leak、policy runtime 以及 recovery mean/p50/p95。
+AgentTX saving 定义为粗粒度策略的完整恢复 token 减去 causal 的完整恢复 token；
+故障前 token 仍是 sunk cost。Step 24 是低噪声的因果归因，Step 26 是包含 Agent
+随机规划开销的用户侧对比，二者不能互相替代。
+
+当前 VM 没有 OpenAI/OpenRouter 凭据，因此代码、notebook、文档和结构测试已经
+完成，但 12/24/48 行、三策略、三重复的数值 sweep 尚未运行。仓库不加入占位
+CSV、JSON 或图片；数值结果必须来自后续 credentialed run。详见
+`docs/step26-end-to-end-token-comparison.md`。
+
 ---
 
 ## 11. Robustness 与辅助 microbench
@@ -611,6 +630,7 @@ snapshot 存储，但不代表 snapshot 遍历和 WAL copy 已经完全解决。
 | 没有依赖捕获行不行？ | 不行，64-call 时只删掉 4% invalid subgraph | dependency ablation |
 | 真实 LLM 会使用恢复接口吗？ | 3/3 正确选根并恢复 | real-agent recovery |
 | 能节省多少 token？ | 最高测试点相对 checkpoint/whole abort 节省 1,335.7/2,891.0 | token sweep |
+| 完整恢复循环能否节省 token？ | 对比设计和实现已完成；数值待有凭据 VM 运行 | end-to-end token sweep |
 | 优化路径是否稳健？ | worker crash、256-step reload、4-agent concurrency 均通过 | robustness bundle |
 
 当前最准确的总体结论是：
@@ -626,7 +646,7 @@ snapshot 存储，但不代表 snapshot 遍历和 WAL copy 已经完全解决。
 ## 13. 当前不能越界声称的内容
 
 1. checkpoint/whole-branch 是恢复粒度 emulation，不是外部 artifact 端到端结果；
-2. token 结果是 avoided replay tokens，不是整个 Agent session 的总 token 节省；
+2. Step 24 token 结果是 avoided replay tokens；Step 26 才计入完整 post-policy Agent 恢复循环，但当前尚无数值；
 3. 当前真实 Agent 任务是 seeded repository，不是大型真实开源项目；
 4. full tracing 仍依赖 Linux `strace`，未覆盖所有 syscall 和非文件系统 effect；
 5. hard-link/bind-mount alias 仍是 causal-by-default 的正确性边界；
@@ -661,11 +681,14 @@ snapshot 存储，但不代表 snapshot 遍历和 WAL copy 已经完全解决。
 - `experiments/results/token_recovery.{csv,json,md}`
 - `experiments/results/token_recovery_raw.csv`
 - `docs/step24-token-replay-evaluation.md`
+- `experiments/scripts/bench_token_end_to_end.py`
+- `motivation/plot_token_end_to_end.ipynb`
+- `docs/step26-end-to-end-token-comparison.md`
 
 ### 主要复现命令
 
 ```bash
-cd /home/bfq/agenttx
+cd /home/pengpeng/agenttx
 export PYTHONPATH=src:.
 
 python motivation/bench_optimization_comparison.py --length 64 --repeats 2
@@ -677,12 +700,15 @@ python experiments/scripts/bench_robustness.py \
   --long-steps 256 --long-resume-at 128 \
   --agents 4 --concurrent-steps 16
 
-/home/bfq/miniconda3/envs/agenttx/bin/python \
+/home/pengpeng/miniconda3/envs/agenttx/bin/python \
   experiments/scripts/bench_real_agent_recovery.py \
   --repeats 3 --max-turns 30
 
-/home/bfq/miniconda3/envs/agenttx/bin/python \
+/home/pengpeng/miniconda3/envs/agenttx/bin/python \
   experiments/scripts/bench_token_recovery.py \
   --document-lines 12 24 48 --repeats 3
+
+python3 experiments/scripts/bench_token_end_to_end.py \
+  --document-lines 12 24 48 --repeats 3 --max-turns 20
 ```
 

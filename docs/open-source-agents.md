@@ -19,7 +19,7 @@ export OPENAI_API_KEY=...
 ## Intercepted agent (for experiments)
 
 ```bash
-cd /home/bfq/agenttx
+cd /home/pengpeng/agenttx
 ./scripts/agenttx-agent llm --workdir /tmp/ws --task "add hello.py" --dump-ledger /tmp/ledger.json
 ```
 
@@ -39,7 +39,7 @@ cd /home/bfq/agenttx
 ```bash
 source ~/miniconda3/etc/profile.d/conda.sh && conda activate agenttx
 . ~/.agenttx_llm.env
-cd /home/bfq/agenttx
+cd /home/pengpeng/agenttx
 PYTHONPATH=src python experiments/scripts/demo_live_agent.py
 ```
 

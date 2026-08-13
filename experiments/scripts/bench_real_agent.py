@@ -28,20 +28,12 @@ from experiments.workloads.refactor_traj import (  # noqa: E402
     REFACTOR_TASK,
     seed_refactor_repo,
 )
+from agenttx.providers import configured_provider, load_provider_env, provider_names, provider_result_dir, resolve_provider  # noqa: E402
 
 
 def load_llm_env() -> None:
     """Load local agent configuration without printing or persisting secrets."""
-    envfile = Path.home() / ".agenttx_llm.env"
-    if not envfile.exists():
-        return
-    for line in envfile.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line.startswith("export "):
-            line = line[len("export ") :]
-        if "=" in line and not line.startswith("#"):
-            key, value = line.split("=", 1)
-            os.environ.setdefault(key.strip(), value.strip().strip("'").strip('"'))
+    load_provider_env()
 
 
 def _cleanup(path: Path) -> None:
@@ -78,7 +70,7 @@ def _run_host_tests(workdir: Path) -> int:
     return result.returncode
 
 
-def run_once(repeat: int, model: Optional[str], max_turns: int) -> dict:
+def run_once(repeat: int, model: Optional[str], max_turns: int, provider: Optional[str]) -> dict:
     """Run one real agent attempt and validate the protected commit boundary."""
     from agenttx.agents.llm_agent import LLMToolAgent
 
@@ -103,6 +95,7 @@ def run_once(repeat: int, model: Optional[str], max_turns: int) -> dict:
             workdir=workdir,
             session_dir=scratch / "session",
             model=model,
+            provider=provider,
             max_turns=max_turns,
         )
         result = agent.run(REFACTOR_TASK, commit=False)
@@ -138,7 +131,8 @@ def run_once(repeat: int, model: Optional[str], max_turns: int) -> dict:
     wall_s = time.perf_counter() - started
     return {
         "repeat": repeat,
-        "model": model or os.environ.get("AGENTTX_MODEL") or os.environ.get("OPENAI_MODEL", "default"),
+        "provider": resolve_provider(provider).name,
+        "model": model or resolve_provider(provider).model,
         "wall_s": round(wall_s, 6),
         "finished": finished,
         "tool_calls": tool_calls,
@@ -167,12 +161,13 @@ def summarize(rows: Sequence[dict]) -> dict:
         "host_leak_rate": round(sum(bool(row["host_polluted_before_commit"]) for row in rows) / max(len(rows), 1), 6),
         "tests_pass_rate": round(sum(row["tests_rc"] == 0 for row in rows) / max(len(rows), 1), 6),
         "model": rows[0].get("model", "") if rows else "",
+        "provider": rows[0].get("provider", "") if rows else "",
         "rows": list(rows),
     }
 
 
-def write_outputs(summary: dict) -> None:
-    out = ROOT / "experiments" / "results"
+def write_outputs(summary: dict, provider: Optional[str] = None) -> None:
+    out = provider_result_dir(ROOT, provider)
     out.mkdir(parents=True, exist_ok=True)
     rows = summary.pop("rows")
     summary["rows"] = rows
@@ -181,6 +176,7 @@ def write_outputs(summary: dict) -> None:
     )
     fields = [
         "repeat",
+        "provider",
         "model",
         "wall_s",
         "finished",
@@ -200,7 +196,7 @@ def write_outputs(summary: dict) -> None:
     lines = [
         "# Real AgentTX agent robustness",
         "",
-        f"Model: `{summary['model']}`; repeats: {summary['repeats']}; task: seeded multi-file refactor.",
+        f"Provider: `{summary['provider']}`; model: `{summary['model']}`; repeats: {summary['repeats']}; task: seeded multi-file refactor.",
         "",
         "| metric | value |",
         "|---|---:|",
@@ -223,21 +219,23 @@ def main() -> int:
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--max-turns", type=int, default=35)
     parser.add_argument("--model", default=None)
+    parser.add_argument("--provider", choices=provider_names(), default=None)
     args = parser.parse_args()
     if args.repeats <= 0 or args.max_turns <= 0:
         parser.error("repeats and max-turns must be positive")
     load_llm_env()
-    if not (os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY")):
-        print("skip: no OPENAI_API_KEY or OPENROUTER_API_KEY", file=sys.stderr)
+    if not configured_provider(args.provider):
+        profile = resolve_provider(args.provider)
+        print(f"skip: no {profile.name.upper()}_API_KEY", file=sys.stderr)
         return 0
     rows: List[dict] = []
     for repeat in range(args.repeats):
-        row = run_once(repeat, args.model, args.max_turns)
+        row = run_once(repeat, args.model, args.max_turns, args.provider)
         rows.append(row)
         print(json.dumps({k: v for k, v in row.items() if k != "error"}, indent=2), flush=True)
         if row["error"]:
             print(f"error: {row['error']}", file=sys.stderr, flush=True)
-    write_outputs(summarize(rows))
+    write_outputs(summarize(rows), args.provider)
     return 0 if rows and all(row["success"] for row in rows) else 2
 
 

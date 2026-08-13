@@ -65,9 +65,9 @@ pass through symbolic ledger scoring alone.
 ## Reproduce
 
 ```bash
-cd /home/bfq/agenttx
+cd /home/pengpeng/agenttx
 export PYTHONPATH=src:.
-/home/bfq/miniconda3/envs/agenttx/bin/python \
+/home/pengpeng/miniconda3/envs/agenttx/bin/python \
   experiments/scripts/bench_causal_retention.py --repeats 3
 ```
 

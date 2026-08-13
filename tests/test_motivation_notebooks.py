@@ -78,6 +78,9 @@ def test_causal_retention_notebook_uses_controlled_dag_results() -> None:
 
 def test_new_recovery_notebooks_use_their_source_results() -> None:
     token = _code(ROOT / "motivation" / "plot_token_recovery.ipynb")
+    token_end_to_end = _code(
+        ROOT / "motivation" / "plot_token_end_to_end.ipynb"
+    )
     real_agent = _code(ROOT / "motivation" / "plot_real_agent_recovery.ipynb")
     robustness = _code(ROOT / "motivation" / "plot_robustness.ipynb")
 
@@ -85,6 +88,12 @@ def test_new_recovery_notebooks_use_their_source_results() -> None:
     assert "total_tokens_mean" in token
     assert "regenerated_documents_mean" in token
     assert "FIG-Token-Recovery.pdf" in token
+
+    assert "token_end_to_end.csv" in token_end_to_end
+    assert "total_tokens_mean" in token_end_to_end
+    assert "prompt_tokens_mean" in token_end_to_end
+    assert "completion_tokens_mean" in token_end_to_end
+    assert "FIG-Token-End-to-End.pdf" in token_end_to_end
 
     assert "real_agent_recovery.csv" in real_agent
     assert "causal_targets_correct" in real_agent
@@ -97,7 +106,7 @@ def test_new_recovery_notebooks_use_their_source_results() -> None:
     assert "concurrent_agents" in robustness
     assert "FIG-Robustness.pdf" in robustness
 
-    for source in (token, real_agent, robustness):
+    for source in (token, token_end_to_end, real_agent, robustness):
         assert "Path.cwd()" in source
         assert "ax.plot" in source
         assert "ax.bar" not in source

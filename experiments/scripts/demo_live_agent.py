@@ -8,17 +8,10 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 def main() -> int:
-    envfile = Path.home() / ".agenttx_llm.env"
-    if envfile.exists():
-        for line in envfile.read_text(encoding="utf-8").splitlines():
-            line=line.strip()
-            if line.startswith("export "):
-                line=line[len("export "):]
-            if "=" in line and not line.startswith("#"):
-                k,v=line.split("=",1)
-                os.environ.setdefault(k.strip(), v.strip().strip("'").strip('"'))
-    if not (os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY")):
-        print("skip: no API key", file=sys.stderr)
+    from agenttx.providers import configured_provider, resolve_provider, provider_names
+    provider = os.environ.get("AGENTTX_PROVIDER", "deepseek")
+    if not configured_provider(provider):
+        print(f"skip: no {resolve_provider(provider).name.upper()}_API_KEY", file=sys.stderr)
         return 0
 
     from agenttx.agents.llm_agent import LLMToolAgent
@@ -31,7 +24,7 @@ def main() -> int:
         "from src.calc import add\n\ndef test_add():\n    assert add(1,2)==3\n", encoding="utf-8")
     out = ROOT / "experiments" / "results" / "live_agent_ledger.json"
     try:
-        agent = LLMToolAgent(workdir=ws, session_dir=scratch/"sess", max_turns=20)
+        agent = LLMToolAgent(workdir=ws, session_dir=scratch/"sess", max_turns=20, provider=provider)
         result = agent.run(
             "Add mul(a,b) to src/calc.py and test_mul in tests/test_calc.py. "
             "Run: PYTHONPATH=. python -m pytest -q. Call finish with commit=false.",

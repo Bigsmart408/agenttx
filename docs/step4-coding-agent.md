@@ -10,7 +10,7 @@
 ## Run
 
 ```bash
-cd /home/bfq/agenttx
+cd /home/pengpeng/agenttx
 PYTHONPATH=src python3 tests/test_policy.py
 PYTHONPATH=src:. python3 experiments/scripts/demo_coding_agent.py
 PYTHONPATH=src:. python3 experiments/scripts/bench_long_trajectory.py 2

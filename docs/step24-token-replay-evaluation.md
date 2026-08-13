@@ -118,9 +118,9 @@ All reported results were collected after this fix; pilot values were discarded.
 ## Reproduction and artifacts
 
 ```bash
-cd /home/bfq/agenttx
+cd /home/pengpeng/agenttx
 source ~/.agenttx_llm.env
-PYTHONPATH=src:. /home/bfq/miniconda3/envs/agenttx/bin/python \
+PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python \
   experiments/scripts/bench_token_recovery.py \
   --document-lines 12 24 48 --repeats 3
 ```

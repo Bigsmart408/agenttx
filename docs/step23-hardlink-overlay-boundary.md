@@ -47,8 +47,8 @@ separately untested because the VM does not expose the required mount authority.
 ## Reproduce
 
 ```bash
-cd /home/bfq/agenttx
-PYTHONPATH=src:. /home/bfq/miniconda3/envs/agenttx/bin/python \
+cd /home/pengpeng/agenttx
+PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python \
   experiments/scripts/probe_hardlink_alias.py
 ```
 

@@ -22,7 +22,7 @@ If step 0 writes `a.txt` and a later speculative step rewrites `a.txt`, Step 11 
 ## Verification
 
 ```bash
-cd /home/bfq/agenttx
+cd /home/pengpeng/agenttx
 export PATH="$HOME/miniconda3/envs/agenttx/bin:$PATH"
 export PYTHONPATH=src:.
 python -m pytest -q

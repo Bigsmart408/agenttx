@@ -1,0 +1,61 @@
+{
+  "suite": "real_agent",
+  "repeats": 3,
+  "wall_p50_s": 16.257391,
+  "wall_p95_s": 28.382105,
+  "tool_calls_p50": 15.0,
+  "tool_calls_p95": 15.9,
+  "finished_rate": 1.0,
+  "success_rate": 1.0,
+  "host_leak_rate": 0.0,
+  "tests_pass_rate": 1.0,
+  "model": "deepseek-v4-flash",
+  "provider": "deepseek",
+  "rows": [
+    {
+      "repeat": 0,
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "wall_s": 29.729295,
+      "finished": true,
+      "tool_calls": 16,
+      "ledger_steps": 15,
+      "host_polluted_before_commit": false,
+      "committed": true,
+      "commit_ok": true,
+      "tests_rc": 0,
+      "error": "",
+      "success": true
+    },
+    {
+      "repeat": 1,
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "wall_s": 15.188684,
+      "finished": true,
+      "tool_calls": 15,
+      "ledger_steps": 14,
+      "host_polluted_before_commit": false,
+      "committed": true,
+      "commit_ok": true,
+      "tests_rc": 0,
+      "error": "",
+      "success": true
+    },
+    {
+      "repeat": 2,
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "wall_s": 16.257391,
+      "finished": true,
+      "tool_calls": 15,
+      "ledger_steps": 14,
+      "host_polluted_before_commit": false,
+      "committed": true,
+      "commit_ok": true,
+      "tests_rc": 0,
+      "error": "",
+      "success": true
+    }
+  ]
+}

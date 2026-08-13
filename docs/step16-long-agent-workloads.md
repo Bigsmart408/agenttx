@@ -32,7 +32,7 @@ derived report are absent, while all three independent files remain available.
 ## Reproduction
 
 ```bash
-cd /home/bfq/agenttx
+cd /home/pengpeng/agenttx
 PYTHONPATH=src:. python3 -m pytest -q
 PYTHONPATH=src:. python3 experiments/scripts/bench_long_trajectory.py \
   --length 64 --repeats 1

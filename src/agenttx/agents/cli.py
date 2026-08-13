@@ -7,7 +7,7 @@ def cmd_llm(args):
     from agenttx.agents.llm_agent import LLMToolAgent
     workdir = Path(args.workdir).resolve()
     workdir.mkdir(parents=True, exist_ok=True)
-    agent = LLMToolAgent(workdir=workdir, model=args.model, max_turns=args.max_turns)
+    agent = LLMToolAgent(workdir=workdir, model=args.model, provider=args.provider, max_turns=args.max_turns)
     try:
         result = agent.run(args.task, commit=args.commit)
         print(json.dumps({
@@ -44,6 +44,7 @@ def main(argv=None):
     l.add_argument("--task", required=True)
     l.add_argument("--workdir", default=".")
     l.add_argument("--model", default=None)
+    l.add_argument("--provider", choices=["deepseek", "openai", "openrouter"], default=None)
     l.add_argument("--max-turns", type=int, default=30)
     l.add_argument("--commit", action="store_true")
     l.add_argument("--dump-ledger", default=None)

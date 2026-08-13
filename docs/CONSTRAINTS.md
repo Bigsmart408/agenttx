@@ -33,7 +33,7 @@ AgentTX targets **Problem A**: multi-step **Agent Effect Transactions**.
 
 1. **Do not write project files to the local Windows workspace.**
    All source, docs, experiments, logs, and build outputs for AgentTX
-   must be created on the remote VM under `/home/bfq/agenttx` (or a
+   must be created on the remote VM under `/home/pengpeng/agenttx` (or a
    documented sibling path on that VM).
 2. Prefer `ssh` / remote shell for edits, tests, and commits.
 3. If a file appears locally by accident, delete it locally and recreate
@@ -66,7 +66,7 @@ Temporary files are allowed **only on the VM** and **must not be committed**.
 ### Pre-commit checklist (VM)
 
 ```bash
-cd /home/bfq/agenttx
+cd /home/pengpeng/agenttx
 git status
 # remove scratch explicitly, e.g.:
 # rm -rf .tmp *.overlay /tmp/agenttx-*

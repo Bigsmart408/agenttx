@@ -32,9 +32,10 @@ from experiments.workloads.recovery_agent import (  # noqa: E402
     inject_recovery_failure,
     seed_recovery_repo,
 )
+from agenttx.providers import configured_provider, provider_names, provider_result_dir, resolve_provider  # noqa: E402
 
 
-def run_once(repeat: int, model: Optional[str], max_turns: int) -> dict:
+def run_once(repeat: int, model: Optional[str], max_turns: int, provider: Optional[str]) -> dict:
     from agenttx.agents.llm_agent import LLMToolAgent
 
     scratch = Path(tempfile.mkdtemp(prefix=f"agenttx-real-recovery-{repeat}-", dir="/tmp"))
@@ -65,6 +66,7 @@ def run_once(repeat: int, model: Optional[str], max_turns: int) -> dict:
             workdir=workdir,
             session_dir=scratch / "session",
             model=model,
+            provider=provider,
             max_turns=max_turns,
         )
         injection = inject_recovery_failure(agent)
@@ -153,9 +155,8 @@ def run_once(repeat: int, model: Optional[str], max_turns: int) -> dict:
     )
     return {
         "repeat": repeat,
-        "model": model
-        or os.environ.get("AGENTTX_MODEL")
-        or os.environ.get("OPENAI_MODEL", "default"),
+        "provider": resolve_provider(provider).name,
+        "model": model or resolve_provider(provider).model,
         "wall_s": round(time.perf_counter() - started, 6),
         "finished": finished,
         "tool_calls": tool_calls,
@@ -187,6 +188,7 @@ def summarize(rows: Sequence[dict]) -> dict:
         "suite": "real_agent_causal_recovery",
         "repeats": len(rows),
         "model": rows[0].get("model", "") if rows else "",
+        "provider": rows[0].get("provider", "") if rows else "",
         "wall_p50_s": round(percentile(walls, 0.50), 6),
         "wall_p95_s": round(percentile(walls, 0.95), 6),
         "success_rate": rate("success"),
@@ -200,8 +202,8 @@ def summarize(rows: Sequence[dict]) -> dict:
     }
 
 
-def write_outputs(summary: dict) -> None:
-    output = ROOT / "experiments" / "results"
+def write_outputs(summary: dict, provider: Optional[str] = None) -> None:
+    output = provider_result_dir(ROOT, provider)
     output.mkdir(parents=True, exist_ok=True)
     rows = summary["rows"]
     (output / "real_agent_recovery.json").write_text(
@@ -220,7 +222,7 @@ def write_outputs(summary: dict) -> None:
     lines = [
         "# Real-agent causal recovery",
         "",
-        f"Model: `{summary['model']}`; repeats: {summary['repeats']}.",
+        f"Provider: `{summary['provider']}`; model: `{summary['model']}`; repeats: {summary['repeats']}.",
         "",
         "| metric | value |",
         "|---|---:|",
@@ -246,22 +248,24 @@ def main() -> int:
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--max-turns", type=int, default=30)
     parser.add_argument("--model", default=None)
+    parser.add_argument("--provider", choices=provider_names(), default=None)
     args = parser.parse_args()
     if args.repeats <= 0 or args.max_turns <= 0:
         parser.error("repeats and max-turns must be positive")
     load_llm_env()
-    if not (os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY")):
-        print("skip: no OPENAI_API_KEY or OPENROUTER_API_KEY", file=sys.stderr)
+    if not configured_provider(args.provider):
+        profile = resolve_provider(args.provider)
+        print(f"skip: no {profile.name.upper()}_API_KEY", file=sys.stderr)
         return 0
 
     rows: List[dict] = []
     for repeat in range(args.repeats):
-        row = run_once(repeat, args.model, args.max_turns)
+        row = run_once(repeat, args.model, args.max_turns, args.provider)
         rows.append(row)
         print(json.dumps({key: value for key, value in row.items() if key != "error"}, indent=2), flush=True)
         if row["error"]:
             print(f"error: {row['error']}", file=sys.stderr, flush=True)
-    write_outputs(summarize(rows))
+    write_outputs(summarize(rows), args.provider)
     return 0 if rows and all(row["success"] for row in rows) else 2
 
 

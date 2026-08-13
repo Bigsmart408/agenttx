@@ -11,7 +11,7 @@ for Bare, AgentTX without read tracing, and AgentTX full. The trajectory prefix,
 fault location, repair location, and final correctness oracle are unchanged.
 
 ```bash
-cd /home/bfq/agenttx
+cd /home/pengpeng/agenttx
 PYTHONPATH=src:. python3 experiments/scripts/bench_long_scaling.py \
   --lengths 54 64 96 --repeats 2
 PYTHONPATH=src:. python3 experiments/scripts/bench_scaling.py

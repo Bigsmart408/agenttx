@@ -53,6 +53,8 @@ result artifacts:
   rollback p95 across controlled effect DAGs.
 - `plot_token_recovery.ipynb` connects retained work to real DeepSeek replay
   tokens, regenerated documents, and p95 recovery latency.
+- `plot_token_end_to_end.ipynb` compares complete autonomous recovery prompt,
+  completion, and total API tokens plus recovery p95 across the same policies.
 - `plot_real_agent_recovery.ipynb` exposes the live agent's recovery decision,
   trajectory variability, rollback targets, and semantic success conditions.
 - `plot_robustness.ipynb` covers p50/p95 latency, worker-crash fallback,
@@ -73,6 +75,8 @@ jupyter nbconvert --to notebook --execute motivation/plot_causal_retention.ipynb
   --output motivation/plot_causal_retention.executed.ipynb
 jupyter nbconvert --to notebook --execute motivation/plot_token_recovery.ipynb \
   --output motivation/plot_token_recovery.executed.ipynb
+jupyter nbconvert --to notebook --execute motivation/plot_token_end_to_end.ipynb \
+  --output motivation/plot_token_end_to_end.executed.ipynb
 jupyter nbconvert --to notebook --execute motivation/plot_real_agent_recovery.ipynb \
   --output motivation/plot_real_agent_recovery.executed.ipynb
 jupyter nbconvert --to notebook --execute motivation/plot_robustness.ipynb \
@@ -82,8 +86,9 @@ jupyter nbconvert --to notebook --execute motivation/report.ipynb \
 ```
 
 The causal-retention notebook writes `motivation/FIG-Causal-Retention.{pdf,png}`;
-the three new evaluation notebooks write `FIG-Token-Recovery.{pdf,png}`,
-`FIG-Real-Agent-Recovery.{pdf,png}`, and `FIG-Robustness.{pdf,png}`;
+the evaluation notebooks write `FIG-Token-Recovery.{pdf,png}`,
+`FIG-Token-End-to-End.{pdf,png}`, `FIG-Real-Agent-Recovery.{pdf,png}`, and
+`FIG-Robustness.{pdf,png}`;
 the report notebook is intended for interactive inspection and does not
 duplicate the source result files.
 
@@ -129,7 +134,7 @@ calls regenerate only the lost artifacts, and response usage reports the exact
 replay tokens.
 
 ```bash
-PYTHONPATH=src:. /home/bfq/miniconda3/envs/agenttx/bin/python \
+PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python \
   experiments/scripts/bench_token_recovery.py \
   --document-lines 12 24 48 --repeats 3
 ```
@@ -138,6 +143,24 @@ The central metric is *avoided replay tokens*, not total end-to-end recovery
 tokens. Results live in `token_recovery.{csv,json,md}` and
 `token_recovery_raw.csv`; design and limitations are in
 `docs/step24-token-replay-evaluation.md`.
+
+## Complete autonomous recovery token comparison
+
+Step 26 runs the same post-policy task through the full `LLMToolAgent` loop and
+charges diagnosis, prompt/tool context, planning, validation, and regenerated
+content. This complements rather than replaces the isolated Step 24 replay
+attribution.
+
+```bash
+PYTHONPATH=src:. python3 experiments/scripts/bench_token_end_to_end.py \
+  --document-lines 12 24 48 --repeats 3 --max-turns 20
+python3 motivation/plot_token_end_to_end.py
+```
+
+A credentialed run writes `token_end_to_end.{csv,json,md}` plus raw CSV and the
+paper figure. The current VM has no API credentials, so numeric results and
+figures are intentionally absent. See
+`docs/step26-end-to-end-token-comparison.md`.
 
 ## FAST-style multi-length line experiments
 

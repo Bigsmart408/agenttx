@@ -9,7 +9,7 @@ real-agent, robustness, and token experiments into one paper evidence chain.
 Goal: quantify why naive per-tool-call `try` is not enough for AgentTX.
 
 ```bash
-cd /home/bfq/agenttx
+cd /home/pengpeng/agenttx
 python3 experiments/scripts/bench_try_overhead.py -n 20 --repeats 3
 ```
 
@@ -23,7 +23,7 @@ Do not push until explicitly requested.
 ## Step 2 — shared overlay + ledger
 
 ```bash
-cd /home/bfq/agenttx
+cd /home/pengpeng/agenttx
 PYTHONPATH=src python3 experiments/scripts/test_ledger.py
 PYTHONPATH=src python3 experiments/scripts/demo_trajectory.py
 PYTHONPATH=src python3 experiments/scripts/bench_shared_overlay.py 20 3
@@ -149,7 +149,7 @@ actual API prompt/completion/total tokens, tool calls, retries, p50/p95, tests,
 and pre-commit host leakage.
 
 ```bash
-PYTHONPATH=src:. /home/bfq/miniconda3/envs/agenttx/bin/python \
+PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python \
   experiments/scripts/bench_token_recovery.py \
   --document-lines 12 24 48 --repeats 3
 ```
@@ -160,6 +160,28 @@ recovery-granularity emulations, not executions of external artifacts. See
 `docs/step24-token-replay-evaluation.md` for the metric boundary and SOTA
 mapping.
 
+## Step 26 — end-to-end autonomous recovery tokens
+
+This companion comparison keeps the full post-policy LLM loop intact. The same
+agent diagnoses, uses tools, validates, and repairs the same recovered workspace
+under causal, optimistic temporal-checkpoint, and whole-branch policies. It
+records complete prompt/completion/total API usage, model/tool calls, ledger
+steps, regenerated documents, success, host leakage, and recovery p50/p95.
+
+```bash
+PYTHONPATH=src:. python3 experiments/scripts/bench_token_end_to_end.py \
+  --document-lines 12 24 48 --repeats 3 --max-turns 20
+```
+
+A credentialed, preflight-clean run writes `token_end_to_end.{csv,json,md}` and
+`token_end_to_end_raw.csv`. Use `--preflight-only` to diagnose missing
+`strace`/`try`/overlay support. On this x86 Docker-overlay host, execute the
+preflight and benchmark as root while preserving the `agenttx` conda PATH;
+`scripts/bootstrap.sh` reapplies the `try` compatibility patch after a fresh
+clone. Missing credentials or a failed preflight now return non-zero; add
+`--allow-skip` only for optional CI. See
+`docs/step26-end-to-end-token-comparison.md`.
+
 ## Paper-facing notebooks
 
 The result files remain the source of truth. The notebooks under `motivation/`
@@ -169,6 +191,8 @@ are deterministic presentation layers and can be executed independently:
   latency;
 - `plot_token_recovery.ipynb` — real replay tokens, regenerated documents, and
   replay p95;
+- `plot_token_end_to_end.ipynb` — complete autonomous recovery prompt,
+  completion, total tokens, and recovery p95;
 - `plot_real_agent_recovery.ipynb` — live LLM root selection, rollback targets,
   latency, and recovery invariants;
 - `plot_robustness.ipynb` — p50/p95, worker crash, 256-step resume, and four

@@ -1,0 +1,453 @@
+{
+  "summary": [
+    {
+      "document_lines": 12,
+      "mode": "causal",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "repeats": 3,
+      "success_rate": 1.0,
+      "regenerated_documents_mean": 0.0,
+      "host_leak_rate": 0.0,
+      "prompt_tokens_mean": 0.0,
+      "prompt_tokens_p50": 0.0,
+      "prompt_tokens_p95": 0.0,
+      "completion_tokens_mean": 0.0,
+      "completion_tokens_p50": 0.0,
+      "completion_tokens_p95": 0.0,
+      "total_tokens_mean": 0.0,
+      "total_tokens_p50": 0.0,
+      "total_tokens_p95": 0.0,
+      "tool_calls_mean": 0.0,
+      "tool_calls_p50": 0.0,
+      "tool_calls_p95": 0.0,
+      "model_calls_mean": 0.0,
+      "model_calls_p50": 0.0,
+      "model_calls_p95": 0.0,
+      "wall_s_mean": 1.941962,
+      "wall_s_p50": 1.906943,
+      "wall_s_p95": 2.013784,
+      "agenttx_prompt_tokens_saved": 0.0,
+      "agenttx_prompt_tokens_saved_pct": 0.0,
+      "agenttx_completion_tokens_saved": 0.0,
+      "agenttx_completion_tokens_saved_pct": 0.0,
+      "agenttx_total_tokens_saved": 0.0,
+      "agenttx_total_tokens_saved_pct": 0.0
+    },
+    {
+      "document_lines": 12,
+      "mode": "temporal_checkpoint",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "repeats": 3,
+      "success_rate": 1.0,
+      "regenerated_documents_mean": 1.0,
+      "host_leak_rate": 0.0,
+      "prompt_tokens_mean": 491.0,
+      "prompt_tokens_p50": 491.0,
+      "prompt_tokens_p95": 491.0,
+      "completion_tokens_mean": 372.666667,
+      "completion_tokens_p50": 375.0,
+      "completion_tokens_p95": 401.1,
+      "total_tokens_mean": 863.666667,
+      "total_tokens_p50": 866.0,
+      "total_tokens_p95": 892.1,
+      "tool_calls_mean": 1.0,
+      "tool_calls_p50": 1.0,
+      "tool_calls_p95": 1.0,
+      "model_calls_mean": 1.0,
+      "model_calls_p50": 1.0,
+      "model_calls_p95": 1.0,
+      "wall_s_mean": 5.923046,
+      "wall_s_p50": 5.968295,
+      "wall_s_p95": 5.985327,
+      "agenttx_prompt_tokens_saved": 491.0,
+      "agenttx_prompt_tokens_saved_pct": 1.0,
+      "agenttx_completion_tokens_saved": 372.666667,
+      "agenttx_completion_tokens_saved_pct": 1.0,
+      "agenttx_total_tokens_saved": 863.666667,
+      "agenttx_total_tokens_saved_pct": 1.0
+    },
+    {
+      "document_lines": 12,
+      "mode": "whole_branch_abort",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "repeats": 3,
+      "success_rate": 1.0,
+      "regenerated_documents_mean": 2.0,
+      "host_leak_rate": 0.0,
+      "prompt_tokens_mean": 982.0,
+      "prompt_tokens_p50": 982.0,
+      "prompt_tokens_p95": 982.0,
+      "completion_tokens_mean": 1033.333333,
+      "completion_tokens_p50": 1000.0,
+      "completion_tokens_p95": 1107.1,
+      "total_tokens_mean": 2015.333333,
+      "total_tokens_p50": 1982.0,
+      "total_tokens_p95": 2089.1,
+      "tool_calls_mean": 2.0,
+      "tool_calls_p50": 2.0,
+      "tool_calls_p95": 2.0,
+      "model_calls_mean": 2.0,
+      "model_calls_p50": 2.0,
+      "model_calls_p95": 2.0,
+      "wall_s_mean": 10.667279,
+      "wall_s_p50": 10.713692,
+      "wall_s_p95": 10.916762,
+      "agenttx_prompt_tokens_saved": 982.0,
+      "agenttx_prompt_tokens_saved_pct": 1.0,
+      "agenttx_completion_tokens_saved": 1033.333333,
+      "agenttx_completion_tokens_saved_pct": 1.0,
+      "agenttx_total_tokens_saved": 2015.333333,
+      "agenttx_total_tokens_saved_pct": 1.0
+    }
+  ],
+  "raw": [
+    {
+      "mode": "causal",
+      "document_lines": 12,
+      "repeat": 0,
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "wall_s": 1.893288,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "tool_calls": 0,
+      "model_calls": 0,
+      "ledger_steps": 5,
+      "rollback_targets": [
+        1,
+        3,
+        4
+      ],
+      "policy_targets_correct": true,
+      "regenerated_documents": [],
+      "regenerated_document_count": 0,
+      "replay_usage": [],
+      "regeneration_compliant": true,
+      "host_polluted_before_commit": false,
+      "tests_rc": 0,
+      "success": true,
+      "error": ""
+    },
+    {
+      "mode": "causal",
+      "document_lines": 12,
+      "repeat": 1,
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "wall_s": 1.906943,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "tool_calls": 0,
+      "model_calls": 0,
+      "ledger_steps": 5,
+      "rollback_targets": [
+        1,
+        3,
+        4
+      ],
+      "policy_targets_correct": true,
+      "regenerated_documents": [],
+      "regenerated_document_count": 0,
+      "replay_usage": [],
+      "regeneration_compliant": true,
+      "host_polluted_before_commit": false,
+      "tests_rc": 0,
+      "success": true,
+      "error": ""
+    },
+    {
+      "mode": "causal",
+      "document_lines": 12,
+      "repeat": 2,
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "wall_s": 2.025655,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "tool_calls": 0,
+      "model_calls": 0,
+      "ledger_steps": 5,
+      "rollback_targets": [
+        1,
+        3,
+        4
+      ],
+      "policy_targets_correct": true,
+      "regenerated_documents": [],
+      "regenerated_document_count": 0,
+      "replay_usage": [],
+      "regeneration_compliant": true,
+      "host_polluted_before_commit": false,
+      "tests_rc": 0,
+      "success": true,
+      "error": ""
+    },
+    {
+      "mode": "temporal_checkpoint",
+      "document_lines": 12,
+      "repeat": 0,
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "wall_s": 5.968295,
+      "prompt_tokens": 491,
+      "completion_tokens": 339,
+      "total_tokens": 830,
+      "tool_calls": 1,
+      "model_calls": 1,
+      "ledger_steps": 6,
+      "rollback_targets": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "policy_targets_correct": true,
+      "regenerated_documents": [
+        "docs/changelog.md"
+      ],
+      "regenerated_document_count": 1,
+      "replay_usage": [
+        {
+          "path": "docs/changelog.md",
+          "attempts": 1,
+          "prompt_tokens": 491,
+          "completion_tokens": 339,
+          "total_tokens": 830
+        }
+      ],
+      "regeneration_compliant": true,
+      "host_polluted_before_commit": false,
+      "tests_rc": 0,
+      "success": true,
+      "error": ""
+    },
+    {
+      "mode": "temporal_checkpoint",
+      "document_lines": 12,
+      "repeat": 1,
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "wall_s": 5.813623,
+      "prompt_tokens": 491,
+      "completion_tokens": 375,
+      "total_tokens": 866,
+      "tool_calls": 1,
+      "model_calls": 1,
+      "ledger_steps": 6,
+      "rollback_targets": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "policy_targets_correct": true,
+      "regenerated_documents": [
+        "docs/changelog.md"
+      ],
+      "regenerated_document_count": 1,
+      "replay_usage": [
+        {
+          "path": "docs/changelog.md",
+          "attempts": 1,
+          "prompt_tokens": 491,
+          "completion_tokens": 375,
+          "total_tokens": 866
+        }
+      ],
+      "regeneration_compliant": true,
+      "host_polluted_before_commit": false,
+      "tests_rc": 0,
+      "success": true,
+      "error": ""
+    },
+    {
+      "mode": "temporal_checkpoint",
+      "document_lines": 12,
+      "repeat": 2,
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "wall_s": 5.987219,
+      "prompt_tokens": 491,
+      "completion_tokens": 404,
+      "total_tokens": 895,
+      "tool_calls": 1,
+      "model_calls": 1,
+      "ledger_steps": 6,
+      "rollback_targets": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "policy_targets_correct": true,
+      "regenerated_documents": [
+        "docs/changelog.md"
+      ],
+      "regenerated_document_count": 1,
+      "replay_usage": [
+        {
+          "path": "docs/changelog.md",
+          "attempts": 1,
+          "prompt_tokens": 491,
+          "completion_tokens": 404,
+          "total_tokens": 895
+        }
+      ],
+      "regeneration_compliant": true,
+      "host_polluted_before_commit": false,
+      "tests_rc": 0,
+      "success": true,
+      "error": ""
+    },
+    {
+      "mode": "whole_branch_abort",
+      "document_lines": 12,
+      "repeat": 0,
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "wall_s": 10.713692,
+      "prompt_tokens": 982,
+      "completion_tokens": 1000,
+      "total_tokens": 1982,
+      "tool_calls": 2,
+      "model_calls": 2,
+      "ledger_steps": 7,
+      "rollback_targets": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "policy_targets_correct": true,
+      "regenerated_documents": [
+        "docs/design.md",
+        "docs/changelog.md"
+      ],
+      "regenerated_document_count": 2,
+      "replay_usage": [
+        {
+          "path": "docs/design.md",
+          "attempts": 1,
+          "prompt_tokens": 491,
+          "completion_tokens": 677,
+          "total_tokens": 1168
+        },
+        {
+          "path": "docs/changelog.md",
+          "attempts": 1,
+          "prompt_tokens": 491,
+          "completion_tokens": 323,
+          "total_tokens": 814
+        }
+      ],
+      "regeneration_compliant": true,
+      "host_polluted_before_commit": false,
+      "tests_rc": 0,
+      "success": true,
+      "error": ""
+    },
+    {
+      "mode": "whole_branch_abort",
+      "document_lines": 12,
+      "repeat": 1,
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "wall_s": 10.939325,
+      "prompt_tokens": 982,
+      "completion_tokens": 1119,
+      "total_tokens": 2101,
+      "tool_calls": 2,
+      "model_calls": 2,
+      "ledger_steps": 7,
+      "rollback_targets": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "policy_targets_correct": true,
+      "regenerated_documents": [
+        "docs/design.md",
+        "docs/changelog.md"
+      ],
+      "regenerated_document_count": 2,
+      "replay_usage": [
+        {
+          "path": "docs/design.md",
+          "attempts": 1,
+          "prompt_tokens": 491,
+          "completion_tokens": 731,
+          "total_tokens": 1222
+        },
+        {
+          "path": "docs/changelog.md",
+          "attempts": 1,
+          "prompt_tokens": 491,
+          "completion_tokens": 388,
+          "total_tokens": 879
+        }
+      ],
+      "regeneration_compliant": true,
+      "host_polluted_before_commit": false,
+      "tests_rc": 0,
+      "success": true,
+      "error": ""
+    },
+    {
+      "mode": "whole_branch_abort",
+      "document_lines": 12,
+      "repeat": 2,
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "wall_s": 10.348821,
+      "prompt_tokens": 982,
+      "completion_tokens": 981,
+      "total_tokens": 1963,
+      "tool_calls": 2,
+      "model_calls": 2,
+      "ledger_steps": 7,
+      "rollback_targets": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "policy_targets_correct": true,
+      "regenerated_documents": [
+        "docs/design.md",
+        "docs/changelog.md"
+      ],
+      "regenerated_document_count": 2,
+      "replay_usage": [
+        {
+          "path": "docs/design.md",
+          "attempts": 1,
+          "prompt_tokens": 491,
+          "completion_tokens": 597,
+          "total_tokens": 1088
+        },
+        {
+          "path": "docs/changelog.md",
+          "attempts": 1,
+          "prompt_tokens": 491,
+          "completion_tokens": 384,
+          "total_tokens": 875
+        }
+      ],
+      "regeneration_compliant": true,
+      "host_polluted_before_commit": false,
+      "tests_rc": 0,
+      "success": true,
+      "error": ""
+    }
+  ]
+}

@@ -76,7 +76,7 @@ BranchFS?Waypoint?Sandlock?YoloFS?DeltaBox?Crab ? Cordon ?????? `docs/related-wo
 ## ????
 
 ```bash
-cd /home/bfq/agenttx
+cd /home/pengpeng/agenttx
 PYTHONPATH=src:. python experiments/scripts/bench_comparison_matrix.py --repeats 3 --n 10
 ```
 

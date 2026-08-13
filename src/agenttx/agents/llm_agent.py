@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from agenttx.harness import CodingAgentHarness
 from agenttx.policy import CommitPolicy
+from agenttx.providers import ProviderProfile, load_provider_env, resolve_provider
 
 def _tool(name, desc, props, required=None):
     params = {"type": "object", "properties": props}
@@ -49,12 +50,14 @@ class AgentRunResult:
     total_tokens: int = 0
 
 class LLMToolAgent:
-    def __init__(self, workdir, model=None, session_dir=None, max_turns=30, api_base=None, api_key=None):
+    def __init__(self, workdir, model=None, session_dir=None, max_turns=30, api_base=None, api_key=None, provider=None):
         self.workdir = Path(workdir).resolve()
-        self.model = model or os.environ.get("AGENTTX_MODEL") or os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+        load_provider_env()
+        self.provider: ProviderProfile = resolve_provider(provider)
+        self.model = model or self.provider.model
         self.max_turns = max_turns
-        self.api_base = api_base or os.environ.get("OPENAI_BASE_URL") or os.environ.get("OPENAI_API_BASE")
-        self.api_key = api_key or os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
+        self.api_base = api_base or self.provider.base_url or os.environ.get("OPENAI_API_BASE")
+        self.api_key = api_key or self.provider.api_key
         self.harness = CodingAgentHarness(workdir=self.workdir, session_dir=session_dir, policy=CommitPolicy(workdir=self.workdir))
         self.control_events: List[dict] = []
 
@@ -63,7 +66,13 @@ class LLMToolAgent:
 
     def _client(self):
         from openai import OpenAI
-        kw = {}
+        kw = {
+            # Keep real-provider experiments bounded.  The SDK default can wait
+            # indefinitely on a stalled network path, which makes a benchmark
+            # look hung and prevents its aggregate rc from being written.
+            "timeout": float(os.environ.get("AGENTTX_API_TIMEOUT_S", "90")),
+            "max_retries": int(os.environ.get("AGENTTX_API_MAX_RETRIES", "1")),
+        }
         if self.api_key:
             kw["api_key"] = self.api_key
         if self.api_base:
@@ -124,7 +133,10 @@ class LLMToolAgent:
 
     def run(self, task, commit=False):
         if not self.api_key:
-            raise RuntimeError("No API key. Set OPENAI_API_KEY or OPENROUTER_API_KEY.")
+            raise RuntimeError(
+                f"No API key for provider {self.provider.name}. "
+                f"Set the corresponding {self.provider.name.upper()}_API_KEY."
+            )
         self.control_events = []
         client = self._client()
         messages = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": task}]

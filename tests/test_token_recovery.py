@@ -4,6 +4,11 @@ from types import SimpleNamespace
 import pytest
 
 from agenttx.agents.llm_agent import LLMToolAgent
+from experiments.scripts.bench_token_end_to_end import (
+    recovery_task,
+    regenerated_documents,
+    summarize as summarize_end_to_end,
+)
 from experiments.scripts.bench_token_recovery import _apply_policy, summarize
 from experiments.workloads.token_recovery_agent import (
     inject_token_recovery_trajectory,
@@ -121,3 +126,73 @@ def test_token_summary_reports_agenttx_savings():
     assert summary["temporal_checkpoint"]["agenttx_total_tokens_saved"] == 600
     assert summary["temporal_checkpoint"]["agenttx_total_tokens_saved_pct"] == 0.375
     assert summary["whole_branch_abort"]["agenttx_completion_tokens_saved"] == 500
+
+
+def test_end_to_end_recovery_task_fixes_common_contract() -> None:
+    task = recovery_task(24)
+    assert "exactly" in task
+    assert "24 ordered entries" in task
+    assert "DESIGN-001:" in task
+    assert "DESIGN-024:" in task
+    assert "CHANGE-001:" in task
+    assert "CHANGE-024:" in task
+    assert "Do not call a rollback tool" in task
+    assert "commit=false" in task
+
+
+def test_end_to_end_regeneration_counts_only_write_file_effects() -> None:
+    def step(tool_name, path, status="applied"):
+        return SimpleNamespace(
+            tool_name=tool_name,
+            status=status,
+            effects=[SimpleNamespace(path=path)],
+        )
+
+    steps = [
+        step("write_file", "/ws/docs/design.md"),
+        step("run_shell", "/ws/docs/changelog.md"),
+        step("write_file", "docs/changelog.md"),
+        step("write_file", "docs/design.md", status="rolled_back"),
+    ]
+    assert regenerated_documents(steps, 1) == ["docs/changelog.md"]
+    assert regenerated_documents(steps, 0) == [
+        "docs/design.md",
+        "docs/changelog.md",
+    ]
+
+
+def test_end_to_end_summary_reports_nonzero_causal_savings() -> None:
+    rows = []
+    for mode, total, completion in [
+        ("causal", 900, 100),
+        ("temporal_checkpoint", 1500, 350),
+        ("whole_branch_abort", 2400, 700),
+    ]:
+        rows.append(
+            {
+                "mode": mode,
+                "document_lines": 24,
+                "model": "test",
+                "success": True,
+                "host_polluted_before_commit": False,
+                "regenerated_document_count": {
+                    "causal": 0,
+                    "temporal_checkpoint": 1,
+                    "whole_branch_abort": 2,
+                }[mode],
+                "prompt_tokens": total - completion,
+                "completion_tokens": completion,
+                "total_tokens": total,
+                "tool_calls": 5,
+                "model_calls": 3,
+                "recovery_ledger_steps": 2,
+                "policy_ms": 1.0,
+                "recovery_wall_s": 2.0,
+            }
+        )
+    summary = {row["mode"]: row for row in summarize_end_to_end(rows)}
+    temporal = summary["temporal_checkpoint"]
+    whole = summary["whole_branch_abort"]
+    assert temporal["agenttx_total_tokens_saved"] == 600
+    assert temporal["agenttx_total_tokens_saved_pct"] == 0.4
+    assert whole["agenttx_completion_tokens_saved"] == 600

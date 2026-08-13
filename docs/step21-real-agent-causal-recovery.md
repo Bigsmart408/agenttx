@@ -71,9 +71,9 @@ open-ended CI repair loops.
 ## Reproduce
 
 ```bash
-cd /home/bfq/agenttx
+cd /home/pengpeng/agenttx
 export PYTHONPATH=src:.
-/home/bfq/miniconda3/envs/agenttx/bin/python \
+/home/pengpeng/miniconda3/envs/agenttx/bin/python \
   experiments/scripts/bench_real_agent_recovery.py --repeats 3 --max-turns 30
 ```
 

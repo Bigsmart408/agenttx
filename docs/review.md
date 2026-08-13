@@ -1,9 +1,9 @@
 # AgentTX code review — current gaps
 
 **Date:** 2026-08-09
-**Repo:** `/home/bfq/agenttx`  
+**Repo:** `/home/pengpeng/agenttx`
 **Reviewed through:** `e78416a` (`Add agent-driven causal recovery`)
-**Scope:** Defect-first / gap review of the *current* implementation.  
+**Scope:** Defect-first / gap review of the *current* implementation.
 **Non-goal:** This document does **not** prescribe immediate patches; it inventories gaps for planning.
 
 Companion graphic: Cursor canvas `agenttx-code-graphic` (architecture + gap map).
@@ -16,11 +16,11 @@ AgentTX has grown from a Step 1–4 scaffold into a working trajectory runtime: 
 
 The remaining gaps are no longer “missing the whole system.” They cluster into:
 
-1. **API / product defaults** that under-sell the causal story  
-2. **Completeness holes** in effect capture and aliasing  
-3. **Performance** still dominated by overlay + tracing  
-4. **Atomicity / threat-model limits** of userspace commit  
-5. **Agent integration & eval** still thinner than the runtime core  
+1. **API / product defaults** that under-sell the causal story
+2. **Completeness holes** in effect capture and aliasing
+3. **Performance** still dominated by overlay + tracing
+4. **Atomicity / threat-model limits** of userspace commit
+5. **Agent integration & eval** still thinner than the runtime core
 6. **Paper / external bakeoff** unfinished
 
 ---

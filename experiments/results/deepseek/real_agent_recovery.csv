@@ -1,0 +1,4 @@
+repeat,provider,model,wall_s,finished,tool_calls,ledger_steps,inspect_calls,rollback_calls,injected_root_step,chosen_step,rollback_targets,selected_root,causal_targets_correct,host_polluted_before_commit,committed,independent_retained,derived_removed,pipeline_restored,recovery_note_written,tests_rc,success,error
+0,deepseek,deepseek-v4-flash,47.677943,True,23,24,1,1,0,0,"[0, 2, 3, 5, 6, 9, 10, 12]",True,True,False,True,True,True,True,True,0,True,
+1,deepseek,deepseek-v4-flash,38.601139,True,11,12,1,1,0,0,"[0, 2, 3, 5, 6, 7]",True,True,False,True,True,True,True,True,0,True,
+2,deepseek,deepseek-v4-flash,34.248633,True,22,22,2,1,0,0,"[0, 2, 3, 4, 5, 8, 9, 11]",True,True,False,True,True,True,True,True,0,True,

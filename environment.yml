@@ -1,0 +1,15 @@
+name: agenttx
+channels:
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pytest
+  - pandas
+  - matplotlib
+  - nbformat
+  - nbconvert
+  - pip:
+      - aider-chat==0.86.2
+      - litellm==1.81.10
+      - openai==2.20.0

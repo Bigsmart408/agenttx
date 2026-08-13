@@ -70,7 +70,7 @@ The runtime benchmark can be extended with the actual OpenAI-compatible
 
 ```bash
 source ~/.agenttx_llm.env
-PYTHONPATH=src:. /home/bfq/miniconda3/envs/agenttx/bin/python \
+PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python \
   experiments/scripts/bench_real_agent.py --repeats 3 --max-turns 35
 ```
 
