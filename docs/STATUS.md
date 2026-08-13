@@ -1,6 +1,6 @@
 # AgentTX status — done vs remaining
 
-Last updated: 2026-08-12 (VM `/home/pengpeng/agenttx`).
+Last updated: 2026-08-13 (container `/home/pengpeng/agenttx`).
 
 ## Completed
 
@@ -58,6 +58,7 @@ Last updated: 2026-08-12 (VM `/home/pengpeng/agenttx`).
 | Hard-link alias boundary | Step 23 probe shows lower hard links split on OverlayFS copy-up: alias reads stay stale and selective commit breaks inode identity | `hardlink_alias_probe.{json,md}`, `step23-hardlink-overlay-boundary.md` |
 | Avoided LLM replay tokens | Step 24 controlled real-DeepSeek replay sweep over 12/24/48-line artifacts and three recovery granularities | `token_recovery.{csv,json,md}`, `token_recovery_raw.csv`, `step24-token-replay-evaluation.md` |
 | Full autonomous recovery tokens | Step 26 complete post-policy LLM diagnosis/tool/validation/repair loop; root preflight and 79-test suite pass on x86, credentialed sweep pending | `bench_token_end_to_end.py`, `plot_token_end_to_end.ipynb`, `step26-end-to-end-token-comparison.md` |
+| eBPF dependency tracer (strace replacement) | Step 27 syscall-tracepoint capture with in-kernel process-tree filtering, FIFO-held startup, strace-parity parser, `auto`/`strace`/`bpf` backend selection, CLI flag, persistent backend, and orchestration/parity tests | `src/agenttx/bpf_trace.py`, `src/agenttx/bpf_trace.bt` generation, `tests/test_bpf_trace.py`, `bench_bpf_trace.py`, `plot_bpf_trace.ipynb`, `step27-bpf-dependency-tracing.md` |
 
 **Evidence suite highlights (2026-08-07):**
 - Cascade rollback: host clean until commit; only intended files land.
@@ -80,6 +81,7 @@ Last updated: 2026-08-12 (VM `/home/pengpeng/agenttx`).
 - Hard-link boundary: on the Linux 5.15 `try` OverlayFS path, writing one name of a lower hard link leaves the sibling alias stale in the speculative view and splits the inode at selective commit. Ledger-only canonicalization cannot restore POSIX semantics; causal-by-default remains blocked on a different substrate or kernel/FUSE support.
 - Token replay: 27/27 controlled `deepseek-chat` recovery samples passed with zero pre-commit host leaks. Causal rollback retained both valid artifacts and required no LLM replay; optimistic temporal recovery replayed one document (692.3/971.3/1,335.7 mean tokens at 12/24/48 lines), while whole branch/session abort replayed two (1,435.7/1,886.7/2,891.0). These are avoided replay tokens, not total end-to-end recovery tokens or external-artifact results.
 - End-to-end token comparison: Step 26 charges the complete post-policy autonomous recovery loop and records prompt/completion/total usage, tool/model calls, regeneration, success, leakage, and latency. The x86 conda environment, root-compatible `try` substrate, root preflight, and 79-test suite are ready; the 27-sample numeric sweep remains pending only because no API credential is configured, and no placeholders were added.
+- eBPF tracing: Step 27 adds a kernel-tracepoint dependency tracer with the same read/negative semantics as the strace parser (including its classification quirks), in-kernel allowed-process-tree seeding, FIFO-held command startup so no syscall escapes, optional `vfs_open`/`dpath()` symlink-alias resolution on bpftrace >= 0.10, `auto`/`strace`/`bpf` backend selection persisted per session, and fail-closed behavior identical to Step 7. Twenty new unit tests pass (parity, script generation, backend resolution, FIFO release, full stub-driven orchestration); the numeric overhead comparison awaits a root-capable host because this container cannot attach BPF programs (unprivileged_bpf_disabled=2) and its `try` overlay backend cannot run on the read-only rootfs.
 - Workspace-start invariant: real-agent benchmark construction exposed stale inherited `$PWD` despite `subprocess cwd=`. One-shot and persistent-worker launches now synchronize `PWD` with the protected workspace, with a regression test for a different caller directory.
 
 **Refactor compare (DeepSeek):**
@@ -99,7 +101,7 @@ Last updated: 2026-08-12 (VM `/home/pengpeng/agenttx`).
 2. **Scalable snapshots** - content-addressed blobs reduce repeated file storage (9.0% physical/logical bytes in the Step 12 workload), but directory traversal and historical/WAL copies still grow with speculative state.
 3. **Crash-atomic filesystem commit** - a durable WAL now restores interrupted host materialization on reload; an in-flight external observer can still see partial paths, so kernel-level atomicity remains out of scope.
 4. **Lower overlay overhead** - known-tool tracing bypass, a longer-lived try worker, and incremental snapshots are measured and preserved in iteration history; shared pool remains substantially slower than bare execution, so ledger and overlay traversal costs remain open.
-5. **Trace portability and completeness** - current capture requires Linux strace and models workspace-local path syscalls; unsupported syscalls and non-symlink aliases need a formal coverage story.
+5. **Trace portability and completeness** - capture now has two backends: the original Linux strace path and a new eBPF tracepoint tracer (Step 27) that is preferred automatically when attachable; `auto`/`strace`/`bpf` is selectable per session. Unsupported syscalls and non-symlink aliases (non-AT_FDCWD dirfds without `dpath()`) still need a formal coverage story, and the eBPF backend needs a root-capable host to measure its overhead.
 6. **Non-filesystem effects** - network/cloud side effects (currently coarse hide_network only).
 
 ### Evaluation gaps
@@ -134,6 +136,8 @@ python experiments/scripts/bench_causal_retention.py --repeats 3
 python experiments/scripts/probe_hardlink_alias.py
 PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python experiments/scripts/bench_token_recovery.py --document-lines 12 24 48 --repeats 3
 PYTHONPATH=src:. python3 experiments/scripts/bench_token_end_to_end.py --document-lines 12 24 48 --repeats 3 --max-turns 20
+PYTHONPATH=src:. python3 experiments/scripts/bench_bpf_trace.py --steps 20 --repeats 3 --workload read
+PYTHONPATH=src:. python3 motivation/plot_bpf_trace.py
 PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python experiments/scripts/bench_real_agent.py --repeats 3 --max-turns 35
 PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python experiments/scripts/bench_real_agent_recovery.py --repeats 3 --max-turns 30
 PYTHONPATH=src:. python3 motivation/bench_optimization_comparison.py --length 64 --repeats 2

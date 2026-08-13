@@ -56,6 +56,14 @@ The reproducible no-op benchmark uses 10 steps and three repeats:
 The measured increment is 17.91 ms/step (9.7%). Overlay setup remains the
 dominant per-step cost.
 
+## eBPF backend
+
+`docs/step27-bpf-dependency-tracing.md` replaces the ptrace path with a
+syscall-tracepoint tracer (`trace_backend="bpf"` / `--trace-backend bpf`;
+`auto` prefers eBPF when attachable and falls back to this strace backend).
+The dependency semantics, fail-closed initialization, and raw-log hygiene
+described here apply to both backends.
+
 ## Remaining boundary
 
 The parser intentionally covers common open/stat/access/readlink/exec/chdir

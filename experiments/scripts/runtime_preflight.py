@@ -16,6 +16,13 @@ def runtime_preflight(root: Optional[Path] = None) -> Dict[str, object]:
     checks = []
     strace = shutil.which("strace")
     checks.append({"name": "strace", "ok": bool(strace), "detail": strace or "not found"})
+    bpftrace = shutil.which("bpftrace")
+    checks.append({
+        "name": "bpftrace",
+        "ok": bool(bpftrace),
+        "detail": bpftrace or "not found (eBPF tracing backend unavailable; strace fallback used)",
+        "required": False,
+    })
     wrapper = root / "scripts" / "try-wrapper.sh"
     try_bin = root / "third_party" / "try" / "try"
     try_ready = wrapper.is_file() and os.access(wrapper, os.X_OK) and try_bin.is_file()
@@ -66,7 +73,9 @@ def runtime_preflight(root: Optional[Path] = None) -> Dict[str, object]:
         })
     return {
         "root": str(root),
-        "ok": all(bool(check["ok"]) for check in checks),
+        "ok": all(
+            bool(check["ok"]) for check in checks if not check.get("required", True)
+        ),
         "checks": checks,
     }
 

@@ -14,6 +14,7 @@ environment on the research VM. Pins are lower bounds unless noted.
 |---|---|---|
 | Linux (user namespaces + overlayfs) | Shared semisolate / `try` sandbox | `src/agenttx/semisolate.py`, `third_party/try` |
 | `strace` | Default automatic READ / NEGATIVE dependency tracing | `src/agenttx/trace.py`, `SharedSemisolate` |
+| `bpftrace` (root) | eBPF tracepoint tracer, preferred automatically when attachable | `src/agenttx/bpf_trace.py`, `SharedSemisolate` |
 | `git` | Bootstrap / clone `try`, some experiment helpers | `scripts/bootstrap.sh` |
 | `make` / build tools | Building vendored `try` if the binary is missing | `third_party/try` |
 | `python >= 3.11` | Runtime language | whole repo |
@@ -31,9 +32,11 @@ Bootstrap:
 command -v strace
 ```
 
-`README.md` notes that default sessions fail closed when `strace` is
-missing. Experiments that intentionally measure the untraced mode can
-start with `agenttx begin --no-trace-reads`.
+`README.md` notes that default sessions fail closed when neither `strace`
+nor a working eBPF tracer is present. `agenttx begin --trace-backend
+{auto,strace,bpf}` selects the backend (`auto` prefers eBPF); experiments
+that intentionally measure the untraced mode can start with
+`agenttx begin --no-trace-reads`.
 
 ## 2. Core runtime (AgentTX library)
 

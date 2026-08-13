@@ -110,3 +110,17 @@ def test_new_recovery_notebooks_use_their_source_results() -> None:
         assert "Path.cwd()" in source
         assert "ax.plot" in source
         assert "ax.bar" not in source
+
+
+def test_bpf_trace_notebook_uses_overhead_results() -> None:
+    source = _code(ROOT / "motivation" / "plot_bpf_trace.ipynb")
+    assert "bpf_trace_overhead.csv" in source
+    assert "per_step_ms_mean" in source
+    assert "per_step_ms_p95" in source
+    assert "reads_captured" in source
+    assert "negatives_captured" in source
+    assert "FIG-Bpf-Trace.pdf" in source
+    assert "Path.cwd()" in source
+    assert "ax.plot" in source
+    assert "ax.bar" not in source
+    assert "bench_bpf_trace.py" in source

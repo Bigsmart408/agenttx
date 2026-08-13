@@ -66,6 +66,12 @@ def main() -> int:
         if not isinstance(argv, list) or not all(isinstance(item, str) for item in argv):
             _write_frame(stdout, {"error": "invalid argv"})
             continue
+        hold_fifo = request.get("hold_fifo")
+        if isinstance(hold_fifo, str):
+            # eBPF backend: block the step on a FIFO until the tracer on the
+            # host side has attached all probes (ATXBPF_READY).
+            with open(hold_fifo, "rb") as fifo:
+                fifo.read(1)
         try:
             completed = subprocess.run(
                 argv,

@@ -1,15 +1,18 @@
 """Shared/incremental semisolate pool backed by binpash/try -N DIR."""
 from __future__ import annotations
-import base64, hashlib, json, os, re, shlex, shutil, stat, struct, subprocess, tempfile, time
+import base64, errno, hashlib, json, os, re, shlex, shutil, signal, stat, struct, subprocess, tempfile, time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Sequence
+from typing import Callable, Dict, Iterator, List, Optional, Sequence, Tuple
+from . import bpf_trace
 from .effects import SummaryEntry, diff_summaries, parse_try_summary
 from .ledger import Effect, EffectKind
 from .layers import LayerStore, _remove_overlay_tree
 from .trace import parse_strace_effects
 
 _WHITEOUT_DIGEST = "<agenttx:whiteout>"
+_TRACE_BACKENDS = ("auto", "strace", "bpf")
+_BPF_FIFO_PREFIX = ".agenttx-bpf-fifo-"
 
 
 def _iter_upper_entries(directory: Path) -> Iterator[Path]:
@@ -122,6 +125,7 @@ class StepResult:
     summary_after: Dict[str, SummaryEntry]
     duration_s: float
     effects: List[Effect] = field(default_factory=list)
+    tracer: Optional[str] = None
 
 @dataclass
 class SharedSemisolate:
@@ -130,6 +134,7 @@ class SharedSemisolate:
     sandbox_dir: Optional[Path] = None
     hide_network: bool = False
     trace_reads: bool = True
+    trace_backend: str = "auto"
     _owns_sandbox: bool = False
     _step_count: int = 0
     _closed: bool = False
@@ -142,16 +147,38 @@ class SharedSemisolate:
     _pending_snapshot_changes: Optional[List[str]] = None
     _worker_crash_once: bool = False
     _worker_failure_count: int = 0
+    _bpf_state: Optional[dict] = None
     layers: Optional[LayerStore] = None
 
     def __post_init__(self) -> None:
         self.workspace = Path(self.workspace).resolve()
         self.try_bin = Path(self.try_bin)
-        if self.trace_reads and shutil.which("strace") is None:
-            raise RuntimeError(
-                "automatic dependency tracing requires strace; "
-                "construct SharedSemisolate(trace_reads=False) to opt out"
+        if self.trace_backend not in _TRACE_BACKENDS:
+            raise ValueError(
+                f"trace_backend must be one of {_TRACE_BACKENDS}, "
+                f"got {self.trace_backend!r}"
             )
+        if self.trace_reads:
+            strace_present = shutil.which("strace") is not None
+            if self.trace_backend == "strace" and not strace_present:
+                raise RuntimeError(
+                    "automatic dependency tracing requires strace; "
+                    "construct SharedSemisolate(trace_reads=False) to opt out"
+                )
+            if self.trace_backend == "bpf":
+                static_ok, static_detail = bpf_trace.bpf_static_available()
+                if not static_ok:
+                    raise RuntimeError(
+                        "automatic dependency tracing requires a working eBPF "
+                        f"tracer; construct SharedSemisolate(trace_reads=False) "
+                        f"to opt out. bpf probe: {static_detail}"
+                    )
+            elif not strace_present and not bpf_trace.bpf_static_available()[0]:
+                raise RuntimeError(
+                    "automatic dependency tracing requires strace or a "
+                    "working eBPF tracer; construct "
+                    "SharedSemisolate(trace_reads=False) to opt out"
+                )
         if self.sandbox_dir is None:
             self.sandbox_dir = Path(tempfile.mkdtemp(prefix="agenttx-sandbox-", dir="/tmp"))
             self._owns_sandbox = True
@@ -193,6 +220,209 @@ class SharedSemisolate:
             check=False,
         )
 
+    # ------------------------------------------------------------------
+    # Trace backend selection (strace vs eBPF)
+    # ------------------------------------------------------------------
+
+    def _resolve_step_backend(self) -> Tuple[str, str]:
+        """Choose the tracing backend for this step; fails closed."""
+        if self.trace_backend == "strace":
+            return "strace", "strace"
+        self._ensure_bpf_state()
+        assert self._bpf_state is not None
+        if self._bpf_state["available"]:
+            return "bpf", self._bpf_state["detail"]
+        if self.trace_backend == "bpf":
+            raise RuntimeError(
+                "trace backend 'bpf' requested but eBPF tracing is "
+                f"unavailable: {self._bpf_state['detail']}"
+            )
+        return "strace", "strace (eBPF unavailable)"
+
+    def _ensure_bpf_state(self) -> None:
+        """Attach-precheck the eBPF tracer once per session and cache it."""
+        if self._bpf_state is not None:
+            return
+        script, resolved, detail = bpf_trace.resolve_bpf_script()
+        self._bpf_state = {
+            "available": bool(script),
+            "script": script,
+            "resolved": resolved,
+            "detail": detail,
+        }
+
+    # ------------------------------------------------------------------
+    # eBPF-traced step execution
+    # ------------------------------------------------------------------
+
+    def _run_step_bpf(
+        self, command: Sequence[str], flags: Sequence[str]
+    ) -> Tuple[subprocess.CompletedProcess, List[Effect], float]:
+        """Run one step under the eBPF tracer.
+
+        The command is held on a FIFO until bpftrace reports ``ATXBPF_READY``,
+        so no syscall of the command (or its descendants) can escape the
+        trace.  A tracer failure fails the step closed after the command has
+        run (releasing the hold first), mirroring the strace backend's
+        missing-log behavior; the host stays clean because effects remain
+        speculative in the overlay.
+        """
+        self._ensure_bpf_state()
+        assert self._bpf_state is not None and self._bpf_state["script"]
+        assert self.sandbox_dir is not None
+        session_token = hashlib.sha256(
+            str(self.sandbox_dir).encode("utf-8")
+        ).hexdigest()[:12]
+        tag = f"{session_token}-{os.getpid()}-{self._step_count}"
+        fifo_name = f"{_BPF_FIFO_PREFIX}{tag}"
+        fifo_logical = Path("/tmp") / fifo_name
+        fifo_upper = self.sandbox_dir / "upperdir" / "tmp" / fifo_name
+        trace_log = Path("/tmp") / f".agenttx-bpf-{tag}.raw"
+        fifo_upper.parent.mkdir(parents=True, exist_ok=True)
+        os.mkfifo(fifo_upper)
+        bpf_proc: Optional[subprocess.Popen] = None
+        log_handle = None
+        released = False
+        ready_failed: Optional[str] = None
+        popen: Optional[subprocess.Popen] = None
+        collect: Optional[Callable[[], subprocess.CompletedProcess]] = None
+        waiter: Optional[subprocess.Popen] = None
+        t0 = time.perf_counter()
+        try:
+            if self.persistent_worker:
+                request = {
+                    "argv": list(command),
+                    "cwd": str(self.workspace),
+                    "hold_fifo": str(fifo_logical),
+                }
+                try:
+                    self._dispatch_worker(request)
+                except Exception:
+                    # Worker failure must not change correctness: fall back to
+                    # the one-shot try path, exactly like the strace backend.
+                    self._worker_failure_count += 1
+                    self._stop_worker()
+                    self._repair_worker_sandbox()
+                else:
+                    assert self._worker_process is not None
+                    waiter = self._worker_process
+                    collect = lambda: self._collect_worker_response(list(command))
+            if collect is None:
+                read_cmd = 'IFS= read -r _ < "$0"; shift; exec "$@"'
+                popen = subprocess.Popen(
+                    [
+                        str(self.try_bin),
+                        *flags,
+                        "--",
+                        "bash",
+                        "-c",
+                        read_cmd,
+                        str(fifo_logical),
+                        *command,
+                    ],
+                    cwd=str(self.workspace),
+                    env={**os.environ, "PWD": str(self.workspace)},
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                waiter = popen
+            seed = waiter.pid if waiter is not None else 0
+            log_handle = open(trace_log, "w", encoding="utf-8")
+            binary = bpf_trace.bpftrace_binary()
+            assert binary is not None  # validated during initialization
+            bpf_proc = subprocess.Popen(
+                [binary, "-q", "-e", self._bpf_state["script"], str(seed)],
+                stdout=log_handle,
+                stderr=subprocess.DEVNULL,
+                env={**os.environ, "BPFTRACE_STRLEN": "4096"},
+            )
+            ready, elapsed = bpf_trace.wait_for_bpftrace_ready(
+                trace_log,
+                seed,
+                timeout=30.0,
+                abort_check=lambda: bpf_proc.poll() is not None,
+            )
+            if not ready:
+                ready_failed = (
+                    f"bpftrace did not become ready within {elapsed:.1f}s "
+                    f"(rc={bpf_proc.returncode})"
+                )
+            self._release_fifo(fifo_upper, waiter)
+            released = True
+            if collect is not None:
+                cp = collect()
+            else:
+                assert popen is not None
+                stdout, stderr = popen.communicate()
+                cp = subprocess.CompletedProcess(
+                    popen.args, popen.returncode, stdout, stderr
+                )
+        finally:
+            if bpf_proc is not None:
+                try:
+                    bpf_proc.send_signal(signal.SIGINT)
+                    bpf_proc.wait(timeout=10)
+                except Exception:
+                    bpf_proc.kill()
+                    try:
+                        bpf_proc.wait(timeout=5)
+                    except Exception:
+                        pass
+            if not released and waiter is not None:
+                # A readiness failure must not leave the command blocked on
+                # the FIFO; release it so the step can complete and fail closed.
+                try:
+                    self._release_fifo(fifo_upper, waiter, timeout=30.0)
+                except Exception:
+                    pass
+            if log_handle is not None:
+                log_handle.close()
+        duration = time.perf_counter() - t0
+        try:
+            if ready_failed is not None:
+                raise RuntimeError(ready_failed)
+            if not trace_log.is_file():
+                raise RuntimeError(
+                    "bpftrace did not produce the expected dependency log"
+                )
+            text = trace_log.read_text(encoding="utf-8", errors="replace")
+            effects = bpf_trace.parse_bpf_effects(text, self.workspace)
+            return cp, effects, duration
+        finally:
+            for leftover in (fifo_upper, trace_log):
+                try:
+                    leftover.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+    def _release_fifo(
+        self,
+        fifo_upper: Path,
+        waiter: Optional[subprocess.Popen],
+        *,
+        timeout: float = 120.0,
+    ) -> None:
+        """Write the release byte to the hold FIFO without blocking forever."""
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fd = os.open(str(fifo_upper), os.O_WRONLY | os.O_NONBLOCK)
+            except OSError as exc:
+                if exc.errno != errno.ENXIO:
+                    raise
+                if waiter is not None and waiter.poll() is not None:
+                    return  # command already exited without opening the FIFO
+                if time.monotonic() >= deadline:
+                    return
+                time.sleep(0.02)
+                continue
+            try:
+                os.write(fd, b"go")
+            finally:
+                os.close(fd)
+            return
+
     def refresh_summary(self) -> Dict[str, SummaryEntry]:
         assert self.sandbox_dir is not None
         try:
@@ -228,10 +458,11 @@ class SharedSemisolate:
                 logical = Path("/" + rel.as_posix())
 
                 # Read tracing writes an internal raw log into /tmp inside the
-                # overlay. Ignore crash leftovers and never expose them as effects.
-                if (
-                    rel.parent == Path("tmp")
-                    and entry.name.startswith(".agenttx-strace-")
+                # overlay, and the eBPF backend leaves a control FIFO there.
+                # Ignore crash leftovers and never expose them as effects.
+                if rel.parent == Path("tmp") and (
+                    entry.name.startswith(".agenttx-strace-")
+                    or entry.name.startswith(_BPF_FIFO_PREFIX)
                 ):
                     continue
 
@@ -372,21 +603,27 @@ class SharedSemisolate:
     def _run_worker(
         self, command: Sequence[str], cwd: Path
     ) -> subprocess.CompletedProcess:
+        request = {"argv": list(command), "cwd": str(cwd)}
+        self._dispatch_worker(request)
+        return self._collect_worker_response(list(command))
+
+    def _dispatch_worker(self, request: dict) -> None:
         self._ensure_worker()
         assert self._worker_process is not None
         assert self._worker_process.stdin is not None
-        request = json.dumps(
-            {"argv": list(command), "cwd": str(cwd)},
-            separators=(",", ":"),
-        ).encode("utf-8")
+        body = json.dumps(request, separators=(",", ":")).encode("utf-8")
         if self._worker_crash_once:
             self._worker_crash_once = False
             self._worker_process.kill()
             self._worker_process.wait(timeout=2)
             raise RuntimeError("injected persistent-worker crash")
-        self._worker_process.stdin.write(struct.pack("!I", len(request)))
-        self._worker_process.stdin.write(request)
+        self._worker_process.stdin.write(struct.pack("!I", len(body)))
+        self._worker_process.stdin.write(body)
         self._worker_process.stdin.flush()
+
+    def _collect_worker_response(self, argv: Sequence[str]) -> subprocess.CompletedProcess:
+        assert self._worker_process is not None
+        assert self._worker_process.stdout is not None
         response = self._read_worker_frame(self._worker_process.stdout)
         if "error" in response:
             raise RuntimeError(str(response["error"]))
@@ -400,7 +637,7 @@ class SharedSemisolate:
         else:
             stderr = b""
         return subprocess.CompletedProcess(
-            list(command),
+            list(argv),
             int(response.get("returncode", 1)),
             stdout.decode("utf-8", "replace"),
             stderr.decode("utf-8", "replace"),
@@ -481,47 +718,55 @@ class SharedSemisolate:
         # executing it directly avoids an extra shell parse in every try call.
         command = [str(script)]
         trace_upper: Optional[Path] = None
-        if should_trace_reads:
-            strace_bin = shutil.which("strace")
-            assert strace_bin is not None  # validated during initialization
-            session_token = hashlib.sha256(
-                str(self.sandbox_dir).encode("utf-8")
-            ).hexdigest()[:12]
-            trace_name = (
-                f".agenttx-strace-{session_token}-{os.getpid()}-"
-                f"{self._step_count}.raw"
-            )
-            trace_logical = Path("/tmp") / trace_name
-            trace_upper = self.sandbox_dir / "upperdir" / "tmp" / trace_name
-            command = [
-                strace_bin,
-                "-yy",
-                "-f",
-                "-s",
-                "4096",
-                "--seccomp-bpf",
-                "--trace=%file,process",
-                "-o",
-                str(trace_logical),
-                *command,
-            ]
-
-        t0 = time.perf_counter()
-        if self.persistent_worker:
-            try:
-                cp = self._run_worker(command, self.workspace)
-            except Exception:
-                # A worker failure must not change correctness. Restarting the
-                # worker is deferred; this step uses the original try path.
-                self._worker_failure_count += 1
-                self._stop_worker()
-                self._repair_worker_sandbox()
-                cp = self._run_try([*flags, "--", *command], cwd=self.workspace)
-        else:
-            cp = self._run_try([*flags, "--", *command], cwd=self.workspace)
-        duration = time.perf_counter() - t0
-
+        tracer: Optional[str] = None
         trace_effects: List[Effect] = []
+        if should_trace_reads:
+            backend, _detail = self._resolve_step_backend()
+            if backend == "bpf":
+                cp, trace_effects, duration = self._run_step_bpf(command, flags)
+                tracer = "bpf"
+            else:
+                tracer = "strace"
+                strace_bin = shutil.which("strace")
+                assert strace_bin is not None  # validated during initialization
+                session_token = hashlib.sha256(
+                    str(self.sandbox_dir).encode("utf-8")
+                ).hexdigest()[:12]
+                trace_name = (
+                    f".agenttx-strace-{session_token}-{os.getpid()}-"
+                    f"{self._step_count}.raw"
+                )
+                trace_logical = Path("/tmp") / trace_name
+                trace_upper = self.sandbox_dir / "upperdir" / "tmp" / trace_name
+                command = [
+                    strace_bin,
+                    "-yy",
+                    "-f",
+                    "-s",
+                    "4096",
+                    "--seccomp-bpf",
+                    "--trace=%file,process",
+                    "-o",
+                    str(trace_logical),
+                    *command,
+                ]
+
+        if tracer != "bpf":
+            t0 = time.perf_counter()
+            if self.persistent_worker:
+                try:
+                    cp = self._run_worker(command, self.workspace)
+                except Exception:
+                    # A worker failure must not change correctness. Restarting
+                    # the worker is deferred; this step uses the original try path.
+                    self._worker_failure_count += 1
+                    self._stop_worker()
+                    self._repair_worker_sandbox()
+                    cp = self._run_try([*flags, "--", *command], cwd=self.workspace)
+            else:
+                cp = self._run_try([*flags, "--", *command], cwd=self.workspace)
+            duration = time.perf_counter() - t0
+
         if trace_upper is not None:
             try:
                 if not trace_upper.is_file():
@@ -560,7 +805,7 @@ class SharedSemisolate:
         after = dict(self._cached_summary)
         idx = self._step_count
         self._step_count += 1
-        return StepResult(step_index=idx, returncode=cp.returncode, stdout=cp.stdout, stderr=cp.stderr, summary_before=before, summary_after=after, duration_s=duration, effects=effects)
+        return StepResult(step_index=idx, returncode=cp.returncode, stdout=cp.stdout, stderr=cp.stderr, summary_before=before, summary_after=after, duration_s=duration, effects=effects, tracer=tracer)
 
     def step_effects(self, result: StepResult) -> List[Effect]:
         return list(result.effects)

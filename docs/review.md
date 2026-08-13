@@ -61,7 +61,7 @@ The remaining gaps are no longer “missing the whole system.” They cluster in
 - **Measured boundary:** `hardlink_alias_probe.{json,md}` demonstrates that the current substrate diverges from POSIX hard-link visibility before causal analysis. A FUSE/kernel-aware or different snapshot substrate is required for faithful support; bind-mounted tool caches remain a separate risk.
 
 #### G4. Trace completeness is partial and Linux-only
-- **Where:** `trace.py` (`open`/`openat`/`openat2` focused); `SharedSemisolate` requires `strace` unless `trace_reads=False`.
+- **Where:** `trace.py` (`open`/`openat`/`openat2` focused) and the eBPF tracepoint backend `bpf_trace.py` (Step 27); `SharedSemisolate` requires `strace` or a working eBPF tracer unless `trace_reads=False`, selectable via `trace_backend`/`--trace-backend`.
 - **Gaps:**
   - No portable Windows/macOS story
   - Formal unsupported-syscall list not enforced as fail-closed coverage matrix

@@ -75,6 +75,7 @@ class AgentTX:
     pool: Optional[SharedSemisolate] = None
     hide_network: bool = False
     trace_reads: bool = True
+    trace_backend: str = "auto"
     commit_policy: Optional[CommitPolicy] = None
     _meta_path: Optional[Path] = None
 
@@ -90,6 +91,7 @@ class AgentTX:
         session_dir: Optional[Path] = None,
         hide_network: bool = False,
         trace_reads: bool = True,
+        trace_backend: str = "auto",
         commit_policy: Optional[CommitPolicy] = None,
     ) -> "AgentTX":
         workdir = Path(workdir).resolve() if workdir else Path.cwd()
@@ -98,6 +100,7 @@ class AgentTX:
             sandbox_dir=session_dir,
             hide_network=hide_network,
             trace_reads=trace_reads,
+            trace_backend=trace_backend,
         )
         # if caller passed session_dir, SharedSemisolate should not destroy foreign dirs? 
         # mark ownership: if session_dir provided, still allow destroy on close(destroy=True)
@@ -108,6 +111,7 @@ class AgentTX:
             pool=pool,
             hide_network=hide_network,
             trace_reads=trace_reads,
+            trace_backend=trace_backend,
             commit_policy=commit_policy,
         )
         tx._recover_commit_wal()
@@ -137,6 +141,7 @@ class AgentTX:
             ledger=Ledger.from_dict(data.get("ledger", {})),
             hide_network=bool(data.get("hide_network", False)),
             trace_reads=bool(data.get("trace_reads", True)),
+            trace_backend=str(data.get("trace_backend", "auto")),
             commit_policy=commit_policy,
         )
         tx.pool = SharedSemisolate(
@@ -144,6 +149,7 @@ class AgentTX:
             sandbox_dir=session_dir,
             hide_network=tx.hide_network,
             trace_reads=tx.trace_reads,
+            trace_backend=tx.trace_backend,
         )
         tx.pool._owns_sandbox = True
         tx._recover_commit_wal()
@@ -188,6 +194,7 @@ class AgentTX:
             "workspace": str(self.workspace),
             "hide_network": self.hide_network,
             "trace_reads": self.trace_reads,
+            "trace_backend": self.trace_backend,
             "commit_policy": {
                 "allow_globs": list(self.commit_policy.allow_globs),
                 "deny_globs": list(self.commit_policy.deny_globs),
@@ -203,6 +210,7 @@ class AgentTX:
                 workspace=self.workspace,
                 hide_network=self.hide_network,
                 trace_reads=self.trace_reads,
+                trace_backend=self.trace_backend,
             )
 
     def _overlay_entry(self, logical: Path) -> Optional[Path]:
@@ -540,6 +548,7 @@ class AgentTX:
             "session_dir": str(self.pool.session_dir) if self.pool else None,
             "hide_network": self.hide_network,
             "trace_reads": self.trace_reads,
+            "trace_backend": self.trace_backend,
             "steps": len(self.ledger.steps),
             "committed_frontier": self.ledger.committed_frontier,
         }

@@ -16,6 +16,7 @@ def cmd_begin(args: argparse.Namespace) -> int:
         workdir=Path(args.workdir).resolve() if args.workdir else Path.cwd(),
         hide_network=args.no_network,
         trace_reads=not args.no_trace_reads,
+        trace_backend=args.trace_backend,
     )
     print(json.dumps(tx.status(), indent=2))
     print(tx.pool.session_dir)
@@ -97,6 +98,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-trace-reads",
         action="store_true",
         help="disable automatic workspace read/negative-lookup tracing",
+    )
+    b.add_argument(
+        "--trace-backend",
+        choices=("auto", "strace", "bpf"),
+        default="auto",
+        help=(
+            "read-dependency tracing backend: auto prefers eBPF when "
+            "available and falls back to strace; strace forces ptrace; "
+            "bpf requires a working eBPF tracer (default: auto)"
+        ),
     )
     b.set_defaults(func=cmd_begin)
 

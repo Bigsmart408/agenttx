@@ -36,6 +36,9 @@ See [`docs/STATUS.md`](docs/STATUS.md) for completed work, evidence artifacts, a
 ## Runtime requirement
 
 Automatic workspace dependency tracing is enabled by default and requires
-Linux strace. The CLI fails closed when it is unavailable; experiments that
+either Linux strace or a working eBPF tracer (root + bpftrace). The CLI
+fails closed when neither is available; the backend is selectable with
+`agenttx begin --trace-backend {auto,strace,bpf}` — `auto` prefers eBPF when
+the host can attach BPF programs and falls back to strace. Experiments that
 intentionally measure the untraced mode can start a session with
 agenttx begin --no-trace-reads.

@@ -648,7 +648,7 @@ snapshot 存储，但不代表 snapshot 遍历和 WAL copy 已经完全解决。
 1. checkpoint/whole-branch 是恢复粒度 emulation，不是外部 artifact 端到端结果；
 2. Step 24 token 结果是 avoided replay tokens；Step 26 才计入完整 post-policy Agent 恢复循环，但当前尚无数值；
 3. 当前真实 Agent 任务是 seeded repository，不是大型真实开源项目；
-4. full tracing 仍依赖 Linux `strace`，未覆盖所有 syscall 和非文件系统 effect；
+4. full tracing 依赖 Linux `strace` 或 eBPF tracepoint 后端（Step 27，`--trace-backend auto` 优先 eBPF），两者均未覆盖所有 syscall 和非文件系统 effect；
 5. hard-link/bind-mount alias 仍是 causal-by-default 的正确性边界；
 6. concurrency 目前只覆盖 disjoint workspaces；
 7. 历史优化数据部分未 interleave，适合 motivation 和成本分解，不应包装成严格

@@ -57,6 +57,9 @@ result artifacts:
   completion, and total API tokens plus recovery p95 across the same policies.
 - `plot_real_agent_recovery.ipynb` exposes the live agent's recovery decision,
   trajectory variability, rollback targets, and semantic success conditions.
+- `plot_bpf_trace.ipynb` compares the eBPF tracer against strace and no
+  tracing: per-step mean/p50/p95, the incremental tracing tax, and verified
+  READ/NEGATIVE capture fidelity.
 - `plot_robustness.ipynb` covers p50/p95 latency, worker-crash fallback,
   long-session resume, and concurrent-agent isolation without combining their
   heterogeneous latencies into one score.
@@ -79,6 +82,8 @@ jupyter nbconvert --to notebook --execute motivation/plot_token_end_to_end.ipynb
   --output motivation/plot_token_end_to_end.executed.ipynb
 jupyter nbconvert --to notebook --execute motivation/plot_real_agent_recovery.ipynb \
   --output motivation/plot_real_agent_recovery.executed.ipynb
+jupyter nbconvert --to notebook --execute motivation/plot_bpf_trace.ipynb \
+  --output motivation/plot_bpf_trace.executed.ipynb
 jupyter nbconvert --to notebook --execute motivation/plot_robustness.ipynb \
   --output motivation/plot_robustness.executed.ipynb
 jupyter nbconvert --to notebook --execute motivation/report.ipynb \
@@ -87,10 +92,31 @@ jupyter nbconvert --to notebook --execute motivation/report.ipynb \
 
 The causal-retention notebook writes `motivation/FIG-Causal-Retention.{pdf,png}`;
 the evaluation notebooks write `FIG-Token-Recovery.{pdf,png}`,
-`FIG-Token-End-to-End.{pdf,png}`, `FIG-Real-Agent-Recovery.{pdf,png}`, and
+`FIG-Token-End-to-End.{pdf,png}`, `FIG-Real-Agent-Recovery.{pdf,png}`,
+`FIG-Bpf-Trace.{pdf,png}`, and
 `FIG-Robustness.{pdf,png}`;
 the report notebook is intended for interactive inspection and does not
 duplicate the source result files.
+
+## eBPF dependency-tracing overhead
+
+The eBPF backend replaces strace for workspace read/negative-lookup capture
+by attaching syscall tracepoints (with an optional `vfs_open` kprobe for
+symlink-alias resolution on bpftrace >= 0.10). It requires root and bpftrace;
+the runtime falls back to strace automatically in `auto` mode. The benchmark
+compares no tracing, strace, and eBPF on a read-heavy step and verifies that
+every traced step captured both the READ and the NEGATIVE effect:
+
+```bash
+PYTHONPATH=src:. python3 experiments/scripts/bench_bpf_trace.py \
+  --steps 20 --repeats 3 --workload read
+python3 motivation/plot_bpf_trace.py
+```
+
+It writes `bpf_trace_overhead.{csv,json,md}` and `FIG-Bpf-Trace.{pdf,png}`.
+Without root/bpftrace the benchmark exits non-zero with a clear message and
+writes nothing. Design and claim boundaries are in
+`docs/step27-bpf-dependency-tracing.md`.
 
 ## Quantitative causal-retention experiment
 

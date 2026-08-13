@@ -2,6 +2,7 @@
 """Plot full autonomous-recovery token usage for three rollback policies."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import matplotlib
@@ -51,8 +52,25 @@ def repository_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def provider_result(root: Path, name: str) -> Path:
+    """Prefer the default provider's result dir, then any provider dir,
+    then the legacy top-level result file."""
+    results = root / "experiments" / "results"
+    provider = os.environ.get("AGENTTX_PROVIDER", "deepseek")
+    preferred = results / provider / name
+    if preferred.exists():
+        return preferred
+    directories = sorted(
+        path for path in results.iterdir()
+        if path.is_dir() and (path / name).exists()
+    )
+    if directories:
+        return directories[0] / name
+    return results / name
+
+
 def load_results(root: Path) -> pd.DataFrame:
-    result = root / "experiments" / "results" / "token_end_to_end.csv"
+    result = provider_result(root, "token_end_to_end.csv")
     if not result.exists():
         raise FileNotFoundError(
             f"missing {result}; run experiments/scripts/bench_token_end_to_end.py first"

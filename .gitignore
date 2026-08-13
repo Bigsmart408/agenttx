@@ -16,3 +16,5 @@ experiments/results/*.raw
 .env.*
 *.pem
 .agenttx_llm.env
+# code-structure analysis outputs (regenerate via scripts/code_graph.py)
+codegraph/

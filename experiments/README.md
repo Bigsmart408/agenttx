@@ -62,6 +62,21 @@ Compares the same shared AgentTX no-op trajectory with automatic workspace
 read/negative tracing disabled and enabled. Results are written to
 `experiments/results/trace_overhead.{csv,md}`.
 
+## Step 27 — eBPF vs strace dependency tracing
+
+```bash
+PYTHONPATH=src:. python3 experiments/scripts/bench_bpf_trace.py \
+  --steps 20 --repeats 3 --workload read
+PYTHONPATH=src:. python3 motivation/plot_bpf_trace.py
+```
+
+Requires root and bpftrace; without them the benchmark exits non-zero and
+writes no results. Compares no tracing, strace, and the eBPF tracepoint
+backend on a read-heavy step, verifies READ + NEGATIVE capture fidelity per
+step, and writes `experiments/results/bpf_trace_overhead.{csv,json,md}`.
+The runtime selects the backend per session (`--trace-backend
+{auto,strace,bpf}`); see `docs/step27-bpf-dependency-tracing.md`.
+
 ## Step 12 ? content-addressed snapshot storage
 
 ```bash
@@ -195,6 +210,8 @@ are deterministic presentation layers and can be executed independently:
   completion, total tokens, and recovery p95;
 - `plot_real_agent_recovery.ipynb` — live LLM root selection, rollback targets,
   latency, and recovery invariants;
+- `plot_bpf_trace.ipynb` — eBPF vs strace vs no-tracing per-step cost,
+  incremental tax, and capture fidelity (requires `bpf_trace_overhead.csv`);
 - `plot_robustness.ipynb` — p50/p95, worker crash, 256-step resume, and four
   concurrently isolated agents.
 
