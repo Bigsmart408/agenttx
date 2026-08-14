@@ -1,6 +1,6 @@
 agent_p50_ms,agent_p95_ms,agents,cross_contamination,failure_count,failure_rate,failures,fallback_ms,fallback_used,injected,length,materialized_files,mode,note,ok,repeats,resume_at,resumed,run_p50_ms,run_p95_ms,samples,step_p50_ms,step_p95_ms,steps,steps_per_agent,successful_agents,suite,wall_ms,worker_restarted
-,,,,,0.03125,,,,,64,,agenttx_without_read_tracing,end-to-end call wall time includes AgentTX ledger persistence,True,3,,,5197.784,5211.119,192,16.54,420.517,,,,p50_p95,5197.784,
-,,,,,0.03125,,,,,64,,agenttx_full,end-to-end call wall time includes AgentTX ledger persistence,True,3,,,9797.473,9843.453,192,24.902,812.575,,,,p50_p95,9797.473,
-,,,,1,,,258.517,True,True,,,agenttx_without_read_tracing,worker killed before dispatch; command completed through one-shot try fallback,True,,,,,,,,,,,,worker_crash,,True
-,,,,,,0,,,,,256,agenttx_without_read_tracing,session was closed and reloaded at the midpoint before final commit,True,,128,True,,,,41.686,69.925,256,,,long_session,10985.319,
-1798.566,1814.522,4,False,,,,,,,,,agenttx_without_read_tracing,agents use separate session overlays and commit into separate workspace subdirectories concurrently,True,,,,,,,,,,16,4,concurrent_agents,1893.416,
+,,,,,0.03125,,,,,64,,agenttx_without_read_tracing,end-to-end call wall time includes AgentTX ledger persistence,True,3,,,5264.087,5298.868,192,16.461,291.319,,,,p50_p95,5264.087,
+,,,,,0.03125,,,,,64,,agenttx_full,end-to-end call wall time includes AgentTX ledger persistence,True,3,,,8576.436,8656.558,192,19.825,612.579,,,,p50_p95,8576.436,
+,,,,1,,,1885.827,True,True,,,agenttx_without_read_tracing,worker killed before dispatch; command completed through one-shot try fallback,True,,,,,,,,,,,,worker_crash,,True
+,,,,,,0,,,,,256,agenttx_without_read_tracing,session was closed and reloaded at the midpoint before final commit,True,,128,True,,,,30.497,42.414,256,,,long_session,10069.712,
+8357.243,9638.771,4,False,,,,,,,,,agenttx_without_read_tracing,agents use separate session overlays and commit into separate workspace subdirectories concurrently,True,,,,,,,,,,16,4,concurrent_agents,13641.18,

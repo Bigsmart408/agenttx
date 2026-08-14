@@ -1,7 +1,7 @@
 suite,mode,length,repeats,wall_mean_s,wall_stdev_s,wall_p50_s,wall_p95_s,per_step_mean_ms,per_step_stdev_ms,failures_mean,host_polluted
-motivation_runtime_comparison,bare,64,2,4.087606,0.001191,4.087606,4.088364,63.869,0.019,2.0,True
-motivation_runtime_comparison,per_call_try,64,2,15.467342,0.018506,15.467342,15.47912,241.677,0.289,34.0,False
-motivation_runtime_comparison,shared_try,64,2,15.170974,0.005944,15.170974,15.174757,237.046,0.093,34.0,False
-motivation_runtime_comparison,shared_checkpoint,64,2,4.992559,0.011064,4.992559,4.9996,78.009,0.173,2.0,False
-motivation_runtime_comparison,agenttx_without_read_tracing,64,2,5.113441,0.019888,5.113441,5.126098,79.898,0.311,2.0,False
-motivation_runtime_comparison,agenttx_full,64,2,9.670678,0.029974,9.670678,9.689753,151.104,0.468,2.0,False
+motivation_runtime_comparison,bare,64,2,2.904244,0.025488,2.904244,2.920465,45.379,0.398,2.0,True
+motivation_runtime_comparison,per_call_try,64,2,107.0017,0.904103,107.0017,107.577068,1671.902,14.127,34.0,False
+motivation_runtime_comparison,shared_try,64,2,107.236251,0.667765,107.236251,107.661214,1675.566,10.434,34.0,False
+motivation_runtime_comparison,shared_checkpoint,64,2,7.091452,0.092012,7.091452,7.150008,110.804,1.438,2.0,False
+motivation_runtime_comparison,agenttx_without_read_tracing,64,2,7.038108,0.101184,7.038108,7.102501,109.97,1.581,2.0,False
+motivation_runtime_comparison,agenttx_full,64,2,10.310303,0.014284,10.310303,10.319393,161.098,0.223,2.0,False

@@ -7,12 +7,12 @@ Phases: exploration -> modular refactor -> failing CI -> independent docs/config
 
 | mode | wall mean (s) | stdev (s) | ms/step | failures | host polluted | ledger steps | read effects |
 |---|---:|---:|---:|---:|:---:|---:|---:|
-| bare | 4.035102 | 0.0 | 63.048 | 2 | True |  |  |
-| per_call_try | 15.360916 | 0.0 | 240.014 | 34 | False |  |  |
-| shared_try | 15.023626 | 0.0 | 234.744 | 34 | False |  |  |
-| shared_checkpoint | 4.948215 | 0.0 | 77.316 | 2 | False |  |  |
-| agenttx_without_read_tracing | 5.08909 | 0.0 | 79.517 | 2 | False | 64 | 15 |
-| agenttx_full | 9.740673 | 0.0 | 152.198 | 2 | False | 64 | 1025 |
+| bare | 2.877474 | 0.0 | 44.961 | 2 | True |  |  |
+| per_call_try | 132.598478 | 0.0 | 2071.851 | 34 | False |  |  |
+| shared_try | 123.440804 | 0.0 | 1928.763 | 34 | False |  |  |
+| shared_checkpoint | 7.879829 | 0.0 | 123.122 | 2 | False |  |  |
+| agenttx_without_read_tracing | 8.511176 | 0.0 | 132.987 | 2 | False | 64 | 15 |
+| agenttx_full | 11.550848 | 0.0 | 180.482 | 2 | False | 64 | 1025 |
 
 ## Recovery semantics
 

@@ -1,7 +1,7 @@
 suite,mode,length,repeats,samples,step_p50_ms,step_p95_ms,run_p50_ms,run_p95_ms,wall_ms,failure_rate,ok,note
-p50_p95,agenttx_without_read_tracing,54,2,108,15.605,415.632,4964.304,4978.042,4964.304,0.037037,True,end-to-end call wall time includes AgentTX ledger persistence
-p50_p95,agenttx_full,54,2,108,21.44,810.064,9444.317,9486.995,9444.317,0.037037,True,end-to-end call wall time includes AgentTX ledger persistence
-p50_p95,agenttx_without_read_tracing,64,2,128,16.361,398.428,5032.781,5054.236,5032.781,0.03125,True,end-to-end call wall time includes AgentTX ledger persistence
-p50_p95,agenttx_full,64,2,128,24.772,801.382,9671.919,9681.343,9671.919,0.03125,True,end-to-end call wall time includes AgentTX ledger persistence
-p50_p95,agenttx_without_read_tracing,96,2,192,17.923,399.445,5713.355,5733.796,5713.355,0.020833,True,end-to-end call wall time includes AgentTX ledger persistence
-p50_p95,agenttx_full,96,2,192,28.943,791.216,10757.586,10765.382,10757.586,0.020833,True,end-to-end call wall time includes AgentTX ledger persistence
+p50_p95,agenttx_without_read_tracing,54,2,108,16.128,304.555,5164.635,5221.681,5164.635,0.037037,True,end-to-end call wall time includes AgentTX ledger persistence
+p50_p95,agenttx_full,54,2,108,19.496,632.163,8932.783,9402.304,8932.783,0.037037,True,end-to-end call wall time includes AgentTX ledger persistence
+p50_p95,agenttx_without_read_tracing,64,2,128,16.646,306.105,5591.259,5718.827,5591.259,0.03125,True,end-to-end call wall time includes AgentTX ledger persistence
+p50_p95,agenttx_full,64,2,128,19.975,624.587,8799.933,8918.493,8799.933,0.03125,True,end-to-end call wall time includes AgentTX ledger persistence
+p50_p95,agenttx_without_read_tracing,96,2,192,16.788,301.92,6113.378,6141.489,6113.378,0.020833,True,end-to-end call wall time includes AgentTX ledger persistence
+p50_p95,agenttx_full,96,2,192,20.748,596.413,9545.836,9698.088,9545.836,0.020833,True,end-to-end call wall time includes AgentTX ledger persistence

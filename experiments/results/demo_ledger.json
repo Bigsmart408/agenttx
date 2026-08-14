@@ -6,7 +6,7 @@
       "tool_name": "write_a",
       "effects": [
         {
-          "path": "/tmp/agenttx-demo-1f8fnyk4/ws/a.txt",
+          "path": "/tmp/agenttx-demo-0_0zz_f5/ws/a.txt",
           "kind": "W"
         }
       ],
@@ -18,11 +18,15 @@
       "tool_name": "read_a_write_b",
       "effects": [
         {
-          "path": "/tmp/agenttx-demo-1f8fnyk4/ws/b.txt",
+          "path": "/tmp/agenttx-demo-0_0zz_f5/ws/a.txt",
+          "kind": "R"
+        },
+        {
+          "path": "/tmp/agenttx-demo-0_0zz_f5/ws/b.txt",
           "kind": "W"
         },
         {
-          "path": "/tmp/agenttx-demo-1f8fnyk4/ws/a.txt",
+          "path": "/tmp/agenttx-demo-0_0zz_f5/ws/a.txt",
           "kind": "R"
         }
       ],
@@ -36,7 +40,7 @@
       "tool_name": "write_c",
       "effects": [
         {
-          "path": "/tmp/agenttx-demo-1f8fnyk4/ws/c.txt",
+          "path": "/tmp/agenttx-demo-0_0zz_f5/ws/c.txt",
           "kind": "W"
         }
       ],

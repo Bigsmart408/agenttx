@@ -31,13 +31,18 @@ def runtime_preflight(root: Optional[Path] = None) -> Dict[str, object]:
         "ok": try_ready,
         "detail": str(try_bin) if try_ready else "run scripts/bootstrap.sh",
     })
-    if os.geteuid() != 0:
+    if not try_ready:
         checks.append({
             "name": "root_overlay_permission",
             "ok": False,
-            "detail": "this x86 Docker-overlay host requires root for try; rerun with sudo",
+            "detail": "try binary unavailable; run scripts/bootstrap.sh",
         })
-    if try_ready and os.geteuid() == 0:
+        checks.append({
+            "name": "try_overlay_execution",
+            "ok": False,
+            "detail": "not attempted because try_binary is unavailable",
+        })
+    else:
         with tempfile.TemporaryDirectory(prefix="agenttx-preflight-", dir="/tmp") as temp:
             sandbox = Path(temp) / "sandbox"
             sandbox.mkdir()
@@ -45,9 +50,15 @@ def runtime_preflight(root: Optional[Path] = None) -> Dict[str, object]:
                 result = subprocess.run(
                     [str(wrapper), "-N", str(sandbox), "--", "/bin/true"],
                     cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    text=True, timeout=30, check=False,
+                    text=True, timeout=60, check=False,
                 )
                 detail = (result.stderr or result.stdout or "").strip().splitlines()
+                checks.append({
+                    "name": "root_overlay_permission",
+                    "ok": result.returncode == 0,
+                    "detail": "unprivileged recursive-overlay sandbox" if result.returncode == 0
+                    else "try overlay execution failed without root; rerun with sudo",
+                })
                 checks.append({
                     "name": "try_overlay_execution",
                     "ok": result.returncode == 0,
@@ -55,22 +66,15 @@ def runtime_preflight(root: Optional[Path] = None) -> Dict[str, object]:
                 })
             except (OSError, subprocess.SubprocessError) as exc:
                 checks.append({
+                    "name": "root_overlay_permission",
+                    "ok": False,
+                    "detail": f"{type(exc).__name__}: {exc}",
+                })
+                checks.append({
                     "name": "try_overlay_execution",
                     "ok": False,
                     "detail": f"{type(exc).__name__}: {exc}",
                 })
-    elif not try_ready:
-        checks.append({
-            "name": "try_overlay_execution",
-            "ok": False,
-            "detail": "not attempted because try_binary is unavailable",
-        })
-    else:
-        checks.append({
-            "name": "try_overlay_execution",
-            "ok": False,
-            "detail": "not attempted without root on this Docker-overlay host",
-        })
     return {
         "root": str(root),
         "ok": all(

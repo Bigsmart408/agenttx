@@ -1,17 +1,17 @@
 causal_correct_count,causal_correct_rate,host_clean_rate,mode,n_calls,note,notes,per_step_ms_mean,per_step_ms_p50,per_step_ms_p95,per_step_ms_p99,repeats_requested,samples,suite,supported,supported_rate,wall_s_mean,wall_s_p50,wall_s_p95,wall_s_p99,wall_s_stdev
-,,,bare,10,,,1.632,1.619,1.668,2.003,50,50,overhead,True,,0.016317,0.016195,0.016685,0.02003,0.001021
-,,,per_call_try,10,,,245.365,245.742,250.565,252.112,50,50,overhead,True,,2.453645,2.457419,2.505646,2.521124,0.028538
-,,,session_try,10,,,24.0,23.982,24.537,25.284,50,50,overhead,True,,0.24,0.239817,0.245375,0.252843,0.004286
-,,,shared_try,10,,,237.18,235.877,242.729,244.667,50,50,overhead,True,,2.371801,2.358766,2.42729,2.446674,0.027955
-,,,shared_checkpoint,10,,,37.196,37.078,37.68,39.528,50,50,overhead,True,,0.371957,0.370782,0.376797,0.395283,0.005418
-,,,bubblewrap,10,,,0.85,0.844,0.871,0.975,50,50,overhead,True,,0.008505,0.008444,0.008713,0.009751,0.000289
-,,,agenttx_without_read_tracing,10,,,40.547,40.453,40.923,42.88,50,50,overhead,True,,0.405469,0.404533,0.409227,0.428798,0.005283
-,,,agenttx_full,10,,,49.689,49.599,50.9,51.146,50,50,overhead,True,,0.496889,0.495987,0.508998,0.511457,0.004711
-0,0.0,0.0,bare,,,['host writes visible before recovery; whole cleanup loses c'],,,,,,50,recovery,,1.0,,,,,
-0,0.0,1.0,per_call_try,,,['isolated calls cannot pass a from step 0 to step 1'],,,,,,50,recovery,,1.0,,,,,
-0,0.0,1.0,session_try,,,"['one session can see state, but abort discards the whole session']",,,,,,50,recovery,,1.0,,,,,
-0,0.0,1.0,shared_try,,,"['shared upperdir preserves state, but recovery is whole-session discard']",,,,,,50,recovery,,1.0,,,,,
-0,0.0,1.0,shared_checkpoint,,,['full checkpoint restore removes independent c with the failed prefix'],,,,,,50,recovery,,1.0,,,,,
-0,0.0,1.0,bubblewrap,,,['whole-session namespace abort; no causal retention'],,,,,,50,recovery,,1.0,,,,,
-0,0.0,1.0,agenttx_without_read_tracing,,,['causal targets=[0]; read tracing=False'],,,,,,50,recovery,,1.0,,,,,
-50,1.0,1.0,agenttx_full,,,"['causal targets=[0, 1]; read tracing=True']",,,,,,50,recovery,,1.0,,,,,
+,,,bare,10,,,1.285,1.248,1.532,1.63,10,10,overhead,True,,0.012847,0.012484,0.015319,0.0163,0.001624
+,,,per_call_try,10,,,1702.051,1687.741,1817.432,1897.546,10,10,overhead,True,,17.020512,16.877408,18.174319,18.975462,0.787619
+,,,session_try,10,,,169.76,169.136,173.899,174.899,10,10,overhead,True,,1.697603,1.691364,1.738985,1.748992,0.02528
+,,,shared_try,10,,,1682.964,1683.071,1703.384,1704.803,10,10,overhead,True,,16.829639,16.830706,17.033841,17.048028,0.181532
+,,,shared_checkpoint,10,,,361.043,360.245,373.003,373.319,10,10,overhead,True,,3.61043,3.60245,3.730033,3.733186,0.08384
+,,,bubblewrap,10,,,1.06,1.07,1.193,1.202,10,10,overhead,True,,0.010596,0.010699,0.011932,0.012016,0.000969
+,,,agenttx_without_read_tracing,10,,,361.746,363.371,367.946,369.903,10,10,overhead,True,,3.61746,3.633714,3.679463,3.699026,0.054675
+,,,agenttx_full,10,,,371.918,373.42,380.349,380.92,10,10,overhead,True,,3.719176,3.734202,3.803486,3.809196,0.080464
+0,0.0,0.0,bare,,,['host writes visible before recovery; whole cleanup loses c'],,,,,,10,recovery,,1.0,,,,,
+0,0.0,1.0,per_call_try,,,['isolated calls cannot pass a from step 0 to step 1'],,,,,,10,recovery,,1.0,,,,,
+0,0.0,1.0,session_try,,,"['one session can see state, but abort discards the whole session']",,,,,,10,recovery,,1.0,,,,,
+0,0.0,1.0,shared_try,,,"['shared upperdir preserves state, but recovery is whole-session discard']",,,,,,10,recovery,,1.0,,,,,
+0,0.0,1.0,shared_checkpoint,,,['full checkpoint restore removes independent c with the failed prefix'],,,,,,10,recovery,,1.0,,,,,
+0,0.0,1.0,bubblewrap,,,['whole-session namespace abort; no causal retention'],,,,,,10,recovery,,1.0,,,,,
+0,0.0,1.0,agenttx_without_read_tracing,,,['causal targets=[0]; read tracing=False'],,,,,,10,recovery,,1.0,,,,,
+10,1.0,1.0,agenttx_full,,,"['causal targets=[0, 1]; read tracing=True']",,,,,,10,recovery,,1.0,,,,,

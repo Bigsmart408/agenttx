@@ -1,12 +1,12 @@
 causal_retention_correct,exit_codes,host_after_recovery,host_before_recovery,host_clean_before_recovery,mode,n_calls,note,per_step_ms,repeats,suite,supported,wall_s_mean,wall_s_stdev
-,,,,,bare,10,,1.641,3,overhead,True,0.016411,0.000338
-,,,,,per_call_try,10,,239.072,3,overhead,True,2.390725,0.006043
-,,,,,session_try,10,,23.411,3,overhead,True,0.234114,0.002231
-,,,,,shared_try,10,,235.546,3,overhead,True,2.35546,0.017137
-,,,,,shared_checkpoint,10,,36.643,3,overhead,True,0.366428,0.001472
-,,,,,bubblewrap,10,,0.848,3,overhead,True,0.008478,0.000189
-,,,,,agenttx_without_read_tracing,10,,39.913,3,overhead,True,0.399126,0.001698
-,,,,,agenttx_full,10,,48.815,3,overhead,True,0.488148,0.001926
+,,,,,bare,10,,1.282,3,overhead,True,0.012823,0.000802
+,,,,,per_call_try,10,,2126.892,3,overhead,True,21.268921,0.298713
+,,,,,session_try,10,,187.061,3,overhead,True,1.870609,0.12319
+,,,,,shared_try,10,,1894.783,3,overhead,True,18.94783,0.392289
+,,,,,shared_checkpoint,10,,370.347,3,overhead,True,3.703467,0.058882
+,,,,,bubblewrap,10,,1.03,3,overhead,True,0.010302,0.000721
+,,,,,agenttx_without_read_tracing,10,,389.319,3,overhead,True,3.893193,0.104767
+,,,,,agenttx_full,10,,411.479,3,overhead,True,4.114792,0.100626
 False,"[0, 0, 0]","{'a.txt': False, 'b.txt': False, 'c.txt': False}","{'a.txt': True, 'b.txt': True, 'c.txt': True}",False,bare,,host writes visible before recovery; whole cleanup loses c,,,recovery,True,,
 False,"[0, 0, 0]","{'a.txt': False, 'b.txt': False, 'c.txt': False}","{'a.txt': False, 'b.txt': False, 'c.txt': False}",True,per_call_try,,isolated calls cannot pass a from step 0 to step 1,,,recovery,True,,
 False,[0],"{'a.txt': False, 'b.txt': False, 'c.txt': False}","{'a.txt': False, 'b.txt': False, 'c.txt': False}",True,session_try,,"one session can see state, but abort discards the whole session",,,recovery,True,,

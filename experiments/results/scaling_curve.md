@@ -2,15 +2,15 @@
 
 | n | mode | wall_s_mean | per_step_ms |
 |---:|---|---:|---:|
-| 5 | bare | 0.008 | 1.6 |
-| 5 | per_call_try | 1.149 | 229.8 |
-| 5 | shared_agenttx | 0.407 | 81.4 |
-| 10 | bare | 0.015 | 1.5 |
-| 10 | per_call_try | 2.357 | 235.7 |
-| 10 | shared_agenttx | 0.494 | 49.4 |
-| 20 | bare | 0.029 | 1.5 |
-| 20 | per_call_try | 4.707 | 235.3 |
-| 20 | shared_agenttx | 0.674 | 33.7 |
-| 40 | bare | 0.059 | 1.5 |
-| 40 | per_call_try | 9.376 | 234.4 |
-| 40 | shared_agenttx | 1.046 | 26.1 |
+| 5 | bare | 0.007 | 1.3 |
+| 5 | per_call_try | 10.701 | 2140.2 |
+| 5 | shared_agenttx | 5.699 | 1139.7 |
+| 10 | bare | 0.014 | 1.4 |
+| 10 | per_call_try | 20.372 | 2037.2 |
+| 10 | shared_agenttx | 4.029 | 402.9 |
+| 20 | bare | 0.026 | 1.3 |
+| 20 | per_call_try | 37.706 | 1885.3 |
+| 20 | shared_agenttx | 4.351 | 217.5 |
+| 40 | bare | 0.049 | 1.2 |
+| 40 | per_call_try | 68.297 | 1707.4 |
+| 40 | shared_agenttx | 4.284 | 107.1 |

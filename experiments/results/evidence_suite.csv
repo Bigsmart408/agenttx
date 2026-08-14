@@ -1,9 +1,9 @@
 exp,mode,ok,wall_s,wall_s_mean,failures_mean,host_polluted_before_commit_rate,detail
-cascade_rollback,,True,1.0795973700005561,,,,rollback step1 cascades; host clean until commit; only a+e land
-selective_commit_via_rollback,,True,0.6819892099993012,,,,rollback(2)+commit keeps keep0/1 only
-frontier_selective_commit,,True,0.6705198700001347,,,,commit(1) writes keep0/1 while later2 remains speculative
-host_pollution_vs_bare,,True,0.773427170002833,,,,bare writes visible mid-traj; agenttx host clean until commit
-mistake_recovery,,True,3.4693937499978347,,,,buggy mul never hits host; rollback; fixed mul committed; pytest pass
-policy_blocks_dangerous_commit,,True,0.6297151799990388,,,,"deny secrets/*.pem blocks full commit; after rollback, ok.txt commits alone"
-isolation_matrix,bare,True,,1.4785997149992909,0.0,1.0,coding traj pollution/failures/wall
-isolation_matrix,agenttx,True,,3.6368131750004977,0.0,0.0,coding traj pollution/failures/wall
+cascade_rollback,,True,8.171857634006301,,,,rollback step1 cascades; host clean until commit; only a+e land
+selective_commit_via_rollback,,True,6.180761005991371,,,,rollback(2)+commit keeps keep0/1 only
+frontier_selective_commit,,True,7.211726452980656,,,,commit(1) writes keep0/1 while later2 remains speculative
+host_pollution_vs_bare,,True,8.111862304998795,,,,bare writes visible mid-traj; agenttx host clean until commit
+mistake_recovery,,True,10.328790549974656,,,,buggy mul never hits host; rollback; fixed mul committed; pytest pass
+policy_blocks_dangerous_commit,,True,6.16572612899472,,,,"deny secrets/*.pem blocks full commit; after rollback, ok.txt commits alone"
+isolation_matrix,bare,True,,1.109903040502104,0.0,1.0,coding traj pollution/failures/wall
+isolation_matrix,agenttx,True,,4.7110271794954315,0.0,0.0,coding traj pollution/failures/wall

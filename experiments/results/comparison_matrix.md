@@ -7,14 +7,14 @@ The recovery workload is fixed: `a -> b`, independent `c`, then failure.
 
 | mode | supported | wall mean (s) | stdev (s) | per step (ms) | note |
 |---|:---:|---:|---:|---:|---|
-| bare | True | 0.016411 | 0.000338 | 1.641 |  |
-| per_call_try | True | 2.390725 | 0.006043 | 239.072 |  |
-| session_try | True | 0.234114 | 0.002231 | 23.411 |  |
-| shared_try | True | 2.35546 | 0.017137 | 235.546 |  |
-| shared_checkpoint | True | 0.366428 | 0.001472 | 36.643 |  |
-| bubblewrap | True | 0.008478 | 0.000189 | 0.848 |  |
-| agenttx_without_read_tracing | True | 0.399126 | 0.001698 | 39.913 |  |
-| agenttx_full | True | 0.488148 | 0.001926 | 48.815 |  |
+| bare | True | 0.012823 | 0.000802 | 1.282 |  |
+| per_call_try | True | 21.268921 | 0.298713 | 2126.892 |  |
+| session_try | True | 1.870609 | 0.12319 | 187.061 |  |
+| shared_try | True | 18.94783 | 0.392289 | 1894.783 |  |
+| shared_checkpoint | True | 3.703467 | 0.058882 | 370.347 |  |
+| bubblewrap | True | 0.010302 | 0.000721 | 1.03 |  |
+| agenttx_without_read_tracing | True | 3.893193 | 0.104767 | 389.319 |  |
+| agenttx_full | True | 4.114792 | 0.100626 | 411.479 |  |
 
 ## Recovery semantics
 

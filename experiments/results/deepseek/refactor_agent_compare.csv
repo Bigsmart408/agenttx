@@ -1,0 +1,3 @@
+mode,provider,model,wall_s,finished,tool_calls,ledger_steps,host_polluted_before_commit,committed,commit_ok,tests_rc,timed_out
+agenttx_llm,deepseek,deepseek-v4-flash,19.22411946998909,True,15,14,False,True,True,0,False
+aider_baseline,deepseek,deepseek-v4-flash,193.6435700430011,True,,,True,True,True,0,False

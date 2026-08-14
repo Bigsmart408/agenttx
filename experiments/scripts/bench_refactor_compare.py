@@ -111,6 +111,11 @@ def run_aider(ws: Path, provider: str | None) -> dict:
     # Prefer conda env python for pytest later; ensure PATH has aider's env first.
     conda_bin = str(Path(AIDER_BIN).parent)
     env["PATH"] = conda_bin + os.pathsep + env.get("PATH", "")
+    # The research VM home can be read-only; aider needs a writable cache dir
+    # for its version-check state and config.
+    if not os.access(os.path.expanduser("~"), os.W_OK):
+        writable_home = Path(tempfile.mkdtemp(prefix="agenttx-aider-home-", dir="/tmp"))
+        env["HOME"] = str(writable_home)
     model = env.get("AIDER_MODEL") or (
         f"{profile.name}/{profile.model}"
         if profile.name in {"deepseek", "openrouter"}
@@ -123,6 +128,7 @@ def run_aider(ws: Path, provider: str | None) -> dict:
         "--no-stream",
         "--map-tokens",
         "0",
+        "--no-check-update",
         "--model",
         model,
         "src/calc.py",

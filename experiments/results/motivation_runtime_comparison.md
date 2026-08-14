@@ -5,9 +5,9 @@ Historical optimization iterations are reported separately in `motivation_optimi
 
 | mode | wall mean (s) | wall p50 (s) | wall p95 (s) | ms/step | failures | host polluted |
 |---|---:|---:|---:|---:|---:|:---:|
-| bare | 4.087606 | 4.087606 | 4.088364 | 63.869 | 2.0 | True |
-| per_call_try | 15.467342 | 15.467342 | 15.47912 | 241.677 | 34.0 | False |
-| shared_try | 15.170974 | 15.170974 | 15.174757 | 237.046 | 34.0 | False |
-| shared_checkpoint | 4.992559 | 4.992559 | 4.9996 | 78.009 | 2.0 | False |
-| agenttx_without_read_tracing | 5.113441 | 5.113441 | 5.126098 | 79.898 | 2.0 | False |
-| agenttx_full | 9.670678 | 9.670678 | 9.689753 | 151.104 | 2.0 | False |
+| bare | 2.904244 | 2.904244 | 2.920465 | 45.379 | 2.0 | True |
+| per_call_try | 107.0017 | 107.0017 | 107.577068 | 1671.902 | 34.0 | False |
+| shared_try | 107.236251 | 107.236251 | 107.661214 | 1675.566 | 34.0 | False |
+| shared_checkpoint | 7.091452 | 7.091452 | 7.150008 | 110.804 | 2.0 | False |
+| agenttx_without_read_tracing | 7.038108 | 7.038108 | 7.102501 | 109.97 | 2.0 | False |
+| agenttx_full | 10.310303 | 10.310303 | 10.319393 | 161.098 | 2.0 | False |

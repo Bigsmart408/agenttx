@@ -1,4 +1,2 @@
 repeat,provider,model,wall_s,finished,tool_calls,ledger_steps,host_polluted_before_commit,committed,commit_ok,tests_rc,success,error
-0,deepseek,deepseek-v4-flash,29.729295,True,16,15,False,True,True,0,True,
-1,deepseek,deepseek-v4-flash,15.188684,True,15,14,False,True,True,0,True,
-2,deepseek,deepseek-v4-flash,16.257391,True,15,14,False,True,True,0,True,
+0,deepseek,deepseek-v4-flash,20.106559,True,12,11,False,True,True,0,True,

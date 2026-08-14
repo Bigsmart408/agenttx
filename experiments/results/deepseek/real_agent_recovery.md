@@ -1,10 +1,10 @@
 # Real-agent causal recovery
 
-Provider: `deepseek`; model: `deepseek-v4-flash`; repeats: 3.
+Provider: `deepseek`; model: `deepseek-v4-flash`; repeats: 1.
 
 | metric | value |
 |---|---:|
-| wall p50 / p95 (s) | 38.601139 / 46.770263 |
+| wall p50 / p95 (s) | 52.725573 / 52.725573 |
 | full recovery success rate | 1.0 |
 | faulty-root selection rate | 1.0 |
 | correct causal-target rate | 1.0 |

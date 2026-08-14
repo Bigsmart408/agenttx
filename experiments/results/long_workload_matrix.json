@@ -4,9 +4,9 @@
     "mode": "bare",
     "length": 64,
     "repeats": 1,
-    "wall_s_mean": 4.035102,
+    "wall_s_mean": 2.877474,
     "wall_s_stdev": 0.0,
-    "per_step_ms_mean": 63.048,
+    "per_step_ms_mean": 44.961,
     "failures_mean": 2,
     "final_rc": 0,
     "host_polluted": true,
@@ -20,9 +20,9 @@
     "mode": "per_call_try",
     "length": 64,
     "repeats": 1,
-    "wall_s_mean": 15.360916,
+    "wall_s_mean": 132.598478,
     "wall_s_stdev": 0.0,
-    "per_step_ms_mean": 240.014,
+    "per_step_ms_mean": 2071.851,
     "failures_mean": 34,
     "final_rc": 0,
     "host_polluted": false,
@@ -36,9 +36,9 @@
     "mode": "shared_try",
     "length": 64,
     "repeats": 1,
-    "wall_s_mean": 15.023626,
+    "wall_s_mean": 123.440804,
     "wall_s_stdev": 0.0,
-    "per_step_ms_mean": 234.744,
+    "per_step_ms_mean": 1928.763,
     "failures_mean": 34,
     "final_rc": 0,
     "host_polluted": false,
@@ -52,9 +52,9 @@
     "mode": "shared_checkpoint",
     "length": 64,
     "repeats": 1,
-    "wall_s_mean": 4.948215,
+    "wall_s_mean": 7.879829,
     "wall_s_stdev": 0.0,
-    "per_step_ms_mean": 77.316,
+    "per_step_ms_mean": 123.122,
     "failures_mean": 2,
     "final_rc": 0,
     "host_polluted": false,
@@ -68,9 +68,9 @@
     "mode": "agenttx_without_read_tracing",
     "length": 64,
     "repeats": 1,
-    "wall_s_mean": 5.08909,
+    "wall_s_mean": 8.511176,
     "wall_s_stdev": 0.0,
-    "per_step_ms_mean": 79.517,
+    "per_step_ms_mean": 132.987,
     "failures_mean": 2,
     "final_rc": 0,
     "host_polluted": false,
@@ -84,9 +84,9 @@
     "mode": "agenttx_full",
     "length": 64,
     "repeats": 1,
-    "wall_s_mean": 9.740673,
+    "wall_s_mean": 11.550848,
     "wall_s_stdev": 0.0,
-    "per_step_ms_mean": 152.198,
+    "per_step_ms_mean": 180.482,
     "failures_mean": 2,
     "final_rc": 0,
     "host_polluted": false,
@@ -106,7 +106,7 @@
     "causal_retention_correct": false,
     "check_rc": "",
     "final_rc": 0,
-    "wall_s": 4.049604070001806,
+    "wall_s": 2.9495707109745126,
     "note": "host is already modified before recovery; no causal rollback"
   },
   {
@@ -120,7 +120,7 @@
     "causal_retention_correct": false,
     "check_rc": "",
     "final_rc": "",
-    "wall_s": 9.025213699998858,
+    "wall_s": 79.85230777200195,
     "note": "each call is isolated, so the prefix and independent edits never form one state"
   },
   {
@@ -134,7 +134,7 @@
     "causal_retention_correct": false,
     "check_rc": "",
     "final_rc": "",
-    "wall_s": 8.985784600001352,
+    "wall_s": 80.37385695200646,
     "note": "shared overlay preserves the prefix but recovery is whole-session discard"
   },
   {
@@ -148,7 +148,7 @@
     "causal_retention_correct": false,
     "check_rc": 1,
     "final_rc": "",
-    "wall_s": 2.9940880600006494,
+    "wall_s": 8.331009336019633,
     "note": "full checkpoint rollback removes independent docs/config along with the fault"
   },
   {
@@ -164,7 +164,7 @@
     "causal_retention_correct": false,
     "check_rc": 1,
     "final_rc": 0,
-    "wall_s": 5.518708750001679,
+    "wall_s": 9.53520158099127,
     "note": "read tracing disabled: derived build/format-report.txt is retained"
   },
   {
@@ -182,7 +182,7 @@
     "causal_retention_correct": true,
     "check_rc": 0,
     "final_rc": 0,
-    "wall_s": 10.139513330002956,
+    "wall_s": 12.752423959987937,
     "note": "read tracing links the derived artifact to the faulty formatter"
   }
 ]
