@@ -1,0 +1,60 @@
+{
+  "rows": [
+    {
+      "mode": "off",
+      "trace_reads": false,
+      "trace_backend": "auto",
+      "workload": "read",
+      "steps": 20,
+      "repeats": 3,
+      "samples": 60,
+      "per_step_ms_mean": 11.482,
+      "per_step_ms_p50": 2.443,
+      "per_step_ms_p95": 168.978,
+      "reads_captured": 0,
+      "negatives_captured": 0,
+      "capture_expected": 0,
+      "step_retries": 0
+    },
+    {
+      "mode": "strace",
+      "trace_reads": true,
+      "trace_backend": "strace",
+      "workload": "read",
+      "steps": 20,
+      "repeats": 3,
+      "samples": 60,
+      "per_step_ms_mean": 18.89,
+      "per_step_ms_p50": 10.069,
+      "per_step_ms_p95": 183.1,
+      "reads_captured": 60,
+      "negatives_captured": 60,
+      "capture_expected": 60,
+      "step_retries": 0
+    },
+    {
+      "mode": "bpf",
+      "trace_reads": true,
+      "trace_backend": "bpf",
+      "workload": "read",
+      "steps": 20,
+      "repeats": 3,
+      "samples": 60,
+      "per_step_ms_mean": 1376.707,
+      "per_step_ms_p50": 1372.212,
+      "per_step_ms_p95": 1555.585,
+      "reads_captured": 60,
+      "negatives_captured": 60,
+      "capture_expected": 60,
+      "step_retries": 0
+    }
+  ],
+  "summary": [
+    "| bpf | 1376.71 | 1372.21 | 1555.59 |",
+    "",
+    "strace incremental cost: 7.41 ms/step (64.5%).",
+    "eBPF incremental cost: 1365.23 ms/step (11890.1%).",
+    "",
+    "Capture verification: every read step yielded both the `input.txt` READ and the `missing.txt` NEGATIVE effect for both traced modes."
+  ]
+}

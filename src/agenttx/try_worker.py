@@ -6,6 +6,7 @@ import json
 import struct
 import subprocess
 import sys
+import time
 from typing import BinaryIO, Optional
 
 _MAX_FRAME = 128 * 1024 * 1024
@@ -66,12 +67,22 @@ def main() -> int:
         if not isinstance(argv, list) or not all(isinstance(item, str) for item in argv):
             _write_frame(stdout, {"error": "invalid argv"})
             continue
-        hold_fifo = request.get("hold_fifo")
-        if isinstance(hold_fifo, str):
-            # eBPF backend: block the step on a FIFO until the tracer on the
-            # host side has attached all probes (ATXBPF_READY).
-            with open(hold_fifo, "rb") as fifo:
-                fifo.read(1)
+        hold_marker = request.get("hold_marker")
+        if isinstance(hold_marker, str):
+            # eBPF backend: block the step until the host-side tracer has
+            # attached all probes and flipped the release marker to "go".
+            # Polling a marker file's content instead of reading a FIFO:
+            # FIFO pipe pairing does not cross the OverlayFS mount boundary
+            # (pipes are allocated against the superblock's user namespace),
+            # so a sandbox-side reader never sees a host-side writer.
+            while True:
+                try:
+                    with open(hold_marker, "r", encoding="utf-8") as marker:
+                        if marker.read() == "go":
+                            break
+                except OSError:
+                    pass
+                time.sleep(0.01)
         try:
             completed = subprocess.run(
                 argv,

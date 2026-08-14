@@ -177,12 +177,12 @@ def test_parse_bpf_openat2_flags_drive_read_detection(tmp_path: Path) -> None:
 def test_build_script_restricts_to_available_tracepoints() -> None:
     available = {"sys_enter_openat", "sys_exit_openat"}
     script = bpf_trace.build_bpftrace_script(available)
-    assert "tracepoint:sys_enter_openat" in script
-    assert "tracepoint:sys_exit_openat" in script
+    assert "tracepoint:syscalls:sys_enter_openat" in script
+    assert "tracepoint:syscalls:sys_exit_openat" in script
     assert "sys_enter_stat" not in script
     assert "ATXBPF_READY" in script
     # process-call bodies belong to the exit side only (retval exists there)
-    assert "args->ret" not in script.split("tracepoint:sys_exit")[0]
+    assert "args->ret" not in script.split("tracepoint:syscalls:sys_exit")[0]
 
 
 def test_build_script_resolved_section_is_optional() -> None:
@@ -201,6 +201,28 @@ def test_select_tracepoints_filters_unknown_probes() -> None:
     enter_all, exit_all = bpf_trace.select_tracepoints(None)
     assert len(enter_all) == len(exit_all) == 24
     assert "sys_enter_openat" in enter_all
+
+
+def test_select_tracepoints_uses_alias_for_stat_family() -> None:
+    """Ubuntu 5.4 names the stat/lstat tracepoints newstat/newlstat."""
+    available = {
+        "sys_enter_newstat",
+        "sys_exit_newstat",
+        "sys_enter_newlstat",
+        "sys_exit_newlstat",
+        "sys_enter_openat",
+        "sys_exit_openat",
+    }
+    enter, exit_ = bpf_trace.select_tracepoints(available)
+    assert "sys_enter_newstat" in enter
+    assert "sys_enter_newlstat" in enter
+    assert "sys_enter_stat" not in enter
+    assert "sys_enter_lstat" not in enter
+    script = bpf_trace.build_bpftrace_script(available)
+    # the emitted event keeps the syscall name the parser understands
+    assert "tracepoint:syscalls:sys_enter_newstat" in script
+    assert "ATXBPF E %d %d stat 0 0 %s" in script
+    assert "ATXBPF E %d %d lstat 0 0 %s" in script
 
 
 def test_bpf_static_available_matches_euid() -> None:
@@ -266,19 +288,52 @@ def test_semisolate_fails_closed_without_any_tracer(
         )
 
 
-def test_release_fifo_releases_blocked_reader(tmp_path: Path) -> None:
-    fifo = tmp_path / "hold"
-    os.mkfifo(fifo)
+def test_parse_bpf_filters_to_allowed_pid_tree(tmp_path: Path) -> None:
+    """Global tracepoints emit every host process; the parser keeps the
+    seed's tree and extends it through sched_process_fork lines (strace -f)."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    raw = "\n".join(
+        [
+            _entry("openat", str(workspace / "ours.txt"), pid=100, tid=100),
+            _exit("openat", 3, pid=100, tid=100),
+            # an unrelated host process reads a different workspace file: dropped
+            _entry("openat", str(workspace / "alien.txt"), pid=999, tid=999),
+            _exit("openat", 3, pid=999, tid=999),
+            # child forked after the READY snapshot (fork line extends the set)
+            "ATXBPF F 100 101",
+            _entry("newfstatat", str(workspace / "child.txt"), pid=101, tid=101,
+                   flags=0),
+            _exit("newfstatat", -2, pid=101, tid=101),
+        ]
+    )
+    effects = bpf_trace.parse_bpf_effects(raw, workspace, allowed_pids={100})
+    assert effects == [
+        Effect(str(workspace / "child.txt"), EffectKind.NEGATIVE),
+        Effect(str(workspace / "ours.txt"), EffectKind.READ),
+    ]
+    # without an allowlist every pid is accepted (unit-test default)
+    assert len(bpf_trace.parse_bpf_effects(raw, workspace)) == 3
+
+
+def test_signal_release_unblocks_marker_waiter(tmp_path: Path) -> None:
+    marker = tmp_path / "release"
+    marker.write_text("hold", encoding="utf-8")
     reader = subprocess.Popen(
-        ["bash", "-c", f'IFS= read -r _ < "{fifo}"; echo "released"'],
+        [
+            "bash",
+            "-c",
+            f'while [ "$(cat "{marker}" 2>/dev/null)" != "go" ]; '
+            'do sleep 0.01; done; echo "released"',
+        ],
         stdout=subprocess.PIPE,
         text=True,
     )
     try:
         time.sleep(0.2)
-        assert reader.poll() is None  # reader is blocked
+        assert reader.poll() is None  # still waiting for the release byte
         pool = object.__new__(SharedSemisolate)  # bypass try probe
-        pool._release_fifo(fifo, reader)
+        pool._signal_release(marker)
         stdout, _ = reader.communicate(timeout=10)
         assert stdout.strip() == "released"
     finally:
@@ -287,7 +342,7 @@ def test_release_fifo_releases_blocked_reader(tmp_path: Path) -> None:
             reader.wait(timeout=5)
 
 
-def test_run_step_bpf_orchestrates_fifo_ready_and_parse(
+def test_run_step_bpf_orchestrates_marker_ready_and_parse(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Drive the full eBPF step path with a stub bpftrace and a fake try."""
@@ -300,8 +355,10 @@ def test_run_step_bpf_orchestrates_fifo_ready_and_parse(
     fake_bpftrace.write_text(
         "#!/bin/bash\n"
         "echo 'ATXBPF_READY 4242'\n"
-        f"echo 'ATXBPF E 100 100 openat -100 524288 {workspace}/input.txt'\n"
-        "echo 'ATXBPF X 100 100 openat 3'\n"
+        # events carry the seed pid (4242): the runtime filters the global
+        # tracepoint stream to the seed's /proc descendant tree
+        f"echo 'ATXBPF E 4242 4242 openat -100 524288 {workspace}/input.txt'\n"
+        "echo 'ATXBPF X 4242 4242 openat 3'\n"
         "trap 'exit 0' INT TERM\n"
         "while true; do sleep 1; done\n",
         encoding="utf-8",
@@ -319,8 +376,22 @@ def test_run_step_bpf_orchestrates_fifo_ready_and_parse(
                 self._real = None
                 self.returncode = 0
                 self.pid = 4242
+            elif "--version" in args:
+                # The runtime probes the bpftrace version (cached) to pick
+                # the -q flag and BPFTRACE_STRLEN; answer immediately instead
+                # of running the fake tracer, which would never exit.
+                self._real = None
+                self.returncode = 0
+                self.pid = 4242
             else:
                 self._real = real_popen(args, **kwargs)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info) -> None:
+            if self._real is not None:
+                self._real.__exit__(*exc_info)
 
         def poll(self):
             return self._real.poll() if self._real is not None else 0
@@ -328,6 +399,8 @@ def test_run_step_bpf_orchestrates_fifo_ready_and_parse(
         def communicate(self, *args, **kwargs):
             if self._real is not None:
                 return self._real.communicate(*args, **kwargs)
+            if "--version" in self.args:
+                return "bpftrace v0.9.4\n", ""
             return "stdout-text", "stderr-text"
 
         def send_signal(self, sig) -> None:

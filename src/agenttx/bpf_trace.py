@@ -16,12 +16,20 @@ negative-lookup effects from Linux syscall tracepoints instead of ptrace:
   installed bpftrace supports the `dpath()` builtin, i.e. >= 0.10).  This
   restores the symlink-alias granularity that strace gets from `-yy`.
 * `ATXBPF_READY <seed>` marks the moment all probes are attached; the
-  runtime blocks the traced command on a FIFO until it appears, so no
-  syscall of the command can escape the trace.
+  runtime blocks the traced command on a release marker whose content it
+  polls until the marker flips to the "go" value, so no syscall of the
+  command can escape the trace.
 
-The traced process tree is seeded in-kernel: `@allowed[seed]` is set at
-BEGIN, and every successful clone/fork/vfork of an allowed process extends
-the set (strace `-f` equivalence).
+The traced process tree is filtered in userspace: syscall tracepoints are
+global, so every relevant syscall on the host is emitted and
+:func:`parse_bpf_effects` keeps only events whose pid belongs to the seed's
+descendant tree.  The runtime snapshots the tree from ``/proc`` when the
+READY marker appears (the try sandbox's setup forks happen *before* the
+probes attach, so in-kernel fork tracking can never see them), and the
+parser extends the set with `ATXBPF F` lines from the sched_process_fork
+tracepoint, whose pids are global (strace ``-f`` equivalence for forks
+after attach; sys_exit_clone's retval is namespace-local and unusable when
+the sandbox runs in its own pid namespace).
 
 Kernel requirements: bpftrace with tracepoint support (any distro build) and
 root (bpf syscall).  The availability probe fails closed, exactly like the
@@ -30,6 +38,7 @@ strace backend.
 
 from __future__ import annotations
 
+import functools
 import os
 import re
 import shutil
@@ -42,7 +51,6 @@ from .ledger import Effect, EffectKind
 
 ATX_MARKER = "ATXBPF"
 READY_LINE = "ATXBPF_READY"
-OK_LINE = "ATXBPF_OK"
 
 # Process-shape syscalls: successful returns carry the child pid.
 _PROCESS_CALLS = frozenset({"clone", "clone3", "fork", "vfork"})
@@ -75,7 +83,10 @@ _AT_PATH_READS = frozenset(
         "statx",
     }
 )
-# Tracepoint field holding the path in each sys_enter_* format file.
+# Tracepoint field holding the path in each sys_enter_* format file.  The
+# argument-name fields ("pathname") are what modern kernels (>= 4.x) expose;
+# _ENTER_PATH_FIELD_LEGACY carries the older "path" naming for the same calls
+# so the attach pre-check can retry when a host exposes the old layout.
 _ENTER_PATH_FIELD = {
     "stat": "filename",
     "lstat": "filename",
@@ -83,6 +94,14 @@ _ENTER_PATH_FIELD = {
     "chdir": "filename",
     "execve": "filename",
     "readlink": "path",
+    "readlinkat": "pathname",
+    "statfs": "pathname",
+    "getxattr": "pathname",
+    "lgetxattr": "pathname",
+    "listxattr": "pathname",
+    "llistxattr": "pathname",
+}
+_ENTER_PATH_FIELD_LEGACY = {
     "readlinkat": "path",
     "statfs": "path",
     "getxattr": "path",
@@ -90,6 +109,8 @@ _ENTER_PATH_FIELD = {
     "listxattr": "path",
     "llistxattr": "path",
 }
+# Tracepoint field holding the dirfd argument: execveat names it "fd".
+_ENTER_DFD_FIELD = {"execveat": "fd"}
 # All calls the tracer understands (process shape + reads + opens).
 _SUPPORTED_CALLS = _PROCESS_CALLS | _PATH_READS | _AT_PATH_READS | _OPEN_CALLS
 
@@ -101,6 +122,8 @@ _ENOENT = 2
 _ENOTDIR = 20
 
 _BPFTRACE_MIN_RESOLVED = (0, 10)  # dpath() builtin
+_BPFTRACE_MIN_QUIET = (0, 10)  # -q/--quiet flag
+_BPFTRACE_MIN_LONG_STRINGS = (0, 10)  # scratch-map strings (> 200 bytes)
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +135,17 @@ def bpftrace_binary() -> Optional[str]:
 
 
 def bpftrace_version() -> Optional[Tuple[int, ...]]:
-    """Return the installed bpftrace version as a tuple, or None."""
+    """Return the installed bpftrace version as a tuple, or None.
+
+    Cached: the version cannot change during a session, and the flag/strlen
+    helpers below run on every eBPF-traced step, so an uncached probe would
+    spawn one `bpftrace --version` subprocess per step.
+    """
+    return _bpftrace_version()
+
+
+@functools.lru_cache(maxsize=1)
+def _bpftrace_version() -> Optional[Tuple[int, ...]]:
     binary = bpftrace_binary()
     if binary is None:
         return None
@@ -138,6 +171,32 @@ def bpftrace_supports_resolved_paths() -> bool:
     return version is not None and version[:2] >= _BPFTRACE_MIN_RESOLVED
 
 
+def bpftrace_quiet_flag() -> List[str]:
+    """Return the ``-q`` flag when the installed bpftrace supports it.
+
+    bpftrace < 0.10 has no ``-q``/``--quiet`` option and exits with a usage
+    error when passed; older versions simply print their attach/dump chatter
+    to stdout, which the ATXBPF line parser ignores.
+    """
+    version = bpftrace_version()
+    if version is None or version[:2] < _BPFTRACE_MIN_QUIET:
+        return []
+    return ["-q"]
+
+
+def bpftrace_strlen_env() -> Dict[str, str]:
+    """Return the BPFTRACE_STRLEN environment for this bpftrace.
+
+    bpftrace >= 0.10 stores long strings in a scratch map and accepts 4096
+    (paths up to 4095 bytes).  Older builds keep strings on the 512-byte BPF
+    stack and hard-fail on any value above 200 bytes, so they get 200.
+    """
+    version = bpftrace_version()
+    if version is None or version[:2] < _BPFTRACE_MIN_LONG_STRINGS:
+        return {"BPFTRACE_STRLEN": "200"}
+    return {"BPFTRACE_STRLEN": "4096"}
+
+
 def available_syscall_tracepoints() -> Optional[set]:
     """Discover syscall tracepoints from tracefs; None when unreadable.
 
@@ -160,45 +219,77 @@ def available_syscall_tracepoints() -> Optional[set]:
     return None
 
 
-def _tracepoint_name(call: str, direction: str) -> str:
-    return f"sys_{direction}_{call}"
+# Tracepoint-name aliases for syscalls whose tracepoint is named after the
+# underlying kernel function instead of the syscall table entry.  Ubuntu 5.4
+# exposes the `stat` syscall as sys_enter_newstat and `lstat` as
+# sys_enter_newlstat; other kernels use sys_enter_stat/sys_enter_lstat.  The
+# emitted event still carries the syscall name (stat/lstat), which is what
+# the userspace parser matches.
+_TRACEPOINT_ALIASES = {
+    "stat": ("stat", "newstat"),
+    "lstat": ("lstat", "newlstat"),
+}
+
+
+def _tracepoint_candidates(call: str, direction: str) -> Tuple[str, ...]:
+    return tuple(
+        f"sys_{direction}_{name}"
+        for name in _TRACEPOINT_ALIASES.get(call, (call,))
+    )
 
 
 # Static default probe list for kernels where tracefs is not readable.  The
 # attach pre-check retries with this list when discovery is impossible, so a
 # wrong guess degrades to "BPF unavailable" instead of a broken trace.
 _STATIC_ENTER_TRACEPOINTS = tuple(
-    _tracepoint_name(call, "enter") for call in sorted(_SUPPORTED_CALLS)
+    _tracepoint_candidates(call, "enter")[0] for call in sorted(_SUPPORTED_CALLS)
 )
 _STATIC_EXIT_TRACEPOINTS = tuple(
-    _tracepoint_name(call, "exit") for call in sorted(_SUPPORTED_CALLS)
+    _tracepoint_candidates(call, "exit")[0] for call in sorted(_SUPPORTED_CALLS)
 )
 
 
 def select_tracepoints(
     available: Optional[Iterable[str]],
 ) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
-    """Return (enter, exit) tracepoint lists, filtering by availability."""
-    wanted_enter = list(_STATIC_ENTER_TRACEPOINTS)
-    wanted_exit = list(_STATIC_EXIT_TRACEPOINTS)
+    """Return (enter, exit) tracepoint lists, filtering by availability.
+
+    For aliased syscalls (stat -> newstat), the first candidate present in
+    `available` is chosen, so the generated script attaches on kernels that
+    name the tracepoint either way.
+    """
     if available is None:
-        return tuple(wanted_enter), tuple(wanted_exit)
+        return tuple(_STATIC_ENTER_TRACEPOINTS), tuple(_STATIC_EXIT_TRACEPOINTS)
     known = set(available)
-    enter = tuple(name for name in wanted_enter if name in known)
-    exit_ = tuple(name for name in wanted_exit if name in known)
-    return enter, exit_
+    enter = []
+    exit_ = []
+    for call in sorted(_SUPPORTED_CALLS):
+        for candidate in _tracepoint_candidates(call, "enter"):
+            if candidate in known:
+                enter.append(candidate)
+                break
+        for candidate in _tracepoint_candidates(call, "exit"):
+            if candidate in known:
+                exit_.append(candidate)
+                break
+    return tuple(enter), tuple(exit_)
 
 
 # ---------------------------------------------------------------------------
 # bpftrace script generation
 # ---------------------------------------------------------------------------
 
-def _probe_body(call: str) -> str:
+def _probe_body(
+    call: str,
+    path_fields: Optional[Dict[str, str]] = None,
+    dfd_fields: Optional[Dict[str, str]] = None,
+) -> str:
     """Entry-probe body.  Process calls record nothing on entry (their retval
     and child pid are only known at exit), so they return an empty body."""
+    path_field = (path_fields or _ENTER_PATH_FIELD).get(call, "filename")
+    dfd_field = (dfd_fields or _ENTER_DFD_FIELD).get(call, "dfd")
     if call in _PROCESS_CALLS:
         return ""
-    path_field = _ENTER_PATH_FIELD.get(call, "filename")
     if call in _OPEN_CALLS:
         if call == "openat2":
             # open_how.flags is the first u64 of the user struct; dereferencing
@@ -209,7 +300,7 @@ def _probe_body(call: str) -> str:
         if call == "open":
             dfd_arg = "0"
         else:
-            dfd_arg = "(int32)args->dfd"
+            dfd_arg = f"(int32)args->{dfd_field}"
         return (
             f'    printf("ATXBPF E %d %d {call} %d %llu %s\\n", '
             f"pid, tid, {dfd_arg}, {flags_arg}, str(args->{path_field}));\n"
@@ -217,7 +308,7 @@ def _probe_body(call: str) -> str:
     if call in _AT_PATH_READS:
         return (
             f'    printf("ATXBPF E %d %d {call} %d 0 %s\\n", '
-            f"pid, tid, (int32)args->dfd, str(args->{path_field}));\n"
+            f"pid, tid, (int32)args->{dfd_field}, str(args->{path_field}));\n"
         )
     # plain path reads
     return (
@@ -228,12 +319,9 @@ def _probe_body(call: str) -> str:
 
 def _exit_body(call: str) -> str:
     if call in _PROCESS_CALLS:
-        # Extend the allowed process tree in-kernel and report the child pid
-        # so the userspace parser can propagate per-process cwd state.
+        # Report the child pid so the userspace parser can extend the traced
+        # process tree and propagate per-process cwd state.
         return (
-            "    if ((int64)args->ret > 0) {\n"
-            "        @allowed[(uint64)args->ret] = 1;\n"
-            "    }\n"
             f'    printf("ATXBPF X %d %d {call} %lld\\n", '
             "pid, tid, (int64)args->ret);\n"
         )
@@ -243,10 +331,26 @@ def _exit_body(call: str) -> str:
     )
 
 
+def _call_for_tracepoint(tracepoint_name: str) -> str:
+    """Map an emitted tracepoint name back to the syscall name for events."""
+    for prefix in ("sys_enter_", "sys_exit_"):
+        if tracepoint_name.startswith(prefix):
+            suffix = tracepoint_name[len(prefix):]
+            break
+    else:
+        suffix = tracepoint_name
+    for call, candidates in _TRACEPOINT_ALIASES.items():
+        if suffix in candidates:
+            return call
+    return suffix
+
+
 def build_bpftrace_script(
     available: Optional[Iterable[str]] = None,
     *,
     with_resolved: bool = False,
+    path_fields: Optional[Dict[str, str]] = None,
+    dfd_fields: Optional[Dict[str, str]] = None,
 ) -> str:
     """Generate the bpftrace dependency-tracing script.
 
@@ -254,44 +358,69 @@ def build_bpftrace_script(
     ``sys_enter_openat``); None uses the static default list.  `with_resolved`
     adds the kprobe:vfs_open section (requires bpftrace >= 0.10 with the
     ``dpath()`` builtin) that reports kernel-resolved open paths.
+    `path_fields`/`dfd_fields` override per-call tracepoint argument names
+    (used by the attach pre-check to retry legacy field layouts).
+
+    Probes fire for every process on the host; the userspace parser filters
+    events to the seed's descendant tree (see module docstring).
     """
     enter, exit_ = select_tracepoints(available)
     lines = [
         "/* AgentTX dependency tracer (generated). */",
         "BEGIN",
         "{",
-        "    @allowed[(uint64)$1] = 1;",
         f'    printf("{READY_LINE} %d\\n", $1);',
         "}",
         "",
     ]
-    if enter:
-        lines.append(",\n".join(f"tracepoint:{name}" for name in enter))
-        lines.append("/@allowed[(uint64)pid]/")
-        lines.append("{")
-        for call in sorted(_SUPPORTED_CALLS):
-            enter_name = _tracepoint_name(call, "enter")
-            if enter_name in enter:
-                body = _probe_body(call)
-                if body:
-                    lines.append(body)
-        lines.append("}")
-        lines.append("")
-    if exit_:
-        lines.append(",\n".join(f"tracepoint:{name}" for name in exit_))
-        lines.append("/@allowed[(uint64)pid]/")
-        lines.append("{")
-        for call in sorted(_SUPPORTED_CALLS):
-            exit_name = _tracepoint_name(call, "exit")
-            if exit_name in exit_:
-                lines.append(_exit_body(call))
-        lines.append("}")
-        lines.append("")
+    # One probe block per syscall, never comma-joined: bpftrace resolves
+    # `args` against the first probe of a joined block, and syscall
+    # tracepoints have heterogeneous structs, so joined blocks only compile
+    # when every probe shares the same field layout.  Separate blocks work on
+    # every bpftrace version (0.9.x included).
+    for name in enter:
+        call = _call_for_tracepoint(name)
+        body = _probe_body(call, path_fields, dfd_fields)
+        if body:
+            lines.extend(
+                [
+                    f"tracepoint:syscalls:{name}",
+                    "{",
+                    body,
+                    "}",
+                    "",
+                ]
+            )
+    for name in exit_:
+        call = _call_for_tracepoint(name)
+        lines.extend(
+            [
+                f"tracepoint:syscalls:{name}",
+                "{",
+                _exit_body(call),
+                "}",
+                "",
+            ]
+        )
+    # Process-tree extension: sched_process_fork reports the parent and child
+    # pids from task_struct, which are the GLOBAL pids.  sys_exit_clone's ret
+    # is namespace-local (the pid the syscall returns to its caller), so it
+    # cannot be matched against the userspace /proc snapshot when the sandbox
+    # runs in its own pid namespace (try does unshare --pid).
+    lines.extend(
+        [
+            "tracepoint:sched:sched_process_fork",
+            "{",
+            '    printf("ATXBPF F %d %d\\n", '
+            "args->parent_pid, args->child_pid);",
+            "}",
+            "",
+        ]
+    )
     if with_resolved:
         lines.extend(
             [
                 "kprobe:vfs_open",
-                "/@allowed[(uint64)pid]/",
                 "{",
                 "    printf(\"ATXBPF R %d %d %s\\n\", pid, tid, "
                 "dpath((struct path *)arg0));",
@@ -324,12 +453,12 @@ def bpf_attach_precheck(
         return False, "bpftrace binary not found"
     env = {
         **os.environ,
-        "BPFTRACE_STRLEN": "4096",
+        **bpftrace_strlen_env(),
         **(extra_env or {}),
     }
     try:
         cp = subprocess.run(
-            [binary, "-q", "-c", "/bin/true", "-e", script],
+            [*bpftrace_quiet_flag(), binary, "-c", "/bin/true", "-e", script, "1"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -344,7 +473,7 @@ def bpf_attach_precheck(
     if cp.returncode != 0:
         detail = (cp.stderr or cp.stdout).strip().splitlines()
         return False, detail[-1] if detail else f"rc={cp.returncode}"
-    if OK_LINE not in cp.stdout:
+    if f"{READY_LINE} 1" not in cp.stdout:
         return False, "bpftrace pre-check produced no readiness marker"
     return True, "ok"
 
@@ -364,32 +493,39 @@ def bpf_static_available() -> Tuple[bool, str]:
 def resolve_bpf_script() -> Tuple[str, bool, str]:
     """Build the script for this host; returns (script, resolved_paths, detail).
 
-    Tries the full probe set, then falls back to a reduced set without the
-    resolved-path kprobe when the installed bpftrace predates ``dpath()`` or
-    the kprobe cannot attach.  Never returns an unattachable script.
+    Tries the full probe set, then falls back to reduced/legacy variants:
+    the static probe list when tracefs discovery is unavailable or stale, a
+    legacy tracepoint field layout (``path`` instead of ``pathname``) for
+    hosts that expose it, and finally the resolved-path kprobe when the
+    installed bpftrace supports ``dpath()``.  Never returns an unattachable
+    script.
     """
     static_ok, static_detail = bpf_static_available()
     if not static_ok:
         return "", False, static_detail
     discovered = available_syscall_tracepoints()
+    variants: List[Tuple[str, Optional[set], Optional[Dict[str, str]]]] = []
     if discovered is not None:
-        script = build_bpftrace_script(discovered)
+        variants.append(("tracepoints", discovered, None))
+        variants.append(("tracepoints + legacy fields", discovered,
+                         _ENTER_PATH_FIELD_LEGACY))
+    variants.append(("default tracepoints", None, None))
+    variants.append(("default tracepoints + legacy fields", None,
+                     _ENTER_PATH_FIELD_LEGACY))
+    last_detail = "no attachable probe set"
+    for label, avail, path_fields in variants:
+        script = build_bpftrace_script(avail, path_fields=path_fields)
         ok, detail = bpf_attach_precheck(script)
         if ok:
-            return script, False, "tracepoints"
-        # Discovery may be stale or the kernel may reject a specific probe;
-        # fall through to the legacy-retry path below.
-    script = build_bpftrace_script(None)
-    ok, detail = bpf_attach_precheck(script)
-    if ok:
-        return script, False, "default tracepoints"
-    with_resolved = bpftrace_supports_resolved_paths()
-    if with_resolved:
+            return script, False, label
+        last_detail = detail or last_detail
+    if bpftrace_supports_resolved_paths():
         script = build_bpftrace_script(None, with_resolved=True)
         ok, detail = bpf_attach_precheck(script)
         if ok:
             return script, True, "default tracepoints + resolved paths"
-    return "", False, detail or "no attachable probe set"
+        last_detail = detail or last_detail
+    return "", False, last_detail
 
 
 # ---------------------------------------------------------------------------
@@ -439,6 +575,22 @@ def _resolved_fields(line: str) -> Optional[Tuple[int, int, str]]:
         return None
     try:
         return int(parts[2]), int(parts[3]), parts[4]
+    except ValueError:
+        return None
+
+
+def _fork_fields(line: str) -> Optional[Tuple[int, int]]:
+    """Parse one fork line; returns (parent_pid, child_pid).
+
+    The sched_process_fork tracepoint reports global pids (from
+    task_struct), unlike sys_exit_clone's ret, which is the pid the syscall
+    returned in the caller's (possibly nested) pid namespace.
+    """
+    parts = line.split()
+    if len(parts) != 4 or parts[1] != "F":
+        return None
+    try:
+        return int(parts[2]), int(parts[3])
     except ValueError:
         return None
 
@@ -508,7 +660,11 @@ def _apply_exit(
         _add_workspace([path], kind, workspace, effects)
 
 
-def parse_bpf_effects(text: str, workspace: Path) -> List[Effect]:
+def parse_bpf_effects(
+    text: str,
+    workspace: Path,
+    allowed_pids: Optional[Iterable[int]] = None,
+) -> List[Effect]:
     """Return deduplicated workspace reads and failed path lookups.
 
     Mirrors :func:`agenttx.trace.parse_strace_effects` semantics:
@@ -520,12 +676,21 @@ def parse_bpf_effects(text: str, workspace: Path) -> List[Effect]:
       child pid;
     * when a resolved path (ATXBPF_R) differs from the requested path, both
       are recorded (symlink-alias granularity).
+
+    `allowed_pids` optionally restricts parsing to the seed's traced process
+    tree: events of other pids are dropped, and `ATXBPF F` fork lines
+    (sched_process_fork, global pids) of an allowed parent extend the set and
+    propagate the parent's cwd, so children forked after the READY snapshot
+    are still traced (strace `-f` equivalence).  None (used by the unit
+    tests) accepts every pid and keeps the clone/fork retval-based cwd
+    propagation.
     """
     workspace = Path(workspace).resolve()
     cwd_by_pid: Dict[int, Path] = {}
     pending: Dict[int, Tuple[int, str, Path, int]] = {}
     resolved: Dict[int, Path] = {}
     effects = set()
+    allowed: Optional[set] = set(allowed_pids) if allowed_pids is not None else None
 
     for raw_line in text.splitlines():
         if not raw_line.startswith(ATX_MARKER):
@@ -533,6 +698,8 @@ def parse_bpf_effects(text: str, workspace: Path) -> List[Effect]:
         entry = _entry_fields(raw_line)
         if entry is not None:
             pid, tid, call, dfd, flags, path_text = entry
+            if allowed is not None and pid not in allowed:
+                continue
             if call in _OPEN_CALLS:
                 resolved.pop(tid, None)
             base = cwd_by_pid.get(pid, workspace)
@@ -552,11 +719,19 @@ def parse_bpf_effects(text: str, workspace: Path) -> List[Effect]:
         exit_ = _exit_fields(raw_line)
         if exit_ is not None:
             pid, tid, call, retval = exit_
+            if allowed is not None and pid not in allowed:
+                continue
             entry = pending.pop(tid, None)
             if entry is None:
                 continue
             entry_pid, entry_call, path, flags = entry
             if entry_call != call:
+                continue
+            if allowed is not None and call in _PROCESS_CALLS:
+                # The syscall retval is the child pid in the caller's pid
+                # namespace, unusable against the global-pid /proc snapshot;
+                # the sched_process_fork line already propagated the tree and
+                # the child's cwd.
                 continue
             _apply_exit(
                 pid,
@@ -571,9 +746,24 @@ def parse_bpf_effects(text: str, workspace: Path) -> List[Effect]:
                 effects,
             )
             continue
+        fork = _fork_fields(raw_line)
+        if fork is not None:
+            parent, child = fork
+            if allowed is None:
+                # Unfiltered (unit-test) mode: nothing to extend.
+                continue
+            if parent not in allowed:
+                continue
+            allowed.add(child)
+            # The child inherits the parent's cwd at fork time (the syscall
+            # exit's retval is a namespace-local pid, unusable as a key here).
+            cwd_by_pid.setdefault(child, cwd_by_pid.get(parent, workspace))
+            continue
         resolved_line = _resolved_fields(raw_line)
         if resolved_line is not None:
             pid, tid, path_text = resolved_line
+            if allowed is not None and pid not in allowed:
+                continue
             if path_text.startswith("/"):
                 resolved[tid] = _normal(Path(path_text))
 

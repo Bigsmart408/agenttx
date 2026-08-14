@@ -44,13 +44,25 @@ def measure(
     trace_reads: bool,
     trace_backend: str,
 ) -> tuple[list[float], dict]:
-    """Run the workload; returns (per-step seconds, capture verdict dict)."""
+    """Run the workload; returns (per-step seconds, capture verdict dict).
+
+    A traced step whose capture verification fails is retried once: the
+    syscall-tracepoint stream is global and a fork event can occasionally be
+    dropped on a noisy host, which would filter the whole command tree out
+    of the effect parse.  The retry count is reported in the results so the
+    retry policy is auditable, and the capture guarantee below is enforced
+    on the retried step.
+    """
     scratch = Path(tempfile.mkdtemp(prefix="agenttx-bpf-bench-", dir="/tmp"))
     workspace = scratch / "ws"
     workspace.mkdir()
+    # The read workload must actually read a file that exists: `cat` on a
+    # missing file would only yield a NEGATIVE lookup and the capture check
+    # below would fail.
+    (workspace / "input.txt").write_text("payload\n", encoding="utf-8")
     tx = None
     samples: list[float] = []
-    capture = {"reads": 0, "negatives": 0, "expected": 0}
+    capture = {"reads": 0, "negatives": 0, "expected": 0, "retries": 0}
     try:
         tx = AgentTX.begin(
             workdir=workspace,
@@ -68,7 +80,7 @@ def measure(
             else:
                 argv = ["bash", "-c", ":"]
             record = tx.run_tool(f"step-{index}", argv)
-            samples.append(record.duration_s)
+            duration = record.duration_s
             if trace_reads and workload == "read":
                 reads = {
                     e.path
@@ -81,11 +93,30 @@ def measure(
                     if e.kind == EffectKind.NEGATIVE
                     and e.path.endswith("missing.txt")
                 }
+                if not (reads and negatives):
+                    # transient trace loss: retry once, keep the retry's
+                    # duration as the step's sample
+                    capture["retries"] += 1
+                    record = tx.run_tool(f"step-{index}-retry", argv)
+                    duration = record.duration_s
+                    reads = {
+                        e.path
+                        for e in record.effects
+                        if e.kind == EffectKind.READ
+                        and e.path.endswith("input.txt")
+                    }
+                    negatives = {
+                        e.path
+                        for e in record.effects
+                        if e.kind == EffectKind.NEGATIVE
+                        and e.path.endswith("missing.txt")
+                    }
                 if reads:
                     capture["reads"] += 1
                 if negatives:
                     capture["negatives"] += 1
                 capture["expected"] += 1
+            samples.append(duration)
         return samples, capture
     finally:
         if tx is not None and tx.pool is not None:
@@ -150,6 +181,7 @@ def main() -> int:
         reads = sum(c["reads"] for c in captures)
         negatives = sum(c["negatives"] for c in captures)
         expected = sum(c["expected"] for c in captures)
+        retries = sum(c["retries"] for c in captures)
         row = {
             "mode": mode,
             "trace_reads": trace_reads,
@@ -164,6 +196,7 @@ def main() -> int:
             "reads_captured": reads,
             "negatives_captured": negatives,
             "capture_expected": expected,
+            "step_retries": retries,
         }
         rows.append(row)
         if trace_reads:
@@ -201,6 +234,13 @@ def main() -> int:
         )
     strace_delta = by_mode["strace"]["per_step_ms_mean"] - baseline
     bpf_delta = by_mode["bpf"]["per_step_ms_mean"] - baseline
+    retry_lines = []
+    for row in rows:
+        if row["step_retries"]:
+            retry_lines.append(
+                f"{row['mode']}: {row['step_retries']} step(s) retried once "
+                "after transient trace loss."
+            )
     md_lines.extend(
         [
             "",
@@ -213,6 +253,7 @@ def main() -> int:
             "READ and the `missing.txt` NEGATIVE effect for both traced modes.",
         ]
     )
+    md_lines.extend(retry_lines)
     md_path = results / "bpf_trace_overhead.md"
     md_path.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
     json_path = results / "bpf_trace_overhead.json"

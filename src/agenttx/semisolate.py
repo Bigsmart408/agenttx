@@ -1,6 +1,6 @@
 """Shared/incremental semisolate pool backed by binpash/try -N DIR."""
 from __future__ import annotations
-import base64, errno, hashlib, json, os, re, shlex, shutil, signal, stat, struct, subprocess, tempfile, time
+import base64, hashlib, json, os, re, shlex, shutil, signal, stat, struct, subprocess, tempfile, time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Optional, Sequence, Tuple
@@ -12,7 +12,9 @@ from .trace import parse_strace_effects
 
 _WHITEOUT_DIGEST = "<agenttx:whiteout>"
 _TRACE_BACKENDS = ("auto", "strace", "bpf")
-_BPF_FIFO_PREFIX = ".agenttx-bpf-fifo-"
+_BPF_MARKER_PREFIX = ".agenttx-bpf-marker-"
+_BPF_MARKER_HOLD = "hold"
+_BPF_MARKER_GO = "go"
 
 
 def _iter_upper_entries(directory: Path) -> Iterator[Path]:
@@ -114,6 +116,37 @@ def _probe_try_backend(try_bin: Path, workspace: Path) -> tuple[bool, str]:
         return False, f"{type(exc).__name__}: {exc}"
     finally:
         shutil.rmtree(probe, ignore_errors=True)
+
+def _descendant_pids(root: int) -> set:
+    """Return `root` and every live descendant pid, walked from /proc.
+
+    The eBPF tracer's syscall tracepoints are global, so the userspace parser
+    needs the seed's process tree to filter events.  The walk runs when the
+    probes have attached (ATXBPF_READY): the try sandbox's setup forks happen
+    before attach and are invisible to in-kernel fork tracking, so they must
+    be discovered here; forks after the snapshot are recovered from traced
+    clone/fork/vfork/clone3 exits in the parser.
+    """
+    seen = {root}
+    frontier = [root]
+    while frontier:
+        pid = frontier.pop()
+        try:
+            tids = os.listdir(f"/proc/{pid}/task")
+        except OSError:
+            continue
+        for tid in tids:
+            try:
+                with open(f"/proc/{pid}/task/{tid}/children", "r") as handle:
+                    children = [int(item) for item in handle.read().split()]
+            except OSError:
+                continue
+            for child in children:
+                if child not in seen:
+                    seen.add(child)
+                    frontier.append(child)
+    return seen
+
 
 @dataclass
 class StepResult:
@@ -260,12 +293,12 @@ class SharedSemisolate:
     ) -> Tuple[subprocess.CompletedProcess, List[Effect], float]:
         """Run one step under the eBPF tracer.
 
-        The command is held on a FIFO until bpftrace reports ``ATXBPF_READY``,
-        so no syscall of the command (or its descendants) can escape the
-        trace.  A tracer failure fails the step closed after the command has
-        run (releasing the hold first), mirroring the strace backend's
-        missing-log behavior; the host stays clean because effects remain
-        speculative in the overlay.
+        The command is held on a release-marker file until bpftrace reports
+        ``ATXBPF_READY``, so no syscall of the command (or its descendants)
+        can escape the trace.  A tracer failure fails the step closed after
+        the command has run (releasing the hold first), mirroring the strace
+        backend's missing-log behavior; the host stays clean because effects
+        remain speculative in the overlay.
         """
         self._ensure_bpf_state()
         assert self._bpf_state is not None and self._bpf_state["script"]
@@ -274,16 +307,22 @@ class SharedSemisolate:
             str(self.sandbox_dir).encode("utf-8")
         ).hexdigest()[:12]
         tag = f"{session_token}-{os.getpid()}-{self._step_count}"
-        fifo_name = f"{_BPF_FIFO_PREFIX}{tag}"
-        fifo_logical = Path("/tmp") / fifo_name
-        fifo_upper = self.sandbox_dir / "upperdir" / "tmp" / fifo_name
+        marker_name = f"{_BPF_MARKER_PREFIX}{tag}"
+        marker_logical = Path("/tmp") / marker_name
+        marker_upper = self.sandbox_dir / "upperdir" / "tmp" / marker_name
         trace_log = Path("/tmp") / f".agenttx-bpf-{tag}.raw"
-        fifo_upper.parent.mkdir(parents=True, exist_ok=True)
-        os.mkfifo(fifo_upper)
+        marker_upper.parent.mkdir(parents=True, exist_ok=True)
+        # Pre-create the marker with a "hold" payload: the command polls the
+        # marker's CONTENT (not its existence).  Existence polling would race
+        # OverlayFS negative-dentry caching — a lookup that misses before the
+        # file is created stays cached as ENOENT even after the file appears
+        # in the upperdir (verified on this kernel).
+        marker_upper.write_text(_BPF_MARKER_HOLD)
         bpf_proc: Optional[subprocess.Popen] = None
         log_handle = None
         released = False
         ready_failed: Optional[str] = None
+        traced_tree: Optional[set] = None
         popen: Optional[subprocess.Popen] = None
         collect: Optional[Callable[[], subprocess.CompletedProcess]] = None
         waiter: Optional[subprocess.Popen] = None
@@ -293,7 +332,7 @@ class SharedSemisolate:
                 request = {
                     "argv": list(command),
                     "cwd": str(self.workspace),
-                    "hold_fifo": str(fifo_logical),
+                    "hold_marker": str(marker_logical),
                 }
                 try:
                     self._dispatch_worker(request)
@@ -308,16 +347,19 @@ class SharedSemisolate:
                     waiter = self._worker_process
                     collect = lambda: self._collect_worker_response(list(command))
             if collect is None:
-                read_cmd = 'IFS= read -r _ < "$0"; shift; exec "$@"'
+                # The hold runs from a script file: try word-splits inline
+                # `bash -c` strings when it builds script_to_execute.sh.
+                # FIFO pipe pairing does not cross the OverlayFS mount
+                # boundary either (pipes are allocated against the
+                # superblock's user namespace), so the script polls the
+                # release marker's content instead.
                 popen = subprocess.Popen(
                     [
                         str(self.try_bin),
                         *flags,
                         "--",
-                        "bash",
-                        "-c",
-                        read_cmd,
-                        str(fifo_logical),
+                        str(self._hold_script()),
+                        str(marker_logical),
                         *command,
                     ],
                     cwd=str(self.workspace),
@@ -332,10 +374,16 @@ class SharedSemisolate:
             binary = bpf_trace.bpftrace_binary()
             assert binary is not None  # validated during initialization
             bpf_proc = subprocess.Popen(
-                [binary, "-q", "-e", self._bpf_state["script"], str(seed)],
+                [
+                    *bpf_trace.bpftrace_quiet_flag(),
+                    binary,
+                    "-e",
+                    self._bpf_state["script"],
+                    str(seed),
+                ],
                 stdout=log_handle,
                 stderr=subprocess.DEVNULL,
-                env={**os.environ, "BPFTRACE_STRLEN": "4096"},
+                env={**os.environ, **bpf_trace.bpftrace_strlen_env()},
             )
             ready, elapsed = bpf_trace.wait_for_bpftrace_ready(
                 trace_log,
@@ -348,7 +396,12 @@ class SharedSemisolate:
                     f"bpftrace did not become ready within {elapsed:.1f}s "
                     f"(rc={bpf_proc.returncode})"
                 )
-            self._release_fifo(fifo_upper, waiter)
+            else:
+                # Snapshot the seed's live descendant tree now: the sandbox's
+                # setup forks predate probe attach, and the userspace parser
+                # filters the (global) tracepoint events to this tree.
+                traced_tree = _descendant_pids(seed)
+            self._signal_release(marker_upper)
             released = True
             if collect is not None:
                 cp = collect()
@@ -369,11 +422,12 @@ class SharedSemisolate:
                         bpf_proc.wait(timeout=5)
                     except Exception:
                         pass
-            if not released and waiter is not None:
+            if not released:
                 # A readiness failure must not leave the command blocked on
-                # the FIFO; release it so the step can complete and fail closed.
+                # the hold; release it so the step can complete and fail
+                # closed.
                 try:
-                    self._release_fifo(fifo_upper, waiter, timeout=30.0)
+                    self._signal_release(marker_upper)
                 except Exception:
                     pass
             if log_handle is not None:
@@ -387,41 +441,29 @@ class SharedSemisolate:
                     "bpftrace did not produce the expected dependency log"
                 )
             text = trace_log.read_text(encoding="utf-8", errors="replace")
-            effects = bpf_trace.parse_bpf_effects(text, self.workspace)
+            effects = bpf_trace.parse_bpf_effects(
+                text, self.workspace, allowed_pids=traced_tree
+            )
             return cp, effects, duration
         finally:
-            for leftover in (fifo_upper, trace_log):
+            for leftover in (marker_upper, trace_log):
                 try:
                     leftover.unlink(missing_ok=True)
                 except OSError:
                     pass
 
-    def _release_fifo(
-        self,
-        fifo_upper: Path,
-        waiter: Optional[subprocess.Popen],
-        *,
-        timeout: float = 120.0,
-    ) -> None:
-        """Write the release byte to the hold FIFO without blocking forever."""
-        deadline = time.monotonic() + timeout
-        while True:
-            try:
-                fd = os.open(str(fifo_upper), os.O_WRONLY | os.O_NONBLOCK)
-            except OSError as exc:
-                if exc.errno != errno.ENXIO:
-                    raise
-                if waiter is not None and waiter.poll() is not None:
-                    return  # command already exited without opening the FIFO
-                if time.monotonic() >= deadline:
-                    return
-                time.sleep(0.02)
-                continue
-            try:
-                os.write(fd, b"go")
-            finally:
-                os.close(fd)
-            return
+    def _signal_release(self, marker_upper: Path) -> None:
+        """Flip the release marker to "go", unblocking the traced command.
+
+        The marker file is pre-created with a "hold" payload in the overlay
+        upperdir; the traced command (worker or one-shot bash) polls its
+        content through the sandbox's mount.  A FIFO cannot serve this
+        handshake: FIFO pipe pairing does not cross the OverlayFS mount
+        boundary, because pipes are allocated against the superblock's user
+        namespace — a reader inside the sandbox never pairs with a writer on
+        the host upperdir (verified on this kernel in both directions).
+        """
+        marker_upper.write_text(_BPF_MARKER_GO)
 
     def refresh_summary(self) -> Dict[str, SummaryEntry]:
         assert self.sandbox_dir is not None
@@ -458,11 +500,11 @@ class SharedSemisolate:
                 logical = Path("/" + rel.as_posix())
 
                 # Read tracing writes an internal raw log into /tmp inside the
-                # overlay, and the eBPF backend leaves a control FIFO there.
+                # overlay, and the eBPF backend leaves a release marker there.
                 # Ignore crash leftovers and never expose them as effects.
                 if rel.parent == Path("tmp") and (
                     entry.name.startswith(".agenttx-strace-")
-                    or entry.name.startswith(_BPF_FIFO_PREFIX)
+                    or entry.name.startswith(_BPF_MARKER_PREFIX)
                 ):
                     continue
 
@@ -529,6 +571,34 @@ class SharedSemisolate:
             body = "#!/bin/bash\nset -e\n" + " ".join(shlex.quote(a) for a in argv) + "\n"
         script.write_text(body, encoding="utf-8")
         return script
+
+    def _hold_script(self) -> Path:
+        """Return the eBPF hold script used by the one-shot try path.
+
+        The hold must be a script file, not an inline ``bash -c`` string:
+        try word-splits inline arguments when it builds script_to_execute.sh
+        (verified on this host), so semicolons and quotes in the hold logic
+        would be mangled.  The script lives next to the command script, which
+        is already visible inside the sandbox via the /tmp overlay.
+        """
+        parent = (
+            self._cmd_script.parent
+            if self._cmd_script is not None
+            else Path(tempfile.mkdtemp(prefix="agenttx-cmd-", dir="/tmp"))
+        )
+        hold = parent / "hold.sh"
+        if not hold.exists():
+            hold.write_text(
+                "#!/bin/bash\n"
+                "# AgentTX eBPF hold: wait for the release marker, then exec.\n"
+                'while [ "$(cat "$1" 2>/dev/null)" != "go" ]; '
+                "do sleep 0.01; done\n"
+                "shift\n"
+                'exec "$@"\n',
+                encoding="utf-8",
+            )
+            hold.chmod(0o700)
+        return hold
 
     def _ensure_worker(self) -> None:
         if self._worker_process is not None and self._worker_process.poll() is None:
