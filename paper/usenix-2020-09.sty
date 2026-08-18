@@ -29,7 +29,14 @@
 \usepackage{pslatex}
 
 % appearance
-\usepackage[kerning,spacing]{microtype} % more compact and arguably nicer
+% XeTeX (used by tectonic) does not implement microtype's spacing feature.
+% Keep the full optimization for pdfTeX and use kerning-only elsewhere.
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[kerning,spacing]{microtype}
+\else
+  \usepackage{microtype}
+\fi
 
 % Uncomment the following line if you want the columns of the last page
 % equal in size. But note that doing so may cause issues with some
@@ -38,7 +45,14 @@
 
 % refs and bib
 \usepackage{cite}               % order multiple entries in \cite{...}
-\usepackage{breakurl}           % break too-long urls in refs
+% breakurl expects hyperref to be loaded already, which is not true for
+% XeTeX-based lightweight builders such as tectonic.  Hyperref's URL support
+% is sufficient for PDF output, so load breakurl only for the classic PDF
+% route where the style historically used it.
+\usepackage{ifpdf}
+\ifpdf
+  \usepackage{breakurl}         % break too-long urls in refs
+\fi
 \usepackage{url}                % allow \url in bibtex for clickable links
 \usepackage{xcolor}             % color definitions, to be use for...
 \usepackage[]{hyperref}         % ...clickable refs within pdf...

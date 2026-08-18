@@ -35,7 +35,7 @@ from experiments.workloads.recovery_agent import (  # noqa: E402
 from agenttx.providers import configured_provider, provider_names, provider_result_dir, resolve_provider  # noqa: E402
 
 
-def run_once(repeat: int, model: Optional[str], max_turns: int, provider: Optional[str]) -> dict:
+def run_once(repeat: int, model: Optional[str], max_turns: int, provider: Optional[str], trace_backend: str = "strace") -> dict:
     from agenttx.agents.llm_agent import LLMToolAgent
 
     scratch = Path(tempfile.mkdtemp(prefix=f"agenttx-real-recovery-{repeat}-", dir="/tmp"))
@@ -68,6 +68,7 @@ def run_once(repeat: int, model: Optional[str], max_turns: int, provider: Option
             model=model,
             provider=provider,
             max_turns=max_turns,
+            trace_backend=trace_backend,
         )
         injection = inject_recovery_failure(agent)
         if not (
@@ -249,6 +250,7 @@ def main() -> int:
     parser.add_argument("--max-turns", type=int, default=30)
     parser.add_argument("--model", default=None)
     parser.add_argument("--provider", choices=provider_names(), default=None)
+    parser.add_argument("--trace-backend", choices=("strace", "bpf_persistent"), default="strace")
     args = parser.parse_args()
     if args.repeats <= 0 or args.max_turns <= 0:
         parser.error("repeats and max-turns must be positive")
@@ -260,7 +262,7 @@ def main() -> int:
 
     rows: List[dict] = []
     for repeat in range(args.repeats):
-        row = run_once(repeat, args.model, args.max_turns, args.provider)
+        row = run_once(repeat, args.model, args.max_turns, args.provider, args.trace_backend)
         rows.append(row)
         print(json.dumps({key: value for key, value in row.items() if key != "error"}, indent=2), flush=True)
         if row["error"]:

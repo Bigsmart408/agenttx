@@ -63,7 +63,13 @@ def _copy_regular(source: Path, destination: Path, mode: int) -> None:
             source.chmod(original_mode)
 
 
-def _copy_host_entry(source: Path, destination: Path) -> None:
+def _copy_host_entry(
+    source: Path,
+    destination: Path,
+    inode_memo: Optional[Dict[tuple[int, int], Path]] = None,
+) -> None:
+    if inode_memo is None:
+        inode_memo = {}
     source_stat = source.lstat()
     mode = source_stat.st_mode
     if stat.S_ISDIR(mode):
@@ -77,7 +83,9 @@ def _copy_host_entry(source: Path, destination: Path) -> None:
             with os.scandir(source) as entries:
                 children = list(entries)
             for entry in children:
-                _copy_host_entry(Path(entry.path), destination / entry.name)
+                _copy_host_entry(
+                    Path(entry.path), destination / entry.name, inode_memo
+                )
             shutil.copystat(source, destination, follow_symlinks=False)
             if changed:
                 destination.chmod(original_mode)
@@ -90,7 +98,16 @@ def _copy_host_entry(source: Path, destination: Path) -> None:
         shutil.copystat(source, destination, follow_symlinks=False)
     elif stat.S_ISREG(mode):
         destination.parent.mkdir(parents=True, exist_ok=True)
-        _copy_regular(source, destination, mode)
+        if inode_memo is None:
+            inode_memo = {}
+        key = (source_stat.st_dev, source_stat.st_ino)
+        previous = inode_memo.get(key)
+        if previous is not None:
+            os.link(previous, destination, follow_symlinks=False)
+            shutil.copystat(source, destination, follow_symlinks=False)
+        else:
+            _copy_regular(source, destination, mode)
+            inode_memo[key] = destination
     else:
         raise ValueError(f"unsupported host entry in commit WAL: {source}")
 
@@ -257,12 +274,13 @@ class CommitWAL:
         host_root = backup_dir / "host"
         host_root.mkdir()
         entries = []
+        host_inode_memo: Dict[tuple[int, int], Path] = {}
         for relative in _collapse_paths(paths, workspace):
             source = workspace / relative
             present = _lexists(source)
             entries.append({"relative": relative.as_posix(), "present": present})
             if present:
-                _copy_host_entry(source, host_root / relative)
+                _copy_host_entry(source, host_root / relative, host_inode_memo)
 
         upper_backup = backup_dir / "upper"
         if upperdir.exists():
@@ -298,6 +316,7 @@ class CommitWAL:
             )
         host_root = self.backup_dir / "host"
         parent_modes: Dict[Path, int] = {}
+        host_inode_memo: Dict[tuple[int, int], Path] = {}
         try:
             for item in self.payload["entries"]:
                 relative = Path(item["relative"])
@@ -315,7 +334,9 @@ class CommitWAL:
                     cursor = cursor.parent
                 _remove_any(destination)
                 if item["present"]:
-                    _copy_host_entry(host_root / relative, destination)
+                    _copy_host_entry(
+                        host_root / relative, destination, host_inode_memo
+                    )
         finally:
             for path, mode in sorted(
                 parent_modes.items(), key=lambda item: len(item[0].parts), reverse=True

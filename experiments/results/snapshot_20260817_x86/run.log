@@ -1,0 +1,1 @@
+{'files': 128, 'file_bytes': 65536, 'snapshots': 12, 'logical_snapshot_bytes': 100663296, 'physical_unique_bytes': 9109504, 'blob_bytes': 9109504, 'dedup_ratio': 0.09049479166666667, 'elapsed_s': 0.25025944999651983}

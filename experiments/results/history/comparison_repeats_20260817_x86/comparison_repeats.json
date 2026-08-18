@@ -1,0 +1,233 @@
+{
+  "suite": "comparison_repeats",
+  "repeats": 10,
+  "n_calls": 10,
+  "overhead": [
+    {
+      "mode": "bare",
+      "supported": true,
+      "samples": 10,
+      "repeats_requested": 10,
+      "n_calls": 10,
+      "wall_s_mean": 0.012847,
+      "wall_s_stdev": 0.001624,
+      "wall_s_p50": 0.012484,
+      "wall_s_p95": 0.015319,
+      "wall_s_p99": 0.0163,
+      "per_step_ms_mean": 1.285,
+      "per_step_ms_p50": 1.248,
+      "per_step_ms_p95": 1.532,
+      "per_step_ms_p99": 1.63,
+      "note": ""
+    },
+    {
+      "mode": "per_call_try",
+      "supported": true,
+      "samples": 10,
+      "repeats_requested": 10,
+      "n_calls": 10,
+      "wall_s_mean": 17.020512,
+      "wall_s_stdev": 0.787619,
+      "wall_s_p50": 16.877408,
+      "wall_s_p95": 18.174319,
+      "wall_s_p99": 18.975462,
+      "per_step_ms_mean": 1702.051,
+      "per_step_ms_p50": 1687.741,
+      "per_step_ms_p95": 1817.432,
+      "per_step_ms_p99": 1897.546,
+      "note": ""
+    },
+    {
+      "mode": "session_try",
+      "supported": true,
+      "samples": 10,
+      "repeats_requested": 10,
+      "n_calls": 10,
+      "wall_s_mean": 1.697603,
+      "wall_s_stdev": 0.02528,
+      "wall_s_p50": 1.691364,
+      "wall_s_p95": 1.738985,
+      "wall_s_p99": 1.748992,
+      "per_step_ms_mean": 169.76,
+      "per_step_ms_p50": 169.136,
+      "per_step_ms_p95": 173.899,
+      "per_step_ms_p99": 174.899,
+      "note": ""
+    },
+    {
+      "mode": "shared_try",
+      "supported": true,
+      "samples": 10,
+      "repeats_requested": 10,
+      "n_calls": 10,
+      "wall_s_mean": 16.829639,
+      "wall_s_stdev": 0.181532,
+      "wall_s_p50": 16.830706,
+      "wall_s_p95": 17.033841,
+      "wall_s_p99": 17.048028,
+      "per_step_ms_mean": 1682.964,
+      "per_step_ms_p50": 1683.071,
+      "per_step_ms_p95": 1703.384,
+      "per_step_ms_p99": 1704.803,
+      "note": ""
+    },
+    {
+      "mode": "shared_checkpoint",
+      "supported": true,
+      "samples": 10,
+      "repeats_requested": 10,
+      "n_calls": 10,
+      "wall_s_mean": 3.61043,
+      "wall_s_stdev": 0.08384,
+      "wall_s_p50": 3.60245,
+      "wall_s_p95": 3.730033,
+      "wall_s_p99": 3.733186,
+      "per_step_ms_mean": 361.043,
+      "per_step_ms_p50": 360.245,
+      "per_step_ms_p95": 373.003,
+      "per_step_ms_p99": 373.319,
+      "note": ""
+    },
+    {
+      "mode": "bubblewrap",
+      "supported": true,
+      "samples": 10,
+      "repeats_requested": 10,
+      "n_calls": 10,
+      "wall_s_mean": 0.010596,
+      "wall_s_stdev": 0.000969,
+      "wall_s_p50": 0.010699,
+      "wall_s_p95": 0.011932,
+      "wall_s_p99": 0.012016,
+      "per_step_ms_mean": 1.06,
+      "per_step_ms_p50": 1.07,
+      "per_step_ms_p95": 1.193,
+      "per_step_ms_p99": 1.202,
+      "note": ""
+    },
+    {
+      "mode": "agenttx_without_read_tracing",
+      "supported": true,
+      "samples": 10,
+      "repeats_requested": 10,
+      "n_calls": 10,
+      "wall_s_mean": 3.61746,
+      "wall_s_stdev": 0.054675,
+      "wall_s_p50": 3.633714,
+      "wall_s_p95": 3.679463,
+      "wall_s_p99": 3.699026,
+      "per_step_ms_mean": 361.746,
+      "per_step_ms_p50": 363.371,
+      "per_step_ms_p95": 367.946,
+      "per_step_ms_p99": 369.903,
+      "note": ""
+    },
+    {
+      "mode": "agenttx_full",
+      "supported": true,
+      "samples": 10,
+      "repeats_requested": 10,
+      "n_calls": 10,
+      "wall_s_mean": 3.719176,
+      "wall_s_stdev": 0.080464,
+      "wall_s_p50": 3.734202,
+      "wall_s_p95": 3.803486,
+      "wall_s_p99": 3.809196,
+      "per_step_ms_mean": 371.918,
+      "per_step_ms_p50": 373.42,
+      "per_step_ms_p95": 380.349,
+      "per_step_ms_p99": 380.92,
+      "note": ""
+    }
+  ],
+  "recovery": [
+    {
+      "mode": "bare",
+      "samples": 10,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 0.0,
+      "notes": [
+        "host writes visible before recovery; whole cleanup loses c"
+      ]
+    },
+    {
+      "mode": "per_call_try",
+      "samples": 10,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "isolated calls cannot pass a from step 0 to step 1"
+      ]
+    },
+    {
+      "mode": "session_try",
+      "samples": 10,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "one session can see state, but abort discards the whole session"
+      ]
+    },
+    {
+      "mode": "shared_try",
+      "samples": 10,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "shared upperdir preserves state, but recovery is whole-session discard"
+      ]
+    },
+    {
+      "mode": "shared_checkpoint",
+      "samples": 10,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "full checkpoint restore removes independent c with the failed prefix"
+      ]
+    },
+    {
+      "mode": "bubblewrap",
+      "samples": 10,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "whole-session namespace abort; no causal retention"
+      ]
+    },
+    {
+      "mode": "agenttx_without_read_tracing",
+      "samples": 10,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "causal targets=[0]; read tracing=False"
+      ]
+    },
+    {
+      "mode": "agenttx_full",
+      "samples": 10,
+      "supported_rate": 1.0,
+      "causal_correct_count": 10,
+      "causal_correct_rate": 1.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "causal targets=[0, 1]; read tracing=True"
+      ]
+    }
+  ]
+}

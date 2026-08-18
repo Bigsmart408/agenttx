@@ -50,7 +50,7 @@ class AgentRunResult:
     total_tokens: int = 0
 
 class LLMToolAgent:
-    def __init__(self, workdir, model=None, session_dir=None, max_turns=30, api_base=None, api_key=None, provider=None):
+    def __init__(self, workdir, model=None, session_dir=None, max_turns=30, api_base=None, api_key=None, provider=None, trace_backend="auto"):
         self.workdir = Path(workdir).resolve()
         load_provider_env()
         self.provider: ProviderProfile = resolve_provider(provider)
@@ -58,7 +58,13 @@ class LLMToolAgent:
         self.max_turns = max_turns
         self.api_base = api_base or self.provider.base_url or os.environ.get("OPENAI_API_BASE")
         self.api_key = api_key or self.provider.api_key
-        self.harness = CodingAgentHarness(workdir=self.workdir, session_dir=session_dir, policy=CommitPolicy(workdir=self.workdir))
+        self.trace_backend = trace_backend
+        self.harness = CodingAgentHarness(
+            workdir=self.workdir,
+            session_dir=session_dir,
+            policy=CommitPolicy(workdir=self.workdir),
+            trace_backend=trace_backend,
+        )
         self.control_events: List[dict] = []
 
     def close(self, destroy=True):

@@ -71,11 +71,13 @@ PYTHONPATH=src:. python3 motivation/plot_bpf_trace.py
 ```
 
 Requires root and bpftrace; without them the benchmark exits non-zero and
-writes no results. Compares no tracing, strace, and the eBPF tracepoint
-backend on a read-heavy step, verifies READ + NEGATIVE capture fidelity per
-step, and writes `experiments/results/bpf_trace_overhead.{csv,json,md}`.
+writes no results. Compares no tracing, strace, and the session-persistent
+eBPF backend on a read-heavy step, verifies READ + NEGATIVE capture fidelity per step,
+and writes `experiments/results/bpf_trace_overhead.{csv,json,md}`.
 The runtime selects the backend per session (`--trace-backend
-{auto,strace,bpf}`); see `docs/step27-bpf-dependency-tracing.md`.
+{auto,strace,bpf}`; `bpf` is always session-persistent. See
+`docs/step28-persistent-ebpf.md` and
+`docs/step29-hardlink-preserving-transactions.md`.
 
 ## Step 12 ? content-addressed snapshot storage
 
@@ -158,7 +160,7 @@ remaining incremental-snapshot/worker optimizations.
 
 This experiment isolates the LLM work discarded by recovery granularity. It
 uses the real AgentTX overlay and dependency graph for all policies, then asks
-`deepseek-chat` to regenerate only valid documents that the selected policy
+`deepseek-v4-flash` to regenerate only valid documents that the selected policy
 lost. The sweep varies each document from 12 to 48 distinct entries and records
 actual API prompt/completion/total tokens, tool calls, retries, p50/p95, tests,
 and pre-commit host leakage.
@@ -210,7 +212,7 @@ are deterministic presentation layers and can be executed independently:
   completion, total tokens, and recovery p95;
 - `plot_real_agent_recovery.ipynb` — live LLM root selection, rollback targets,
   latency, and recovery invariants;
-- `plot_bpf_trace.ipynb` — eBPF vs strace vs no-tracing per-step cost,
+- `plot_bpf_trace.ipynb` — persistent eBPF vs strace vs no-tracing cost,
   incremental tax, and capture fidelity (requires `bpf_trace_overhead.csv`);
 - `plot_robustness.ipynb` — p50/p95, worker crash, 256-step resume, and four
   concurrently isolated agents.

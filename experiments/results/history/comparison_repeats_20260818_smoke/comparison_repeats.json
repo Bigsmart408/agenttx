@@ -1,0 +1,233 @@
+{
+  "suite": "comparison_repeats",
+  "repeats": 1,
+  "n_calls": 2,
+  "overhead": [
+    {
+      "mode": "bare",
+      "supported": true,
+      "samples": 1,
+      "repeats_requested": 1,
+      "n_calls": 2,
+      "wall_s_mean": 0.00354,
+      "wall_s_stdev": 0.0,
+      "wall_s_p50": 0.00354,
+      "wall_s_p95": 0.00354,
+      "wall_s_p99": 0.00354,
+      "per_step_ms_mean": 1.77,
+      "per_step_ms_p50": 1.77,
+      "per_step_ms_p95": 1.77,
+      "per_step_ms_p99": 1.77,
+      "note": ""
+    },
+    {
+      "mode": "per_call_try",
+      "supported": true,
+      "samples": 1,
+      "repeats_requested": 1,
+      "n_calls": 2,
+      "wall_s_mean": 9.731015,
+      "wall_s_stdev": 0.0,
+      "wall_s_p50": 9.731015,
+      "wall_s_p95": 9.731015,
+      "wall_s_p99": 9.731015,
+      "per_step_ms_mean": 4865.507,
+      "per_step_ms_p50": 4865.507,
+      "per_step_ms_p95": 4865.507,
+      "per_step_ms_p99": 4865.507,
+      "note": ""
+    },
+    {
+      "mode": "session_try",
+      "supported": true,
+      "samples": 1,
+      "repeats_requested": 1,
+      "n_calls": 2,
+      "wall_s_mean": 4.762855,
+      "wall_s_stdev": 0.0,
+      "wall_s_p50": 4.762855,
+      "wall_s_p95": 4.762855,
+      "wall_s_p99": 4.762855,
+      "per_step_ms_mean": 2381.428,
+      "per_step_ms_p50": 2381.428,
+      "per_step_ms_p95": 2381.428,
+      "per_step_ms_p99": 2381.428,
+      "note": ""
+    },
+    {
+      "mode": "shared_try",
+      "supported": true,
+      "samples": 1,
+      "repeats_requested": 1,
+      "n_calls": 2,
+      "wall_s_mean": 9.818847,
+      "wall_s_stdev": 0.0,
+      "wall_s_p50": 9.818847,
+      "wall_s_p95": 9.818847,
+      "wall_s_p99": 9.818847,
+      "per_step_ms_mean": 4909.424,
+      "per_step_ms_p50": 4909.424,
+      "per_step_ms_p95": 4909.424,
+      "per_step_ms_p99": 4909.424,
+      "note": ""
+    },
+    {
+      "mode": "shared_checkpoint",
+      "supported": true,
+      "samples": 1,
+      "repeats_requested": 1,
+      "n_calls": 2,
+      "wall_s_mean": 10.172289,
+      "wall_s_stdev": 0.0,
+      "wall_s_p50": 10.172289,
+      "wall_s_p95": 10.172289,
+      "wall_s_p99": 10.172289,
+      "per_step_ms_mean": 5086.145,
+      "per_step_ms_p50": 5086.145,
+      "per_step_ms_p95": 5086.145,
+      "per_step_ms_p99": 5086.145,
+      "note": ""
+    },
+    {
+      "mode": "bubblewrap",
+      "supported": true,
+      "samples": 1,
+      "repeats_requested": 1,
+      "n_calls": 2,
+      "wall_s_mean": 0.01382,
+      "wall_s_stdev": 0.0,
+      "wall_s_p50": 0.01382,
+      "wall_s_p95": 0.01382,
+      "wall_s_p99": 0.01382,
+      "per_step_ms_mean": 6.91,
+      "per_step_ms_p50": 6.91,
+      "per_step_ms_p95": 6.91,
+      "per_step_ms_p99": 6.91,
+      "note": ""
+    },
+    {
+      "mode": "agenttx_without_read_tracing",
+      "supported": true,
+      "samples": 1,
+      "repeats_requested": 1,
+      "n_calls": 2,
+      "wall_s_mean": 9.915516,
+      "wall_s_stdev": 0.0,
+      "wall_s_p50": 9.915516,
+      "wall_s_p95": 9.915516,
+      "wall_s_p99": 9.915516,
+      "per_step_ms_mean": 4957.758,
+      "per_step_ms_p50": 4957.758,
+      "per_step_ms_p95": 4957.758,
+      "per_step_ms_p99": 4957.758,
+      "note": ""
+    },
+    {
+      "mode": "agenttx_full",
+      "supported": true,
+      "samples": 1,
+      "repeats_requested": 1,
+      "n_calls": 2,
+      "wall_s_mean": 9.86068,
+      "wall_s_stdev": 0.0,
+      "wall_s_p50": 9.86068,
+      "wall_s_p95": 9.86068,
+      "wall_s_p99": 9.86068,
+      "per_step_ms_mean": 4930.34,
+      "per_step_ms_p50": 4930.34,
+      "per_step_ms_p95": 4930.34,
+      "per_step_ms_p99": 4930.34,
+      "note": ""
+    }
+  ],
+  "recovery": [
+    {
+      "mode": "bare",
+      "samples": 1,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 0.0,
+      "notes": [
+        "host writes visible before recovery; whole cleanup loses c"
+      ]
+    },
+    {
+      "mode": "per_call_try",
+      "samples": 1,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "isolated calls cannot pass a from step 0 to step 1"
+      ]
+    },
+    {
+      "mode": "session_try",
+      "samples": 1,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "one session can see state, but abort discards the whole session"
+      ]
+    },
+    {
+      "mode": "shared_try",
+      "samples": 1,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "shared upperdir preserves state, but recovery is whole-session discard"
+      ]
+    },
+    {
+      "mode": "shared_checkpoint",
+      "samples": 1,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "full checkpoint restore removes independent c with the failed prefix"
+      ]
+    },
+    {
+      "mode": "bubblewrap",
+      "samples": 1,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "whole-session namespace abort; no causal retention"
+      ]
+    },
+    {
+      "mode": "agenttx_without_read_tracing",
+      "samples": 1,
+      "supported_rate": 1.0,
+      "causal_correct_count": 0,
+      "causal_correct_rate": 0.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "causal targets=[0]; read tracing=False"
+      ]
+    },
+    {
+      "mode": "agenttx_full",
+      "samples": 1,
+      "supported_rate": 1.0,
+      "causal_correct_count": 1,
+      "causal_correct_rate": 1.0,
+      "host_clean_rate": 1.0,
+      "notes": [
+        "causal targets=[0, 1]; read tracing=True"
+      ]
+    }
+  ]
+}

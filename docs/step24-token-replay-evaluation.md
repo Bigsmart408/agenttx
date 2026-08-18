@@ -52,7 +52,7 @@ workload. It is not an end-to-end performance comparison with those systems.
 ## Real-agent replay protocol
 
 After applying each policy, the benchmark knows which valid documents were
-discarded. For each missing document, `deepseek-chat` receives the same
+discarded. For each missing document, `deepseek-v4-flash` receives the same
 structured regeneration task and must issue a real `write_file` tool call. API
 usage is read from the response's `usage` object. Generated content must contain
 every numbered item in order; an invalid response may be retried up to three
@@ -68,7 +68,7 @@ separate evaluation rather than being used as evidence for the retention claim.
 
 ## Results
 
-Model: `deepseek-chat`; three fresh samples per cell; 27 total samples.
+Model: `deepseek-v4-flash`; three fresh samples per cell; 27 total samples.
 All 27 recovered workspaces passed tests, all rollback target sets matched the
 policy, and no sample modified the host workspace before commit. Every accepted
 document required one model call in the final run.
@@ -76,19 +76,19 @@ document required one model call in the final run.
 | lines per document | policy | documents replayed | total tokens mean | p50 | p95 | tokens saved by AgentTX |
 |---:|---|---:|---:|---:|---:|---:|
 | 12 | AgentTX causal | 0 | 0.0 | 0.0 | 0.0 | — |
-| 12 | optimistic checkpoint | 1 | 692.3 | 704.0 | 706.7 | 692.3 |
-| 12 | whole branch/session abort | 2 | 1,435.7 | 1,440.0 | 1,458.9 | 1,435.7 |
+| 12 | optimistic checkpoint | 1 | 864.3 | 850.0 | 892.3 | 864.3 |
+| 12 | whole branch/session abort | 2 | 1,797.3 | 1,825.0 | 1,846.6 | 1,797.3 |
 | 24 | AgentTX causal | 0 | 0.0 | 0.0 | 0.0 | — |
-| 24 | optimistic checkpoint | 1 | 971.3 | 1,009.0 | 1,014.4 | 971.3 |
-| 24 | whole branch/session abort | 2 | 1,886.7 | 1,893.0 | 1,930.8 | 1,886.7 |
+| 24 | optimistic checkpoint | 1 | 1,060.3 | 1,033.0 | 1,113.1 | 1,060.3 |
+| 24 | whole branch/session abort | 2 | 2,231.7 | 2,232.0 | 2,238.3 | 2,231.7 |
 | 48 | AgentTX causal | 0 | 0.0 | 0.0 | 0.0 | — |
-| 48 | optimistic checkpoint | 1 | 1,335.7 | 1,340.0 | 1,499.3 | 1,335.7 |
-| 48 | whole branch/session abort | 2 | 2,891.0 | 2,866.0 | 3,078.4 | 2,891.0 |
+| 48 | optimistic checkpoint | 1 | 1,424.7 | 1,407.0 | 1,497.9 | 1,424.7 |
+| 48 | whole branch/session abort | 2 | 3,340.3 | 3,084.0 | 4,009.2 | 3,340.3 |
 
 On this controlled workload, AgentTX avoids 100% of *avoidable replay tokens*
 because it retains both valid documents. The more useful paper number is the
-absolute saving: 692–1,336 tokens versus the optimistic temporal policy and
-1,436–2,891 tokens versus whole branch/session abort across the tested sizes.
+absolute saving: 864–1,425 tokens versus the optimistic temporal policy and
+1,797–3,340 tokens versus whole branch/session abort across the tested sizes.
 The roughly increasing curve connects the systems property (retained work) to
 an economic property (avoided model context and generation).
 

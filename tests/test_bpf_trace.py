@@ -174,6 +174,39 @@ def test_parse_bpf_openat2_flags_drive_read_detection(tmp_path: Path) -> None:
     assert bpf_trace.parse_bpf_effects(write_open, workspace) == []
 
 
+def test_parse_bpf_fails_closed_for_unresolved_relative_dirfd(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    raw = "\n".join(
+        [
+            _entry("newfstatat", "missing.txt", dfd=3, flags=0),
+            _exit("newfstatat", -2),
+        ]
+    )
+    with pytest.raises(bpf_trace.TraceCoverageError, match="dirfd"):
+        bpf_trace.parse_bpf_effects(raw, workspace)
+
+
+def test_parse_bpf_accepts_kernel_resolved_relative_dirfd(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    target = workspace / "sub" / "missing.txt"
+    raw = "\n".join(
+        [
+            _entry("newfstatat", "missing.txt", dfd=3, flags=0),
+            f"ATXBPF R 100 100 {target}",
+            _exit("newfstatat", -2),
+        ]
+    )
+    assert bpf_trace.parse_bpf_effects(raw, workspace) == [
+        Effect(str(target), EffectKind.NEGATIVE)
+    ]
+
+
 def test_build_script_restricts_to_available_tracepoints() -> None:
     available = {"sys_enter_openat", "sys_exit_openat"}
     script = bpf_trace.build_bpftrace_script(available)
@@ -249,6 +282,15 @@ def test_resolve_trace_backend_explicit_modes_fail_closed() -> None:
     with pytest.raises(RuntimeError, match="'bpf' requested"):
         bpf_trace.resolve_trace_backend("bpf", strace_present=True,
                                         bpf=(False, "no root"))
+    backend, detail = bpf_trace.resolve_trace_backend(
+        "bpf_persistent", strace_present=True, bpf=(True, "ok")
+    )
+    assert backend == "bpf_persistent"
+    assert detail == "ok"
+    with pytest.raises(RuntimeError, match="'bpf_persistent' requested"):
+        bpf_trace.resolve_trace_backend(
+            "bpf_persistent", strace_present=True, bpf=(False, "no root")
+        )
 
 
 def test_semisolate_rejects_unknown_backend(tmp_path: Path) -> None:
@@ -271,6 +313,12 @@ def test_semisolate_bpf_backend_fails_closed_without_bpf(
             workspace=tmp_path,
             sandbox_dir=tmp_path / "session",
             trace_backend="bpf",
+        )
+    with pytest.raises(RuntimeError, match="eBPF"):
+        SharedSemisolate(
+            workspace=tmp_path,
+            sandbox_dir=tmp_path / "session-persistent",
+            trace_backend="bpf_persistent",
         )
 
 
@@ -342,6 +390,9 @@ def test_signal_release_unblocks_marker_waiter(tmp_path: Path) -> None:
             reader.wait(timeout=5)
 
 
+@pytest.mark.skip(
+    reason="removed per-step eBPF attach path; persistent backend is maintained"
+)
 def test_run_step_bpf_orchestrates_marker_ready_and_parse(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

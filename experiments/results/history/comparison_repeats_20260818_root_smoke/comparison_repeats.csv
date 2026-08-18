@@ -1,0 +1,17 @@
+causal_correct_count,causal_correct_rate,host_clean_rate,mode,n_calls,note,notes,per_step_ms_mean,per_step_ms_p50,per_step_ms_p95,per_step_ms_p99,repeats_requested,samples,suite,supported,supported_rate,wall_s_mean,wall_s_p50,wall_s_p95,wall_s_p99,wall_s_stdev
+,,,bare,2,,,2.543,2.543,2.543,2.543,1,1,overhead,True,,0.005085,0.005085,0.005085,0.005085,0.0
+,,,per_call_try,2,,,192.814,192.814,192.814,192.814,1,1,overhead,True,,0.385628,0.385628,0.385628,0.385628,0.0
+,,,session_try,2,,,105.473,105.473,105.473,105.473,1,1,overhead,True,,0.210946,0.210946,0.210946,0.210946,0.0
+,,,shared_try,2,,,175.855,175.855,175.855,175.855,1,1,overhead,True,,0.35171,0.35171,0.35171,0.35171,0.0
+,,,shared_checkpoint,2,,,211.401,211.401,211.401,211.401,1,1,overhead,True,,0.422802,0.422802,0.422802,0.422802,0.0
+,,,bubblewrap,2,,,6.792,6.792,6.792,6.792,1,1,overhead,True,,0.013583,0.013583,0.013583,0.013583,0.0
+,,,agenttx_without_read_tracing,2,,,249.754,249.754,249.754,249.754,1,1,overhead,True,,0.499508,0.499508,0.499508,0.499508,0.0
+,,,agenttx_full,2,,,231.218,231.218,231.218,231.218,1,1,overhead,True,,0.462437,0.462437,0.462437,0.462437,0.0
+0,0.0,0.0,bare,,,['host writes visible before recovery; whole cleanup loses c'],,,,,,1,recovery,,1.0,,,,,
+0,0.0,1.0,per_call_try,,,['isolated calls cannot pass a from step 0 to step 1'],,,,,,1,recovery,,1.0,,,,,
+0,0.0,1.0,session_try,,,"['one session can see state, but abort discards the whole session']",,,,,,1,recovery,,1.0,,,,,
+0,0.0,1.0,shared_try,,,"['shared upperdir preserves state, but recovery is whole-session discard']",,,,,,1,recovery,,1.0,,,,,
+0,0.0,1.0,shared_checkpoint,,,['full checkpoint restore removes independent c with the failed prefix'],,,,,,1,recovery,,1.0,,,,,
+0,0.0,1.0,bubblewrap,,,['whole-session namespace abort; no causal retention'],,,,,,1,recovery,,1.0,,,,,
+0,0.0,1.0,agenttx_without_read_tracing,,,['causal targets=[0]; read tracing=False'],,,,,,1,recovery,,1.0,,,,,
+1,1.0,1.0,agenttx_full,,,"['causal targets=[0, 1]; read tracing=True']",,,,,,1,recovery,,1.0,,,,,

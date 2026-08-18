@@ -34,6 +34,11 @@ the sandbox runs in its own pid namespace).
 Kernel requirements: bpftrace with tracepoint support (any distro build) and
 root (bpf syscall).  The availability probe fails closed, exactly like the
 strace backend.
+
+For a relative pathname addressed through a non-``AT_FDCWD`` descriptor, the
+parser requires an ``ATXBPF_R`` kernel-resolved path.  It never treats the
+caller's cwd as the descriptor's directory, because that approximation can
+create a false causal edge.
 """
 
 from __future__ import annotations
@@ -122,6 +127,15 @@ _ENOENT = 2
 _ENOTDIR = 20
 
 _BPFTRACE_MIN_RESOLVED = (0, 10)  # dpath() builtin
+
+
+class TraceCoverageError(RuntimeError):
+    """Raised when a relative descriptor path cannot be kernel-resolved.
+
+    Guessing a non-``AT_FDCWD`` path against the process cwd can create a false
+    dependency (or miss the real one).  The runtime therefore aborts the tool
+    call instead of committing an effect graph built from an unverified name.
+    """
 _BPFTRACE_MIN_QUIET = (0, 10)  # -q/--quiet flag
 _BPFTRACE_MIN_LONG_STRINGS = (0, 10)  # scratch-map strings (> 200 bytes)
 
@@ -622,6 +636,7 @@ def _apply_exit(
     path: Path,
     flags: int,
     retval: int,
+    requires_resolution: bool,
     cwd_by_pid: Dict[int, Path],
     resolved: Dict[int, Path],
     workspace: Path,
@@ -635,6 +650,17 @@ def _apply_exit(
         if retval == 0:
             cwd_by_pid[pid] = path
         return
+    resolved_path = resolved.get(tid)
+    if requires_resolution and resolved_path is None:
+        raise TraceCoverageError(
+            f"eBPF trace cannot resolve relative dirfd path for {call}; "
+            "requires dpath()-backed kernel resolution"
+        )
+    if requires_resolution and resolved_path is not None:
+        # The cwd-relative path is only a parser placeholder.  Once the
+        # kernel supplies the descriptor-resolved name, use that object path
+        # for all syscall families, not just open(2).
+        path = resolved.pop(tid)
     negative = retval < 0 and -retval in (_ENOENT, _ENOTDIR)
     if call in _OPEN_CALLS:
         if retval >= 0:
@@ -675,7 +701,10 @@ def parse_bpf_effects(
     * chdir updates per-process cwd; clone/fork/vfork propagate it to the
       child pid;
     * when a resolved path (ATXBPF_R) differs from the requested path, both
-      are recorded (symlink-alias granularity).
+      are recorded (symlink-alias granularity);
+    * relative paths addressed through a non-AT_FDCWD descriptor require an
+      ATXBPF_R kernel-resolved path; otherwise ``TraceCoverageError`` aborts
+      the call instead of guessing against the process cwd.
 
     `allowed_pids` optionally restricts parsing to the seed's traced process
     tree: events of other pids are dropped, and `ATXBPF F` fork lines
@@ -687,7 +716,7 @@ def parse_bpf_effects(
     """
     workspace = Path(workspace).resolve()
     cwd_by_pid: Dict[int, Path] = {}
-    pending: Dict[int, Tuple[int, str, Path, int]] = {}
+    pending: Dict[int, Tuple[int, str, Path, int, bool]] = {}
     resolved: Dict[int, Path] = {}
     effects = set()
     allowed: Optional[set] = set(allowed_pids) if allowed_pids is not None else None
@@ -704,8 +733,13 @@ def parse_bpf_effects(
                 resolved.pop(tid, None)
             base = cwd_by_pid.get(pid, workspace)
             if path_text:
+                needs_resolution = (
+                    dfd != _AT_FDCWD and not path_text.startswith("/")
+                )
                 # Non-AT_FDCWD dirfds are approximated against cwd until a
-                # resolved-path probe (ATXBPF_R) supplies the true target.
+                # resolved-path probe (ATXBPF_R) supplies the true target.  The
+                # approximation is retained only as a provisional display path;
+                # _apply_exit raises before it can become an effect.
                 path = (
                     _normal(base / path_text)
                     if not path_text.startswith("/")
@@ -714,7 +748,8 @@ def parse_bpf_effects(
             else:
                 # Process calls carry no path; the placeholder is ignored.
                 path = workspace
-            pending[tid] = (pid, call, path, flags)
+                needs_resolution = False
+            pending[tid] = (pid, call, path, flags, needs_resolution)
             continue
         exit_ = _exit_fields(raw_line)
         if exit_ is not None:
@@ -724,7 +759,7 @@ def parse_bpf_effects(
             entry = pending.pop(tid, None)
             if entry is None:
                 continue
-            entry_pid, entry_call, path, flags = entry
+            entry_pid, entry_call, path, flags, needs_resolution = entry
             if entry_call != call:
                 continue
             if allowed is not None and call in _PROCESS_CALLS:
@@ -740,6 +775,7 @@ def parse_bpf_effects(
                 path,
                 flags,
                 retval,
+                needs_resolution,
                 cwd_by_pid,
                 resolved,
                 workspace,
@@ -782,9 +818,12 @@ def resolve_trace_backend(
 ) -> Tuple[str, str]:
     """Choose the tracing backend for one step.
 
-    `trace_backend` is ``auto``, ``strace`` or ``bpf``.  ``auto`` prefers the
-    eBPF backend when the attach pre-check succeeded, otherwise strace; it
-    fails closed when neither is available.  Returns (backend, detail).
+    `trace_backend` is ``auto``, ``strace``, ``bpf`` or the compatibility alias
+    ``bpf_persistent``.  Both eBPF spellings select the session-persistent
+    backend; the former per-step attach mode is intentionally removed.
+    ``auto`` prefers eBPF when the attach pre-check succeeds, otherwise
+    strace; it fails closed when neither is available.
+    Returns (backend, detail).
     """
     if trace_backend == "strace":
         if not strace_present:
@@ -796,10 +835,18 @@ def resolve_trace_backend(
         if bpf is None or not bpf[0]:
             detail = bpf[1] if bpf is not None else "not probed"
             raise RuntimeError(
-                f"trace backend 'bpf' requested but eBPF tracing is "
+                "trace backend 'bpf' requested but eBPF tracing is "
                 f"unavailable: {detail}"
             )
         return "bpf", bpf[1]
+    if trace_backend == "bpf_persistent":
+        if bpf is None or not bpf[0]:
+            detail = bpf[1] if bpf is not None else "not probed"
+            raise RuntimeError(
+                "trace backend 'bpf_persistent' requested but eBPF tracing is "
+                f"unavailable: {detail}"
+            )
+        return "bpf_persistent", bpf[1]
     # auto
     if bpf is not None and bpf[0]:
         return "bpf", bpf[1]

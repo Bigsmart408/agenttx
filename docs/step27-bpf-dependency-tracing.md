@@ -75,15 +75,15 @@ is otherwise discovered per host (e.g. `openat2`/`faccessat2` do not exist on
 unreadable, and legacy tracepoint field names (`path` vs `pathname`) are
 retried when the modern layout fails to compile.
 
-Two deliberate v0 limitations:
+Two deliberate v0 boundaries:
 
 1. **Non-AT_FDCWD dirfds.** A relative path opened against a real dirfd is
-   approximated against the process cwd until the resolved-path probe is
-   available. On hosts with bpftrace >= 0.10 the generated script adds
-   `kprobe:vfs_open` + `dpath()`, which reports the kernel-resolved path for
-   every successful open (and restores the symlink-alias granularity that
-   strace gets from `-yy`). The probe is pre-checked for attachability and
-   silently dropped when unsupported; the parser handles both shapes.
+   never treated as cwd-relative by the maintained parser. On hosts with
+   bpftrace >= 0.10 the generated script adds `kprobe:vfs_open` + `dpath()`;
+   the parser requires that kernel-resolved path for a descriptor-relative
+   access and raises a coverage error otherwise. This prevents a guessed path
+   from creating a false causal edge; `auto` may fall back to strace when the
+   resolved probe is unavailable.
 2. **openat2 flags.** `open_how.flags` is read as the first u64 of the user
    struct, avoiding BTF-dependent struct definitions.
 
@@ -142,50 +142,39 @@ PYTHONPATH=src:. python3 experiments/scripts/bench_bpf_trace.py \
 ```
 
 writes `experiments/results/bpf_trace_overhead.{csv,json,md}` with mean/p50/p95
-per-step cost for no tracing, strace, and eBPF, plus a capture-fidelity check
+per-step cost for no tracing, strace, and session-persistent eBPF, plus a capture-fidelity check
 (every traced step must yield both the READ and the NEGATIVE effect; the
 benchmark exits non-zero otherwise). Without root or bpftrace it exits
 non-zero with a clear message and writes nothing.
 
-## Measured results (this host)
+## Measured results (current maintained path)
 
-Host: bpftrace 0.9.4, kernel 5.4.0-216, `read` workload, 20 steps x 3
-repeats, persistent try worker. Numbers from
-`experiments/results/bpf_trace_overhead.{csv,json,md}` (mean/p50/p95
-per-step ms):
+Host: bpftrace 0.9.4, kernel 5.4.0-216, `read` workload, 12 steps x 2
+repeats, persistent try worker. The maintained comparison is no tracing,
+strace, and the session-persistent eBPF backend (`trace_backend=bpf`).
 
-| mode | mean | p50 | p95 |
+| mode | mean (ms/step) | p50 | p95 |
 |---|---:|---:|---:|
-| no tracing | 11.48 | 2.44 | 168.98 |
-| strace | 18.89 | 10.07 | 183.10 |
-| eBPF | 1376.71 | 1372.21 | 1555.59 |
+| no tracing | 17.70 | 2.99 | 178.93 |
+| strace | 25.60 | 11.67 | 183.29 |
+| persistent eBPF | 61.39 | 26.29 | 413.54 |
 
-- strace incremental cost: +7.4 ms/step (+64.5%).
-- eBPF incremental cost: +1365.2 ms/step — dominated by bpftrace 0.9.4's
-  per-step probe attach and teardown (a timed SIGINT shutdown of the
-  40-probe script takes ~1.2 s on this kernel; SIGKILL is not meaningfully
-  faster, so the cost is kernel-side BPF program teardown, not userspace
-  work).
-- Capture fidelity: 60/60 read steps captured both the `input.txt` READ
-  and the `missing.txt` NEGATIVE effect for both traced modes (a transient
-  drop of the command's fork event on a noisy host is retried once and
-  counted in `step_retries`).
+- strace incremental cost: +7.90 ms/step (+44.6%).
+- persistent eBPF incremental cost: +43.69 ms/step (+246.8%).
+- Capture fidelity: all 24 traced steps captured both the `input.txt` READ and
+  the `missing.txt` NEGATIVE effect for both traced modes.
 
-So on this host's bpftrace 0.9.4, the per-step eBPF attach/teardown tax
-dominates short commands and there is **no endpoint win over strace for
-short steps** — matching the original caveat that the comparison must be
-measured before claiming one. The eBPF backend's value is the kernel-side
-capture point (no ptrace stops, in-kernel event production); amortizing the
-attach with a persistent tracer (one attach per session, step boundaries
-marked in the log) is the natural follow-up and would change the measured
-numbers qualitatively.
+The former per-step attach implementation and its high-latency measurements
+were removed from the maintained backend and benchmark. They are not an
+available mode; this document retains only the tracepoint design rationale.
+See `docs/step28-persistent-ebpf.md` for the persistent implementation.
 
 ## Remaining boundary
 
 The eBPF backend still requires root (bpf syscall) and bpftrace; `auto` mode
-falls back to strace when either is missing. Non-AT_FDCWD dirfd resolution is
-approximate without the `dpath()` kprobe, and every host syscall is emitted
-to the perf ring buffer (the parser filters in userspace), so a very busy
-host could drop events; the per-step bpftrace attach cost dominates short
-commands. Kernel-level atomic commit and hard-link identity remain out of
-scope, as documented in Steps 10 and 23.
+falls back to strace when either is missing. Descriptor-relative accesses fail
+closed without `dpath()`-backed resolution rather than using the caller cwd.
+Every host syscall is emitted to the perf ring buffer (the parser filters in
+userspace), so a very busy host could drop events; the persistent path still
+pays stream-drain and process-tree filtering overhead. Kernel-level atomic
+commit and bind-mount topology remain out of scope for this tracer.

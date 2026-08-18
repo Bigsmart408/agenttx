@@ -81,8 +81,8 @@ unchanged before commit, commits the resulting ledger frontier, and runs the
 tests after commit. It writes `real_agent_robustness.{csv,json,md}` without
 serializing the API key or full conversation.
 
-The latest three-repeat run used `deepseek-chat`: wall p50/p95 were 12.328/14.155
-seconds, tool-call p50/p95 were 13.0/15.7, finished rate was 1.0, success rate
+The latest three-repeat run used `deepseek-v4-flash`: wall p50/p95 were 16.564/18.465
+seconds, tool-call p50/p95 were 15.0/16.8, finished rate was 1.0, success rate
 was 1.0, tests passed in all repeats, and host leak rate before commit was 0.0.
 These numbers include network/model latency and are not directly comparable to
 the deterministic runtime-only p50/p95 measurements.

@@ -172,6 +172,7 @@ def run_once(
     model: Optional[str],
     provider: Optional[str],
     document_lines: int = DOCUMENT_LINES,
+    trace_backend: str = "strace",
 ) -> dict:
     from agenttx.agents.llm_agent import LLMToolAgent
 
@@ -209,6 +210,7 @@ def run_once(
             session_dir=scratch / "session",
             model=model,
             provider=provider,
+            trace_backend=trace_backend,
         )
         injected = inject_token_recovery_trajectory(agent, document_lines)
         graph_valid = bool(
@@ -461,6 +463,7 @@ def main() -> int:
     )
     parser.add_argument("--model", default=None)
     parser.add_argument("--provider", choices=provider_names(), default=None)
+    parser.add_argument("--trace-backend", choices=("strace", "bpf_persistent"), default="strace")
     parser.add_argument(
         "--preflight-only",
         action="store_true",
@@ -498,6 +501,7 @@ def main() -> int:
                     args.model,
                     args.provider,
                     document_lines,
+                    args.trace_backend,
                 )
                 rows.append(row)
                 print(

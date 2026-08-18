@@ -470,13 +470,13 @@ AgentTX 文件操作，错误 producer 与其 descendants、因果独立步骤�
 
 ### 9.1 Real-agent robustness
 
-给 `deepseek-chat` 一个新生成的多文件重构仓库，让模型自行选择工具。所有工具
+给 `deepseek-v4-flash` 一个新生成的多文件重构仓库，让模型自行选择工具。所有工具
 仍经由 AgentTX，模型结束后才执行受控 commit 和 host-side tests。
 
 三次重复结果：
 
-- wall p50/p95：12.328/14.155 s；
-- tool-call p50/p95：13.0/15.7；
+- wall p50/p95：16.564/18.465 s；
+- tool-call p50/p95：15.0/16.8；
 - finished、success、tests pass 均为 100%；
 - commit 前 host leak 为 0%。
 
@@ -496,9 +496,9 @@ selection。它的 wall time 包含模型和网络延迟，不能直接与 runti
 5. 删除 invalid artifact；
 6. 通过 tests 后结束。
 
-三次 `deepseek-chat` 重复中，fault-root selection、correct target、independent
+三次 `deepseek-v4-flash` 重复中，fault-root selection、correct target、independent
 retention、invalid removal 和 tests pass 均为 100%，host leak 为 0%；wall
-p50/p95 为 29.0/30.8 s。
+p50/p95 为 42.939/44.430 s。
 
 这回答了“LLM 是否能够使用因果恢复控制面”，但尚未覆盖多 package、大型真实
 repository、恶意 prompt 或长时间开放式 CI 修复。
@@ -535,22 +535,22 @@ repository、恶意 prompt 或长时间开放式 CI 修复。
 - whole branch/session abort：回滚 `{0, 1, 2, 3, 4}`，重放两份文档。
 
 文档规模为 12、24、48 行，每个 cell 三次重复，共 27 个样本。丢失的文档必须
-由真实 `deepseek-chat` 通过 `write_file` tool call 重建。模型输出若结构不完整
+由真实 `deepseek-v4-flash` 通过 `write_file` tool call 重建。模型输出若结构不完整
 可重试，失败尝试的 token 也必须计费，不能静默丢弃。
 
 ### 10.3 结果
 
 | 每份文档行数 | AgentTX replay | 乐观 checkpoint | whole abort |
 |---:|---:|---:|---:|
-| 12 | 0 | 692.3 | 1,435.7 |
-| 24 | 0 | 971.3 | 1,886.7 |
-| 48 | 0 | 1,335.7 | 2,891.0 |
+| 12 | 0 | 864.3 | 1,797.3 |
+| 24 | 0 | 1,060.3 | 2,231.7 |
+| 48 | 0 | 1,424.7 | 3,340.3 |
 
 27/27 样本成功，host leak 为 0，回滚目标全部正确。AgentTX 在这个受控 workload
 上避免了 100% 的**可避免 replay token**：
 
-- 相对最乐观 temporal checkpoint，节省约 692–1,336 token；
-- 相对 whole branch/session abort，节省约 1,436–2,891 token；
+- 相对最乐观 temporal checkpoint，节省约 864–1,425 token；
+- 相对 whole branch/session abort，节省约 1,797–3,340 token；
 - 绝对节省随被保留工作的大小增长。
 
 这里的 0 只表示没有文档需要重新生成。测试、回滚、commit、Agent 诊断以及错误
@@ -629,7 +629,7 @@ snapshot 存储，但不代表 snapshot 遍历和 WAL copy 已经完全解决。
 | 因果回滚是否保留有效工作？ | 受控 DAG 中 100% 保留且 100% 删除无效结果 | 144-run DAG sweep |
 | 没有依赖捕获行不行？ | 不行，64-call 时只删掉 4% invalid subgraph | dependency ablation |
 | 真实 LLM 会使用恢复接口吗？ | 3/3 正确选根并恢复 | real-agent recovery |
-| 能节省多少 token？ | 最高测试点相对 checkpoint/whole abort 节省 1,335.7/2,891.0 | token sweep |
+| 能节省多少 token？ | 最高测试点相对 checkpoint/whole abort 节省 1,424.7/3,340.3 | token sweep |
 | 完整恢复循环能否节省 token？ | 对比设计和实现已完成；数值待有凭据 VM 运行 | end-to-end token sweep |
 | 优化路径是否稳健？ | worker crash、256-step reload、4-agent concurrency 均通过 | robustness bundle |
 
@@ -711,4 +711,3 @@ python experiments/scripts/bench_robustness.py \
 python3 experiments/scripts/bench_token_end_to_end.py \
   --document-lines 12 24 48 --repeats 3 --max-turns 20
 ```
-

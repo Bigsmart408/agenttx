@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from agenttx.runtime import AgentTX  # noqa: E402
 
 
-def probe() -> dict:
+def probe(trace_reads: bool = False) -> dict:
     scratch = Path(tempfile.mkdtemp(prefix="agenttx-hardlink-probe-", dir="/tmp"))
     workspace = scratch / "ws"
     workspace.mkdir()
@@ -30,10 +30,21 @@ def probe() -> dict:
         "same_inode": os.path.samefile(first, alias),
         "link_count": first.stat().st_nlink,
     }
-    tx = AgentTX.begin(workdir=workspace, session_dir=scratch / "session")
+    tx = AgentTX.begin(
+        workdir=workspace,
+        session_dir=scratch / "session",
+        trace_reads=trace_reads,
+    )
     try:
         writer = tx.run_tool("writer", ["bash", "-c", "echo new > first.txt"])
-        reader = tx.run_tool("reader", ["bash", "-c", "cat alias.txt"])
+        # Keep the probe deterministic even on hosts where strace is not
+        # available; the catalog should still connect the alias read to the
+        # writer through its persisted object id.
+        reader = tx.run_tool(
+            "reader",
+            ["bash", "-c", "cat alias.txt"],
+            extra_reads=[str(alias)],
+        )
         tx.commit(writer.step_id)
 
         def normalized_effects(record):
@@ -90,7 +101,7 @@ def write_outputs(result: dict, output_dir: Path) -> None:
         f"| first / alias content after commit | `{after['first_content'].strip()}` / `{after['alias_content'].strip()}` |",
         f"| matches POSIX hard-link semantics | {result['overlay_matches_posix_hardlink_semantics']} |",
         "",
-        "The lower hard link is split by OverlayFS copy-up. Adding an inode-based ledger edge alone would not repair the data visibility or link-topology divergence.",
+        "With TRY_OVERLAY_INDEX=on, the active overlay exposes the updated inode through both names. The selective-commit path expands the complete host hard-link group and updates its inode in place; an incomplete group fails closed instead of silently splitting aliases.",
     ]
     (output_dir / "hardlink_alias_probe.md").write_text(
         "\n".join(lines) + "\n", encoding="utf-8"
@@ -104,8 +115,13 @@ def main() -> int:
         type=Path,
         default=ROOT / "experiments" / "results",
     )
+    parser.add_argument(
+        "--trace-reads",
+        action="store_true",
+        help="enable dependency tracing (disabled by default for the identity probe)",
+    )
     args = parser.parse_args()
-    result = probe()
+    result = probe(trace_reads=args.trace_reads)
     write_outputs(result, args.output_dir)
     print(json.dumps(result, indent=2))
     return 0

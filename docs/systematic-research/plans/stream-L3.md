@@ -1,123 +1,103 @@
-# L3 Consistency Report: AgentTX | OSDI | 2026-08-09
+# L3 Consistency Report: AgentTX | OSDI | 2026-08-18
 
 ## Scope
 
-This audit checks `paper/main.tex` against `stream-L0.md`, `stream-L1.md`, the
-systems-paper writing guide, and the committed AgentTX evidence documents.  It covers
-the full manuscript from the abstract through the conclusion.  It does not treat missing
-future experiments as prose defects when the draft marks their boundary explicitly.
+This audit checks the polished `paper/main.tex` against `stream-L0.md`, the
+merged-section `stream-L1.md`, the systems-paper guide, and current result
+artifacts.  Missing experiments are recorded in
+`docs/paper-outline-and-experiment-plan.md` instead of being hidden by prose.
 
-## Structural Checks 1--6
+## Thesis and structure
 
-### Check 1: Thesis Trace -- PASS
+**PASS.** The abstract and Introduction state one thesis: the trajectory is the
+speculation unit, while a causal subgraph of versioned effects is the recovery
+unit.  Section 2 combines the minimum background with execution and recovery
+evidence.  Section 3 defines AET without Linux mechanisms.  Section 4 maps the
+abstraction to AgentTX.  Evaluation, limitations, related work, and conclusion
+all retain this recovery-unit distinction.
 
-Every major section traces to the L0 thesis that causal effects, rather than temporal
-position, should define the recovery unit.  Section 2 defines the mismatch, Section 3
-measures it, Section 4 defines AET, Section 5 realizes it, and Section 6 tests semantic,
-runtime, agent, and robustness outcomes.  eBPF appears only as an unmeasured discussion
-alternative.
+The three challenges map to the design and evidence:
 
-### Check 2: Design Coverage -- PASS for draft
+- Dependency Discovery maps to effect capture, the ledger, and the no-dependency
+  ablation.
+- Object Identity maps to hierarchy, symlinks, rename, and tested hard-link
+  groups.  Bind mounts, external aliases, and arbitrary generation changes fail
+  closed.
+- Selective Reconstruction maps to causal closure, historical state, overlap
+  rejection, frontier publication, and WAL recovery.
 
-- DP1 effect capture and ledger appears in Sections 4.2 and 5.1 and is isolated by the
-  no-dependency experiment in RQ2.
-- DP2 shared speculation and selective reconstruction appears in Sections 4.3 and
-  5.2--5.3 and is tested by retention, runtime, crash, and reload experiments.
-- DP3 durable publication appears in Sections 4.4 and 5.4.  RQ4 reports interrupted host
-  materialization and policy persistence checks.
-- DP4 performance engineering is explicitly labeled as additional optimization rather
-  than a fourth correctness challenge.
+Persistent workers and incremental snapshots remain performance engineering,
+not a fourth correctness challenge.
 
-The final submission should give WAL crash phases a compact table or pass count; the draft
-does not claim external multi-path atomic visibility.
+## Result consistency
 
-### Check 3: Challenge--Response and Causal Test -- PASS
+**PASS for the claims left in the draft.** The manuscript consistently reports:
 
-- Dependency Discovery maps to observed effects, the ledger, and the dependency ablation.
-- Object Identity maps to hierarchy and supported symlink normalization.  The lower
-  hard-link probe is presented as a measured boundary, not solved coverage.
-- Selective Reconstruction maps to versioned state, causal closure, overlap rejection,
-  and the retention experiment.
+- 144 controlled real-overlay runs over 48 aggregated configurations;
+- 100% independent-work retention and 100% invalid-descendant removal;
+- 41% temporal retention at 64 calls and 4% invalid removal without read
+  dependencies;
+- 1,424.7 and 3,340.3 avoided replay tokens at 48 document entries;
+- 148.5 ms/step for the 64-call full path, 43% below per-call isolation;
+- 58.757 ms/step mean and 68.169 ms/step p99 for the canonical x86 ten-write
+  comparison, with 50/50 causal-correct full-system runs;
+- 202.746 ms/step p99 for per-call `try`, making the full path 66.4% lower at
+  p99 on that fixed trajectory.
 
-All three challenges follow from the same root mismatch: state is indexed by command,
-time, and pathname, while failures propagate through causal dependencies among versioned
-effects.  Worker reuse and snapshot acceleration are not forced into this list.
+The token result is always called **avoided replay**, not total session-token
+savings.  Temporal checkpoint and whole-session abort are recovery-granularity
+emulations rather than external artifacts.  The GitHub-context figure is
+explicitly exploratory: each task and policy has one run, and tokens are not
+treated as savings when the success predicate differs.
 
-### Check 4: Result Consistency -- PASS
+The 50-run table and p99 figure use only the canonical x86 artifact.  The paper
+keeps that fixed ten-write trajectory separate from the 64-call coding workload
+and does not compare their absolute latency values.
 
-The abstract, introduction, captions, evaluation, and conclusion agree on the following:
+## Claim boundaries
 
-- 144 controlled real-overlay recovery runs;
-- 100% independent-work retention and 100% invalid-descendant removal in that suite;
-- 41% temporal retention at 64 calls and 4% invalid removal without dependencies;
-- 1,335.7 and 2,891.0 replay tokens at the largest controlled input;
-- 148.5 ms/step for full AgentTX, 43% below per-call isolation and 2.99x bare.
+**PASS.** The draft does not claim complete syscall coverage, arbitrary
+filesystem identity, non-filesystem transactions, external multi-path atomic
+visibility, automatic upstream issue resolution, or measured superiority over
+unavailable artifacts.  Tested hard-link cases are described as supported;
+unsupported topology remains fail closed.
 
-The manuscript consistently calls token results **avoided replay tokens**.  Temporal and
-whole-session comparisons are **recovery-granularity emulations**, not external-system
-measurements.  The real model selects and requests recovery; the benchmark performs the
-controlled commit after validation.
+The strace and persistent eBPF comparison is limited to one 12-step probe.  The
+paper states that both capture the same read and negative-lookup cases only in
+that probe and makes no general tracer-equivalence claim.
 
-### Check 5: Section Contracts -- PASS
+## Prose and symbol hygiene
 
-Every section follows its L1 flow chain.  The Introduction uses the seven-step sequence:
-context, approach taxonomy, measured challenges, root cause, key idea, techniques, and
-evidence/contributions.  Evaluation uses RQ1--RQ4 with an opening hypothesis, evidence,
-and closing result.  Robustness and hard-link identity limits are reported with their
-disjoint-workspace and explicit-API scope.
+**PASS.** The revision removes the visible development-stage labels P0/P1,
+diff-anchored words such as “now,” the Unicode numeric dash, and promotional
+phrasing.  Long background taxonomies and repeated limitation lists were
+collapsed.  The Abstract is a compact version of the Introduction and preserves
+all sample counts and claim boundaries.
 
-### Check 6: Contribution Alignment -- PASS
-
-The four contribution bullets cover problem evidence, AET, the AgentTX prototype, and
-evaluation.  They do not claim causal rollback is the default, complete syscall/alias
-coverage, total token savings, atomic external visibility, or superiority over external
-artifacts.
-
-## Prose Quality Check 7 -- PASS
-
-The manuscript was read linearly and then scanned again for length and symbol hygiene.
-
-- **7a sentence length:** all prose sentences are at or below 30 words after excluding
-  equations, tables, and separate list items.
-- **7b paragraph length:** all prose paragraphs contain at most six sentences; the abstract
-  contains six logical sentences.
-- **7c conciseness:** removed filler and ambiguous baseline lists; no banned AI-style terms
-  from the writing guide remain.
-- **7d paragraph structure:** motivation, model, implementation, and each RQ begin with a
-  point or hypothesis before mechanism and evidence.
-- **7e flow:** root cause follows symptoms; AET precedes AgentTX implementation; semantic
-  evidence precedes limitations and related work.
-- **7f vocabulary:** `shared snapshot`, `avoided replay tokens`, `crash recoverability`, and
-  `recovery-granularity emulation` have distinct meanings.
-- **7g pronouns:** recovery actors and commit ownership are explicit.
-- **7h symbol hygiene:** no causal `---`, prose arrows, or internal DP-to-challenge notation.
-- **7i lists:** standalone lists use `itemize`; contribution bullets remain one line each in
-  source.
-- **7j causal clarity:** core correctness mechanisms are linked to challenges; worker and
-  incremental snapshot optimizations are labeled separately.
-
-## LaTeX and Visual QA
+## LaTeX and visual QA
 
 - `latexmk` completes with no undefined references or citations.
-- Output is US Letter, nine PDF pages including references, with the main paper ending on
-  page 8.
-- Fonts are embedded and all pages were rendered to PNG for visual inspection.
-- No text, table, equation, caption, or footer is clipped.
-- The robustness figure was changed to a single-column auxiliary figure so it remains near
-  RQ4 instead of appearing alone after the references.
-- Remaining underfull-box warnings are cosmetic line-breaking effects.  There are no
-  overfull text boxes.
+- Output is US Letter, eleven pages including references; the main text ends on
+  page 10.
+- Evaluation pages 6--9 were rendered to PNG and inspected after the rewrite.
+- No text, table, equation, caption, footer, or figure is clipped or overlapped.
+- Only cosmetic underfull-box warnings remain; no overfull box is reported.
 
-## Evidence Still Needed for Submission
+## Evidence still needed for submission
 
-These are experimental gaps, not inconsistencies hidden by prose:
+1. Storage, frequency control, and confidence intervals for the canonical
+   repeated runtime comparison; CPU, vCPU, memory, kernel, commit, and command
+   are already recorded in its manifest.
+2. At least three repeats per GitHub-context task/policy, plus fair repeated
+   Aider runs under the same model, timeout, prompt, and validator.
+3. A WAL phase fault-injection matrix and a syscall/object-identity coverage
+   matrix.
+4. Shared-path concurrency and snapshot scaling by repository size, churn, and
+   session length, or correspondingly narrower claims.
+5. Artifact-native external baselines where reproducible, with a blocker table
+   for the rest.
 
-1. VM CPU/vCPU, memory, storage, and frequency-control details.
-2. Interleaved runtime repetitions with variance or confidence intervals.
-3. Artifact-native external baseline runs or a documented blocker table.
-4. Multi-package repositories, additional models, and shared-path concurrency.
-5. A compact WAL crash-phase and syscall-coverage table.
-
-**Final verdict:** the draft is structurally consistent and compilable.  Its central
-semantic claim is supported by current controlled evidence, while the text keeps external
-comparison, object identity, tracing completeness, and token scope explicit.
+**Verdict:** the draft is consistent and compilable.  Its controlled semantic
+claim and fixed-trajectory runtime distribution are supported.  Live-agent
+generalization, crash statistics, and external comparisons remain the main OSDI
+evidence gaps.

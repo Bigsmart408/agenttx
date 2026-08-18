@@ -106,7 +106,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "read-dependency tracing backend: auto prefers eBPF when "
             "available and falls back to strace; strace forces ptrace; "
-            "bpf requires a working eBPF tracer (default: auto)"
+            "bpf requires a working eBPF tracer and keeps one attachment "
+            "across the session (default: auto)"
         ),
     )
     b.set_defaults(func=cmd_begin)

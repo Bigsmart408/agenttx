@@ -21,7 +21,7 @@ _DEFAULTS = {
         "base": "DEEPSEEK_BASE_URL",
         "model": "DEEPSEEK_MODEL",
         "default_base": "https://api.deepseek.com",
-        "default_model": "deepseek-chat",
+        "default_model": "deepseek-v4-flash",
     },
     "openai": {
         "key": "OPENAI_API_KEY",
@@ -35,7 +35,7 @@ _DEFAULTS = {
         "base": "OPENROUTER_BASE_URL",
         "model": "OPENROUTER_MODEL",
         "default_base": "https://openrouter.ai/api/v1",
-        "default_model": "deepseek/deepseek-chat",
+        "default_model": "deepseek/deepseek-v4-flash",
     },
 }
 

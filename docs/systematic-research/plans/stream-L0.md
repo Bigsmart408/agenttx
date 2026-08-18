@@ -1,4 +1,4 @@
-# L0: AgentTX | Venue: OSDI (12 pages) | 2026-08-09
+# L0: AgentTX | Venue: OSDI (12 pages) | 2026-08-18
 
 ## 1. Big Background
 
@@ -44,8 +44,9 @@ targets without claiming that all prior systems have identical implementations.
   hidden cross-command dependencies explicit.
 - **C2 -- Object Identity.** Decide when different paths denote the same object across
   hierarchy, symlinks, renames, hard links, and copy-up.  **Causal test: PASS.** Stable
-  effect identities remove path-string ambiguity.  The prototype covers hierarchy and
-  symlink ancestors; lower hard links remain a measured substrate boundary.
+  effect identities remove path-string ambiguity.  The tested pre-existing and
+  upper-created hard-link groups pass; bind mounts, external aliases, and arbitrary
+  generation changes remain the measured boundary.
 - **C3 -- Selective Reconstruction.** Materialize the complement of a non-contiguous
   failed subgraph while preserving later independent effects.  **Causal test: PASS.** A
   versioned causal history identifies both the rollback set and the historical states
@@ -94,8 +95,9 @@ is distinct from the AgentTX prototype that realizes it.
   reduce repeated setup and storage work.  This improves P3 but is not presented as a
   fourth correctness challenge.
 
-All core problems are covered.  Hard-link and bind-mount identity are explicitly scoped as
-unfinished C2 coverage rather than hidden behind the ledger abstraction.
+All core problems are covered within an explicit identity contract.  Tested hard-link
+groups are supported; bind mounts, external aliases, and arbitrary generation changes
+remain fail-closed C2 coverage rather than hidden behind the ledger abstraction.
 
 ## 7. System and Experiments
 
@@ -104,22 +106,23 @@ OverlayFS, and `strace`.  It implements a persistent shared semisolate, effect l
 selective rollback, content-addressed snapshots, commit policy, frontier materialization,
 and crash-recovery WAL.
 
-**Evidence.** The current evaluation includes a 64-call runtime comparison, 54/64/96-call
-scaling, preserved optimization iterations, 144 real-overlay causal-retention runs, a
-dependency ablation, three real-agent causal-recovery runs, 27 real-LLM replay-token
-samples, worker crash injection, a reloadable 256-step session, and four disjoint
-concurrent agents.
+**Evidence.** The current evaluation includes a 64-call runtime comparison, a canonical
+x86 ten-write comparison with 50 fresh workspaces per mode, 54/64/96-call scaling,
+preserved optimization iterations, 144 real-overlay causal-retention runs, a dependency
+ablation, three real-agent causal-recovery runs, 27 real-LLM replay-token samples, worker
+crash injection, a reloadable 256-step session, and four disjoint concurrent agents.
 
 **Headline results.** Full causal recovery retained 100% of independent work and removed
 100% of invalid descendants in the controlled DAG suite.  At the largest replay input it
-avoided 1,335.7 tokens versus an optimistic temporal checkpoint and 2,891.0 versus a whole
-abort.  Persistent execution reduced the full path to 148.5 ms/step, 43% below per-call
-isolation, while remaining about 3x slower than unsafe bare execution.
+avoided 1,424.7 tokens versus an optimistic temporal checkpoint and 3,340.3 versus a whole
+abort.  In the canonical repeated comparison, full AgentTX reached 58.757 ms/step mean and
+68.169 ms/step p99, 66.4% below per-call `try` at p99, and was causal-correct in 50/50 runs.
+The separate 64-call full path remained 43% below per-call isolation.
 
 **Claim boundary.** Checkpoint and whole-abort results emulate recovery granularity rather
 than external artifacts.  Real-agent tasks are seeded, causal rollback is explicit rather
-than the default, hard-link semantics remain incomplete, and non-filesystem effects are
-outside the transaction.
+than the default, the object-identity contract is incomplete outside tested hard-link
+groups, and non-filesystem effects are outside the transaction.
 
 **Judgment: PASS for draft stage.**  The system and evidence support the central semantic
 claim.  External artifact comparisons and broader repositories remain required for an

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot eBPF vs strace dependency-tracing overhead and capture fidelity."""
+"""Plot persistent eBPF vs strace overhead and capture fidelity."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -26,6 +26,7 @@ MODE_LABELS = {
     "off": "no tracing",
     "strace": "strace",
     "bpf": "eBPF",
+    "bpf": "persistent eBPF",
 }
 
 
@@ -158,14 +159,14 @@ def plot(frame: pd.DataFrame, output: Path) -> None:
     bpf_p95 = frame[frame["mode"] == "bpf"]["per_step_ms_p95"].iloc[0]
     ratio = (strace_p95 - bpf_p95) / max(strace_p95, 1e-9) * 100.0
     ax.text(
-        0.05, 0.55,
-        f"p95 ratio (strace − eBPF):\n{ratio:+.1f}% of strace p95",
-        transform=ax.transAxes, fontsize=8, va="center",
+        0.05, 0.72,
+        f"p95 ratio (strace − persistent eBPF):\n{ratio:+.1f}% of strace p95",
+        transform=ax.transAxes, fontsize=7.4, va="center",
     )
     ax.text(
-        0.05, 0.30,
+        0.05, 0.24,
         "Verified: every traced step captured\nboth the READ and the NEGATIVE\neffect in the ledger.",
-        transform=ax.transAxes, fontsize=7, color="0.25", va="center",
+        transform=ax.transAxes, fontsize=6.8, color="0.25", va="center",
     )
     ax.set_ylabel("", fontsize=8)
     ax.set_xlabel("(d) Interpretation", fontsize=7)

@@ -57,12 +57,12 @@ A repeat succeeds only if all of the following hold:
 
 ## Result
 
-Three fresh-workspace `deepseek-chat` repeats all succeeded. Faulty-root
+Three fresh-workspace `deepseek-v4-flash` repeats all succeeded. Faulty-root
 selection, correct causal-target selection, independent-work retention,
 invalid-derived removal, and post-commit test pass rates were all 100%; the
-pre-commit host leak rate was 0%. End-to-end wall time was 29.0 seconds p50 and
-30.8 seconds p95. The model used 17--22 tool calls and inspected the ledger one
-or two times before choosing step 0 in every repeat.
+pre-commit host leak rate was 0%. End-to-end wall time was 42.939 seconds p50 and
+44.430 seconds p95. The three new runs used the same ledger-inspection and
+recovery protocol and passed every validation check.
 
 This closes the narrow “LLM cannot request causal recovery” gap. It does not yet
 establish behavior on multi-package repositories, adversarial prompts, or long

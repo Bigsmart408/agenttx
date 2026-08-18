@@ -70,7 +70,7 @@ def _run_host_tests(workdir: Path) -> int:
     return result.returncode
 
 
-def run_once(repeat: int, model: Optional[str], max_turns: int, provider: Optional[str]) -> dict:
+def run_once(repeat: int, model: Optional[str], max_turns: int, provider: Optional[str], trace_backend: str = "strace") -> dict:
     """Run one real agent attempt and validate the protected commit boundary."""
     from agenttx.agents.llm_agent import LLMToolAgent
 
@@ -97,6 +97,7 @@ def run_once(repeat: int, model: Optional[str], max_turns: int, provider: Option
             model=model,
             provider=provider,
             max_turns=max_turns,
+            trace_backend=trace_backend,
         )
         result = agent.run(REFACTOR_TASK, commit=False)
         finished = result.finished
@@ -220,6 +221,7 @@ def main() -> int:
     parser.add_argument("--max-turns", type=int, default=35)
     parser.add_argument("--model", default=None)
     parser.add_argument("--provider", choices=provider_names(), default=None)
+    parser.add_argument("--trace-backend", choices=("strace", "bpf_persistent"), default="strace")
     args = parser.parse_args()
     if args.repeats <= 0 or args.max_turns <= 0:
         parser.error("repeats and max-turns must be positive")
@@ -230,7 +232,7 @@ def main() -> int:
         return 0
     rows: List[dict] = []
     for repeat in range(args.repeats):
-        row = run_once(repeat, args.model, args.max_turns, args.provider)
+        row = run_once(repeat, args.model, args.max_turns, args.provider, args.trace_backend)
         rows.append(row)
         print(json.dumps({k: v for k, v in row.items() if k != "error"}, indent=2), flush=True)
         if row["error"]:

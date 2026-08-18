@@ -20,3 +20,4 @@ experiments/results/*.raw
 codegraph/
 # stale root-owned backup (cannot delete as unprivileged user)
 experiments/results/deepseek.old-bak*
+experiments/cache/

@@ -39,15 +39,18 @@ class CodingAgentHarness:
         policy: Optional[CommitPolicy] = None,
         auto_commit: bool = False,
         trace_reads: bool = True,
+        trace_backend: str = "auto",
     ) -> None:
         self.workdir = Path(workdir).resolve()
         self.policy = policy or CommitPolicy(workdir=self.workdir)
         self.auto_commit = auto_commit
         self.trace_reads = trace_reads
+        self.trace_backend = trace_backend
         self.tx = AgentTX.begin(
             workdir=self.workdir,
             session_dir=session_dir,
             trace_reads=trace_reads,
+            trace_backend=trace_backend,
             commit_policy=self.policy,
         )
         self.tools: Dict[str, ToolFn] = {

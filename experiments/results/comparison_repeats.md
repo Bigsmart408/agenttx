@@ -1,32 +1,32 @@
 # Repeated comparison baselines
 
-Fixed trajectory: 10 writes; independent fresh-workspace samples per mode: 10.
+Fixed trajectory: 10 writes; independent fresh-workspace samples per mode: 50.
 
 ## Runtime distribution
 
 | mode | samples | mean ms/step | p50 ms/step | p95 ms/step | p99 ms/step | stdev s |
 |---|---:|---:|---:|---:|---:|---:|
-| bare | 10 | 1.285 | 1.248 | 1.532 | 1.63 | 0.001624 |
-| per_call_try | 10 | 1702.051 | 1687.741 | 1817.432 | 1897.546 | 0.787619 |
-| session_try | 10 | 169.76 | 169.136 | 173.899 | 174.899 | 0.02528 |
-| shared_try | 10 | 1682.964 | 1683.071 | 1703.384 | 1704.803 | 0.181532 |
-| shared_checkpoint | 10 | 361.043 | 360.245 | 373.003 | 373.319 | 0.08384 |
-| bubblewrap | 10 | 1.06 | 1.07 | 1.193 | 1.202 | 0.000969 |
-| agenttx_without_read_tracing | 10 | 361.746 | 363.371 | 367.946 | 369.903 | 0.054675 |
-| agenttx_full | 10 | 371.918 | 373.42 | 380.349 | 380.92 | 0.080464 |
+| bare | 50 | 2.164 | 2.095 | 2.323 | 4.976 | 0.006046 |
+| per_call_try | 50 | 193.726 | 193.826 | 201.427 | 202.746 | 0.040859 |
+| session_try | 50 | 18.621 | 18.232 | 21.988 | 22.39 | 0.013168 |
+| shared_try | 50 | 184.23 | 184.204 | 190.712 | 196.776 | 0.040779 |
+| shared_checkpoint | 50 | 47.186 | 46.599 | 51.206 | 52.147 | 0.018666 |
+| bubblewrap | 50 | 1.145 | 1.162 | 1.274 | 1.301 | 0.000939 |
+| agenttx_without_read_tracing | 50 | 50.395 | 49.818 | 54.1 | 55.508 | 0.022186 |
+| agenttx_full | 50 | 58.757 | 57.738 | 63.511 | 68.169 | 0.027546 |
 
 ## Recovery semantics
 
 | mode | samples | supported rate | causal-correct count | causal-correct rate | host-clean rate |
 |---|---:|---:|---:|---:|---:|
-| bare | 10 | 1.0 | 0 | 0.0 | 0.0 |
-| per_call_try | 10 | 1.0 | 0 | 0.0 | 1.0 |
-| session_try | 10 | 1.0 | 0 | 0.0 | 1.0 |
-| shared_try | 10 | 1.0 | 0 | 0.0 | 1.0 |
-| shared_checkpoint | 10 | 1.0 | 0 | 0.0 | 1.0 |
-| bubblewrap | 10 | 1.0 | 0 | 0.0 | 1.0 |
-| agenttx_without_read_tracing | 10 | 1.0 | 0 | 0.0 | 1.0 |
-| agenttx_full | 10 | 1.0 | 10 | 1.0 | 1.0 |
+| bare | 50 | 1.0 | 0 | 0.0 | 0.0 |
+| per_call_try | 50 | 1.0 | 0 | 0.0 | 1.0 |
+| session_try | 50 | 1.0 | 0 | 0.0 | 1.0 |
+| shared_try | 50 | 1.0 | 0 | 0.0 | 1.0 |
+| shared_checkpoint | 50 | 1.0 | 0 | 0.0 | 1.0 |
+| bubblewrap | 50 | 1.0 | 0 | 0.0 | 1.0 |
+| agenttx_without_read_tracing | 50 | 1.0 | 0 | 0.0 | 1.0 |
+| agenttx_full | 50 | 1.0 | 50 | 1.0 | 1.0 |
 
 The repeated runtime rows quantify VM variance; the recovery rows test whether the semantic result is stable across fresh workspaces.
 Bubblewrap is an isolation/abort lower bound, not a causal-recovery implementation.

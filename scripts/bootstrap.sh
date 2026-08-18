@@ -34,7 +34,13 @@ new_mount = '''    # AGENTTX_ROOT_OVERLAY_COMPAT
     else
         overlay_options="userxattr"
     fi
-    overlay_spec="lowerdir=$lowerdirs,upperdir=$sandbox_dir/upperdir/$overlay_mountpoint,workdir=$sandbox_dir/workdir/$overlay_mountpoint,index=off"
+    overlay_index="${TRY_OVERLAY_INDEX:-on}"
+    case "$overlay_index" in
+        on|off) ;;
+        auto) overlay_index="on" ;;
+        *) echo "invalid TRY_OVERLAY_INDEX=$overlay_index" >&2; return 2 ;;
+    esac
+    overlay_spec="lowerdir=$lowerdirs,upperdir=$sandbox_dir/upperdir/$overlay_mountpoint,workdir=$sandbox_dir/workdir/$overlay_mountpoint,index=$overlay_index"
     if [ -n "$overlay_options" ]; then
         overlay_spec="$overlay_options,$overlay_spec"
     fi

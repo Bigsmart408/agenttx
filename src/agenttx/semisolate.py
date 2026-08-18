@@ -1,6 +1,6 @@
 """Shared/incremental semisolate pool backed by binpash/try -N DIR."""
 from __future__ import annotations
-import base64, hashlib, json, os, re, shlex, shutil, signal, stat, struct, subprocess, tempfile, time
+import base64, hashlib, json, os, re, shlex, shutil, signal, stat, struct, subprocess, tempfile, time, threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Optional, Sequence, Tuple
@@ -8,10 +8,14 @@ from . import bpf_trace
 from .effects import SummaryEntry, diff_summaries, parse_try_summary
 from .ledger import Effect, EffectKind
 from .layers import LayerStore, _remove_overlay_tree
+from .object_identity import HardlinkGroup
 from .trace import parse_strace_effects
 
 _WHITEOUT_DIGEST = "<agenttx:whiteout>"
-_TRACE_BACKENDS = ("auto", "strace", "bpf")
+# ``bpf_persistent`` is retained as a compatibility spelling for saved
+# sessions; both names select the same session-persistent tracer.  The removed
+# per-step attach implementation is not restored by this alias.
+_TRACE_BACKENDS = ("auto", "strace", "bpf", "bpf_persistent")
 _BPF_MARKER_PREFIX = ".agenttx-bpf-marker-"
 _BPF_MARKER_HOLD = "hold"
 _BPF_MARKER_GO = "go"
@@ -181,6 +185,14 @@ class SharedSemisolate:
     _worker_crash_once: bool = False
     _worker_failure_count: int = 0
     _bpf_state: Optional[dict] = None
+    # The sole eBPF backend is session-persistent.  The former per-step
+    # attach implementation was removed because its teardown dominated every
+    # short command and was not a meaningful production mode.
+    _bpf_persistent_proc: Optional[subprocess.Popen] = None
+    _bpf_persistent_seed: Optional[int] = None
+    _bpf_persistent_lines: List[str] = field(default_factory=list)
+    _bpf_persistent_lock: threading.Lock = field(default_factory=threading.Lock)
+    _bpf_persistent_reader: Optional[threading.Thread] = None
     layers: Optional[LayerStore] = None
 
     def __post_init__(self) -> None:
@@ -198,7 +210,7 @@ class SharedSemisolate:
                     "automatic dependency tracing requires strace; "
                     "construct SharedSemisolate(trace_reads=False) to opt out"
                 )
-            if self.trace_backend == "bpf":
+            if self.trace_backend in {"bpf", "bpf_persistent"}:
                 static_ok, static_detail = bpf_trace.bpf_static_available()
                 if not static_ok:
                     raise RuntimeError(
@@ -265,9 +277,9 @@ class SharedSemisolate:
         assert self._bpf_state is not None
         if self._bpf_state["available"]:
             return "bpf", self._bpf_state["detail"]
-        if self.trace_backend == "bpf":
+        if self.trace_backend in {"bpf", "bpf_persistent"}:
             raise RuntimeError(
-                "trace backend 'bpf' requested but eBPF tracing is "
+                f"trace backend {self.trace_backend!r} requested but eBPF tracing is "
                 f"unavailable: {self._bpf_state['detail']}"
             )
         return "strace", "strace (eBPF unavailable)"
@@ -284,24 +296,120 @@ class SharedSemisolate:
             "detail": detail,
         }
 
-    # ------------------------------------------------------------------
-    # eBPF-traced step execution
-    # ------------------------------------------------------------------
+    def _persistent_bpf_read_loop(self, process: subprocess.Popen) -> None:
+        """Drain a long-lived bpftrace stdout pipe without blocking steps."""
+        stream = process.stdout
+        if stream is None:
+            return
+        try:
+            for line in iter(stream.readline, ""):
+                with self._bpf_persistent_lock:
+                    self._bpf_persistent_lines.append(line)
+        finally:
+            try:
+                stream.close()
+            except OSError:
+                pass
 
-    def _run_step_bpf(
-        self, command: Sequence[str], flags: Sequence[str]
-    ) -> Tuple[subprocess.CompletedProcess, List[Effect], float]:
-        """Run one step under the eBPF tracer.
+    def _persistent_bpf_snapshot(self) -> List[str]:
+        with self._bpf_persistent_lock:
+            return list(self._bpf_persistent_lines)
 
-        The command is held on a release-marker file until bpftrace reports
-        ``ATXBPF_READY``, so no syscall of the command (or its descendants)
-        can escape the trace.  A tracer failure fails the step closed after
-        the command has run (releasing the hold first), mirroring the strace
-        backend's missing-log behavior; the host stays clean because effects
-        remain speculative in the overlay.
+    def _start_persistent_bpf(self, seed: int) -> None:
+        """Attach bpftrace once for the session's persistent worker.
+
+        The generated script still emits global tracepoint events.  Per-step
+        process-tree snapshots and the existing parser provide the isolation
+        boundary, while the reader thread keeps the tracer alive between
+        commands and avoids a per-step SIGINT/attach cycle.
         """
         self._ensure_bpf_state()
         assert self._bpf_state is not None and self._bpf_state["script"]
+        if (
+            self._bpf_persistent_proc is not None
+            and self._bpf_persistent_proc.poll() is None
+            and self._bpf_persistent_seed == seed
+        ):
+            return
+        self._stop_persistent_bpf()
+        binary = bpf_trace.bpftrace_binary()
+        assert binary is not None
+        process = subprocess.Popen(
+            [
+                *bpf_trace.bpftrace_quiet_flag(),
+                binary,
+                "-e",
+                self._bpf_state["script"],
+                str(seed),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env={**os.environ, **bpf_trace.bpftrace_strlen_env()},
+            text=True,
+            bufsize=1,
+        )
+        self._bpf_persistent_proc = process
+        self._bpf_persistent_seed = seed
+        with self._bpf_persistent_lock:
+            self._bpf_persistent_lines.clear()
+        reader = threading.Thread(
+            target=self._persistent_bpf_read_loop,
+            args=(process,),
+            name="agenttx-bpftrace-reader",
+            daemon=True,
+        )
+        self._bpf_persistent_reader = reader
+        reader.start()
+        wanted = f"{bpf_trace.READY_LINE} {seed}"
+        deadline = time.monotonic() + 30.0
+        while time.monotonic() < deadline:
+            if any(line.startswith(wanted) for line in self._persistent_bpf_snapshot()):
+                return
+            if process.poll() is not None:
+                break
+            time.sleep(0.02)
+        rc = process.poll()
+        self._stop_persistent_bpf()
+        raise RuntimeError(
+            f"persistent bpftrace did not become ready within 30.0s (rc={rc})"
+        )
+
+    def _stop_persistent_bpf(self) -> None:
+        process = self._bpf_persistent_proc
+        reader = self._bpf_persistent_reader
+        self._bpf_persistent_proc = None
+        self._bpf_persistent_reader = None
+        self._bpf_persistent_seed = None
+        if process is None:
+            return
+        try:
+            if process.poll() is None:
+                process.send_signal(signal.SIGINT)
+                process.wait(timeout=10)
+        except Exception:
+            try:
+                process.kill()
+                process.wait(timeout=5)
+            except Exception:
+                pass
+        if reader is not None and reader.is_alive():
+            reader.join(timeout=2)
+
+    def _run_step_bpf_persistent(
+        self, command: Sequence[str], flags: Sequence[str]
+    ) -> Tuple[subprocess.CompletedProcess, List[Effect], float]:
+        """Run one step while reusing a session-level bpftrace attachment.
+
+        Persistent mode requires the existing persistent try worker.  If that
+        worker cannot be dispatched, we stop the tracer and restart the same
+        session-persistent worker/tracer path; the removed per-step attach
+        fallback is unavailable.
+        """
+        if not self.persistent_worker:
+            raise RuntimeError(
+                "the eBPF backend requires the persistent try worker; "
+                "the removed per-step attach path is not available"
+            )
         assert self.sandbox_dir is not None
         session_token = hashlib.sha256(
             str(self.sandbox_dir).encode("utf-8")
@@ -310,147 +418,75 @@ class SharedSemisolate:
         marker_name = f"{_BPF_MARKER_PREFIX}{tag}"
         marker_logical = Path("/tmp") / marker_name
         marker_upper = self.sandbox_dir / "upperdir" / "tmp" / marker_name
-        trace_log = Path("/tmp") / f".agenttx-bpf-{tag}.raw"
         marker_upper.parent.mkdir(parents=True, exist_ok=True)
-        # Pre-create the marker with a "hold" payload: the command polls the
-        # marker's CONTENT (not its existence).  Existence polling would race
-        # OverlayFS negative-dentry caching — a lookup that misses before the
-        # file is created stays cached as ENOENT even after the file appears
-        # in the upperdir (verified on this kernel).
         marker_upper.write_text(_BPF_MARKER_HOLD)
-        bpf_proc: Optional[subprocess.Popen] = None
-        log_handle = None
         released = False
-        ready_failed: Optional[str] = None
-        traced_tree: Optional[set] = None
-        popen: Optional[subprocess.Popen] = None
+        cp: Optional[subprocess.CompletedProcess] = None
         collect: Optional[Callable[[], subprocess.CompletedProcess]] = None
-        waiter: Optional[subprocess.Popen] = None
+        traced_tree: Optional[set] = None
+        start_line = 0
         t0 = time.perf_counter()
         try:
-            if self.persistent_worker:
-                request = {
-                    "argv": list(command),
-                    "cwd": str(self.workspace),
-                    "hold_marker": str(marker_logical),
-                }
-                try:
-                    self._dispatch_worker(request)
-                except Exception:
-                    # Worker failure must not change correctness: fall back to
-                    # the one-shot try path, exactly like the strace backend.
-                    self._worker_failure_count += 1
-                    self._stop_worker()
-                    self._repair_worker_sandbox()
-                else:
-                    assert self._worker_process is not None
-                    waiter = self._worker_process
-                    collect = lambda: self._collect_worker_response(list(command))
-            if collect is None:
-                # The hold runs from a script file: try word-splits inline
-                # `bash -c` strings when it builds script_to_execute.sh.
-                # FIFO pipe pairing does not cross the OverlayFS mount
-                # boundary either (pipes are allocated against the
-                # superblock's user namespace), so the script polls the
-                # release marker's content instead.
-                popen = subprocess.Popen(
-                    [
-                        str(self.try_bin),
-                        *flags,
-                        "--",
-                        str(self._hold_script()),
-                        str(marker_logical),
-                        *command,
-                    ],
-                    cwd=str(self.workspace),
-                    env={**os.environ, "PWD": str(self.workspace)},
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
-                waiter = popen
-            seed = waiter.pid if waiter is not None else 0
-            log_handle = open(trace_log, "w", encoding="utf-8")
-            binary = bpf_trace.bpftrace_binary()
-            assert binary is not None  # validated during initialization
-            bpf_proc = subprocess.Popen(
-                [
-                    *bpf_trace.bpftrace_quiet_flag(),
-                    binary,
-                    "-e",
-                    self._bpf_state["script"],
-                    str(seed),
-                ],
-                stdout=log_handle,
-                stderr=subprocess.DEVNULL,
-                env={**os.environ, **bpf_trace.bpftrace_strlen_env()},
-            )
-            ready, elapsed = bpf_trace.wait_for_bpftrace_ready(
-                trace_log,
-                seed,
-                timeout=30.0,
-                abort_check=lambda: bpf_proc.poll() is not None,
-            )
-            if not ready:
-                ready_failed = (
-                    f"bpftrace did not become ready within {elapsed:.1f}s "
-                    f"(rc={bpf_proc.returncode})"
-                )
-            else:
-                # Snapshot the seed's live descendant tree now: the sandbox's
-                # setup forks predate probe attach, and the userspace parser
-                # filters the (global) tracepoint events to this tree.
-                traced_tree = _descendant_pids(seed)
+            request = {
+                "argv": list(command),
+                "cwd": str(self.workspace),
+                "hold_marker": str(marker_logical),
+            }
+            try:
+                self._dispatch_worker(request)
+            except Exception:
+                self._worker_failure_count += 1
+                self._stop_persistent_bpf()
+                self._stop_worker()
+                self._repair_worker_sandbox()
+                # Restart the persistent worker and tracer.  The former
+                # per-step attach fallback is intentionally gone.
+                return self._run_step_bpf_persistent(command, flags)
+            assert self._worker_process is not None
+            seed = self._worker_process.pid
+            self._start_persistent_bpf(seed)
+            start_line = len(self._persistent_bpf_snapshot())
+            traced_tree = _descendant_pids(seed)
+            collect = lambda: self._collect_worker_response(list(command))
             self._signal_release(marker_upper)
             released = True
-            if collect is not None:
-                cp = collect()
-            else:
-                assert popen is not None
-                stdout, stderr = popen.communicate()
-                cp = subprocess.CompletedProcess(
-                    popen.args, popen.returncode, stdout, stderr
-                )
+            cp = collect()
         finally:
-            if bpf_proc is not None:
-                try:
-                    bpf_proc.send_signal(signal.SIGINT)
-                    bpf_proc.wait(timeout=10)
-                except Exception:
-                    bpf_proc.kill()
-                    try:
-                        bpf_proc.wait(timeout=5)
-                    except Exception:
-                        pass
             if not released:
-                # A readiness failure must not leave the command blocked on
-                # the hold; release it so the step can complete and fail
-                # closed.
                 try:
                     self._signal_release(marker_upper)
                 except Exception:
                     pass
-            if log_handle is not None:
-                log_handle.close()
-        duration = time.perf_counter() - t0
+        # Give the reader a short grace period to receive the final syscall
+        # exits before slicing this step's stream.  The tracer stays attached.
+        for _ in range(3):
+            time.sleep(0.003)
+        lines = self._persistent_bpf_snapshot()
+        text = "".join(lines[start_line:])
+        if not text:
+            # bpftrace 0.9.x can delay pipe writes under load; one bounded retry
+            # avoids turning a successful command into a false empty trace.
+            time.sleep(0.02)
+            lines = self._persistent_bpf_snapshot()
+            text = "".join(lines[start_line:])
+        if cp is None:
+            raise RuntimeError("persistent eBPF worker returned no result")
+        if (
+            self._bpf_persistent_proc is None
+            or self._bpf_persistent_proc.poll() is not None
+        ):
+            raise RuntimeError("persistent bpftrace exited during the step")
         try:
-            if ready_failed is not None:
-                raise RuntimeError(ready_failed)
-            if not trace_log.is_file():
-                raise RuntimeError(
-                    "bpftrace did not produce the expected dependency log"
-                )
-            text = trace_log.read_text(encoding="utf-8", errors="replace")
             effects = bpf_trace.parse_bpf_effects(
                 text, self.workspace, allowed_pids=traced_tree
             )
-            return cp, effects, duration
+            return cp, effects, time.perf_counter() - t0
         finally:
-            for leftover in (marker_upper, trace_log):
-                try:
-                    leftover.unlink(missing_ok=True)
-                except OSError:
-                    pass
+            marker_upper.unlink(missing_ok=True)
+
+    # ------------------------------------------------------------------
+    # eBPF-traced step execution
+    # ------------------------------------------------------------------
 
     def _signal_release(self, marker_upper: Path) -> None:
         """Flip the release marker to "go", unblocking the traced command.
@@ -524,7 +560,8 @@ class SharedSemisolate:
 
                 metadata = (
                     f"{stat.S_IMODE(mode):o}:{entry_stat.st_uid}:"
-                    f"{entry_stat.st_gid}:{entry_stat.st_mtime_ns}"
+                    f"{entry_stat.st_gid}:{entry_stat.st_mtime_ns}:"
+                    f"{entry_stat.st_dev}:{entry_stat.st_ino}:{entry_stat.st_nlink}"
                 ).encode("ascii")
                 if stat.S_ISLNK(mode):
                     target = os.readlink(str(entry)).encode("utf-8", "surrogateescape")
@@ -646,7 +683,7 @@ class SharedSemisolate:
 
     @property
     def worker_failure_count(self) -> int:
-        """Number of worker failures that have used the one-shot fallback."""
+        """Number of worker failures that triggered recovery or restart."""
         return self._worker_failure_count
 
     @staticmethod
@@ -714,6 +751,10 @@ class SharedSemisolate:
         )
 
     def _stop_worker(self) -> None:
+        # A persistent tracer is tied to the worker's process tree.  Stop it
+        # before tearing down or rebuilding that tree (refresh/commit/rollback
+        # call this method as their synchronization point).
+        self._stop_persistent_bpf()
         process = self._worker_process
         self._worker_process = None
         self._worker_script = None
@@ -787,27 +828,26 @@ class SharedSemisolate:
         # The script already has a fixed bash shebang and executable mode;
         # executing it directly avoids an extra shell parse in every try call.
         command = [str(script)]
-        trace_upper: Optional[Path] = None
+        # `try` mounts a private /tmp and /run for the command namespace.  A
+        # trace file written there therefore disappears when the namespace is
+        # torn down, even though the command itself succeeded.  Keep the
+        # trace on the command's stderr pipe instead; both the one-shot path
+        # and the persistent worker already return that stream to the host.
+        trace_to_stderr = False
         tracer: Optional[str] = None
         trace_effects: List[Effect] = []
         if should_trace_reads:
             backend, _detail = self._resolve_step_backend()
             if backend == "bpf":
-                cp, trace_effects, duration = self._run_step_bpf(command, flags)
+                cp, trace_effects, duration = self._run_step_bpf_persistent(
+                    command, flags
+                )
                 tracer = "bpf"
             else:
                 tracer = "strace"
                 strace_bin = shutil.which("strace")
                 assert strace_bin is not None  # validated during initialization
-                session_token = hashlib.sha256(
-                    str(self.sandbox_dir).encode("utf-8")
-                ).hexdigest()[:12]
-                trace_name = (
-                    f".agenttx-strace-{session_token}-{os.getpid()}-"
-                    f"{self._step_count}.raw"
-                )
-                trace_logical = Path("/tmp") / trace_name
-                trace_upper = self.sandbox_dir / "upperdir" / "tmp" / trace_name
+                trace_to_stderr = True
                 command = [
                     strace_bin,
                     "-yy",
@@ -817,7 +857,7 @@ class SharedSemisolate:
                     "--seccomp-bpf",
                     "--trace=%file,process",
                     "-o",
-                    str(trace_logical),
+                    "/dev/stderr",
                     *command,
                 ]
 
@@ -837,18 +877,13 @@ class SharedSemisolate:
                 cp = self._run_try([*flags, "--", *command], cwd=self.workspace)
             duration = time.perf_counter() - t0
 
-        if trace_upper is not None:
-            try:
-                if not trace_upper.is_file():
-                    raise RuntimeError(
-                        "strace did not produce the expected dependency log"
-                    )
-                trace_effects = parse_strace_effects(
-                    trace_upper.read_text(encoding="utf-8", errors="replace"),
-                    self.workspace,
+        if trace_to_stderr:
+            trace_text = cp.stderr or ""
+            if not trace_text.strip():
+                raise RuntimeError(
+                    "strace did not produce dependency output on stderr"
                 )
-            finally:
-                trace_upper.unlink(missing_ok=True)
+            trace_effects = parse_strace_effects(trace_text, self.workspace)
 
         # Digests alone detect writes/deletes without a second try summary process.
         dig_after = self.upperdir_digests()
@@ -971,8 +1006,305 @@ class SharedSemisolate:
             elif kind == "directory" and stat.S_ISDIR(current_mode):
                 path.chmod(mode)
 
+    def _materialize_hardlink_groups(
+        self, groups: Sequence[HardlinkGroup]
+    ) -> None:
+        """Publish regular-file updates without splitting host aliases.
+
+        ``try-commit`` intentionally materializes one upperdir pathname at a
+        time.  For an existing hard-link group that would unlink the selected
+        name and rename a fresh copy over it, leaving untouched aliases on the
+        old inode.  We instead copy the selected upper entry into the existing
+        host inode in place; unlinking the upper entry then makes the merged
+        overlay fall back to the updated lower inode.
+        """
+
+        assert self.sandbox_dir is not None
+        upper = self.sandbox_dir / "upperdir"
+        for group in groups:
+            host_paths = [Path(path) for path in group.paths]
+            source: Optional[Path] = None
+            for host_path in host_paths:
+                # try stores absolute logical paths below upperdir (for
+                # example upperdir/tmp/.../workspace/file), not paths relative
+                # to the workspace mount point.
+                logical = host_path.relative_to(Path("/"))
+                candidate = upper.joinpath(*logical.parts)
+                if os.path.lexists(str(candidate)):
+                    source = candidate
+                    break
+            if source is None:
+                # A complete group can be selected by a delete effect.  The
+                # overlay records that as a native whiteout at one alias.
+                raise RuntimeError(
+                    "hard-link group has no upperdir effect: "
+                    + ", ".join(group.paths)
+                )
+
+            source_stat = source.lstat()
+            source_logical = Path("/") / source.relative_to(upper)
+            target = Path(str(source_logical))
+            if str(target) not in group.paths:
+                raise RuntimeError(
+                    "upperdir hard-link effect is outside its catalog group: "
+                    + str(source_logical)
+                )
+            target_stat = target.lstat() if os.path.lexists(str(target)) else None
+            if target_stat is None:
+                # A newly-created alias may be the first upper pathname seen,
+                # while another group member already exists in the host lower.
+                # Use that existing inode as the canonical publication target.
+                for candidate in (Path(path) for path in group.paths):
+                    if os.path.lexists(str(candidate)):
+                        candidate_stat = candidate.lstat()
+                        if stat.S_ISREG(candidate_stat.st_mode):
+                            target, target_stat = candidate, candidate_stat
+                            break
+            if target_stat is not None and not stat.S_ISREG(target_stat.st_mode):
+                raise RuntimeError(
+                    "hard-link target was replaced while committing: " + str(target)
+                )
+
+            if stat.S_ISREG(source_stat.st_mode):
+                try:
+                    source_xattrs = os.listxattr(
+                        str(source), follow_symlinks=False
+                    )
+                except OSError:
+                    source_xattrs = []
+                # Indexed copy-up keeps an origin/index relation and reports
+                # the extra link in the upper inode.  A replacement such as
+                # ``rename(new, first)`` has no lower origin and must split
+                # only the selected name instead of updating every alias.
+                copyup = source_stat.st_nlink > 1 or any(
+                    name in {"trusted.overlay.origin", "trusted.overlay.nlink"}
+                    for name in source_xattrs
+                )
+                source_mode = stat.S_IMODE(source_stat.st_mode)
+                source_readable = source_mode | stat.S_IRUSR
+                source_changed = source_readable != source_mode
+                if source_changed:
+                    source.chmod(source_readable)
+                target_mode = (
+                    stat.S_IMODE(target_stat.st_mode)
+                    if target_stat is not None
+                    else source_mode
+                )
+                target_writable = target_mode | stat.S_IWUSR
+                target_changed = target_stat is not None and target_writable != target_mode
+                if target_changed:
+                    target.chmod(target_writable)
+                try:
+                    if copyup:
+                        if target_stat is None:
+                            # A new link group has no host inode yet.  Stage
+                            # one entry, then use link(2) for its siblings.
+                            fd, temporary_name = tempfile.mkstemp(
+                                prefix=".agenttx-new-object-", dir=str(target.parent)
+                            )
+                            temporary = Path(temporary_name)
+                            os.close(fd)
+                            try:
+                                with source.open("rb") as source_handle, temporary.open("wb") as temporary_handle:
+                                    shutil.copyfileobj(source_handle, temporary_handle)
+                                    temporary_handle.flush()
+                                    os.fsync(temporary_handle.fileno())
+                                temporary.chmod(source_mode)
+                                shutil.copystat(source, temporary, follow_symlinks=False)
+                                os.replace(str(temporary), str(target))
+                            finally:
+                                temporary.unlink(missing_ok=True)
+                        else:
+                            with source.open("rb") as source_handle, target.open("wb") as target_handle:
+                                shutil.copyfileobj(source_handle, target_handle)
+                                target_handle.flush()
+                                os.fsync(target_handle.fileno())
+                            shutil.copystat(source, target, follow_symlinks=False)
+                        # Install any newly-created names as hard links to the
+                        # canonical host inode.  Existing names already share
+                        # that inode and need no replacement.
+                        for alias in host_paths:
+                            if alias == target or os.path.lexists(str(alias)):
+                                continue
+                            alias.parent.mkdir(parents=True, exist_ok=True)
+                            os.link(target, alias, follow_symlinks=False)
+                    else:
+                        # Intentional replacement: stage a fresh inode in the
+                        # host directory, then replace only this directory
+                        # entry.  The other aliases retain the old inode.
+                        fd, temporary_name = tempfile.mkstemp(
+                            prefix=".agenttx-replace-", dir=str(target.parent)
+                        )
+                        temporary = Path(temporary_name)
+                        os.close(fd)
+                        try:
+                            with source.open("rb") as source_handle, temporary.open("wb") as temporary_handle:
+                                shutil.copyfileobj(source_handle, temporary_handle)
+                                temporary_handle.flush()
+                                os.fsync(temporary_handle.fileno())
+                            temporary.chmod(source_mode)
+                            shutil.copystat(source, temporary, follow_symlinks=False)
+                            os.replace(str(temporary), str(target))
+                        finally:
+                            temporary.unlink(missing_ok=True)
+                finally:
+                    if source_changed:
+                        source.chmod(source_mode)
+                    if target_changed and copyup and os.path.lexists(str(target)):
+                        target.chmod(target_mode)
+                _remove_overlay_tree(source)
+                continue
+
+            if stat.S_ISCHR(source_stat.st_mode) and source_stat.st_rdev == os.makedev(0, 0):
+                # Deleting one name from a hard-link group must not delete the
+                # inode through its aliases; unlink just the selected name.
+                selected = next(
+                    (path for path in host_paths if path.name == source.name),
+                    target,
+                )
+                selected.unlink(missing_ok=True)
+                _remove_overlay_tree(source)
+                continue
+
+            raise RuntimeError(
+                "unsupported hard-link materialization effect: " + str(source)
+            )
+
+    def _discover_upper_hardlink_groups(
+        self, paths: Optional[Sequence[str]]
+    ) -> List[HardlinkGroup]:
+        """Return selected groups whose aliases are both present in upperdir."""
+
+        if paths is None or self.sandbox_dir is None:
+            return []
+        selected = set(paths)
+        upper = self.sandbox_dir / "upperdir"
+        if not upper.exists():
+            return []
+        grouped: Dict[tuple[int, int], List[str]] = {}
+        for entry in _iter_upper_entries(upper):
+            try:
+                entry_stat = entry.lstat()
+            except FileNotFoundError:
+                continue
+            if not stat.S_ISREG(entry_stat.st_mode):
+                continue
+            logical = str(Path("/") / entry.relative_to(upper))
+            grouped.setdefault((entry_stat.st_dev, entry_stat.st_ino), []).append(
+                logical
+            )
+        groups: List[HardlinkGroup] = []
+        for (device, inode), aliases in grouped.items():
+            aliases = sorted(set(aliases))
+            if len(aliases) < 2 or not selected.intersection(aliases):
+                continue
+            groups.append(HardlinkGroup(device, inode, tuple(aliases)))
+        return groups
+
+    def _validate_upper_hardlink_scope(
+        self,
+        paths: Optional[Sequence[str]],
+        known_groups: Sequence[HardlinkGroup],
+    ) -> None:
+        """Reject speculative link graphs that P0 cannot publish safely.
+
+        A ``link(2)`` created only inside the overlay may produce two upperdir
+        names sharing an inode even though the host baseline had no group.  A
+        path-wise ``try-commit`` would split that inode.  Until the full
+        object-id ledger lands, fail closed whenever a selected upper group is
+        not one of the complete host groups handled above.
+        """
+
+        if paths is None or self.sandbox_dir is None:
+            return
+        selected = set(paths)
+        allowed = {frozenset(group.paths) for group in known_groups}
+        upper = self.sandbox_dir / "upperdir"
+        if not upper.exists():
+            return
+        groups: Dict[tuple[int, int], List[str]] = {}
+        for entry in _iter_upper_entries(upper):
+            try:
+                entry_stat = entry.lstat()
+            except FileNotFoundError:
+                continue
+            if not stat.S_ISREG(entry_stat.st_mode):
+                continue
+            logical = str(Path("/") / entry.relative_to(upper))
+            groups.setdefault((entry_stat.st_dev, entry_stat.st_ino), []).append(
+                logical
+            )
+        for aliases in groups.values():
+            alias_set = frozenset(aliases)
+            # OverlayFS index metadata can report nlink=2 for one upper
+            # pathname even though its sibling remains in the lower layer.
+            # Only two or more distinct upper names prove an overlay-created
+            # hard-link group.
+            if len(aliases) > 1 and selected.intersection(aliases) and alias_set not in allowed:
+                raise RuntimeError(
+                    "selected commit contains an overlay-created hard-link "
+                    "group that lacks an object identity: "
+                    + ", ".join(sorted(aliases))
+                )
+
+    @staticmethod
+    def _strip_overlay_origins(root: Path) -> None:
+        """Remove volatile OverlayFS origin xattrs from a copied upper tree."""
+
+        if not root.exists():
+            return
+        for current, directories, filenames in os.walk(root, followlinks=False):
+            for name in [*directories, *filenames]:
+                path = Path(current) / name
+                try:
+                    xattrs = os.listxattr(str(path), follow_symlinks=False)
+                except OSError:
+                    continue
+                for xattr in xattrs:
+                    if xattr in {"trusted.overlay.origin", "trusted.overlay.nlink"}:
+                        try:
+                            os.removexattr(str(path), xattr, follow_symlinks=False)
+                        except OSError:
+                            # An unprivileged backing filesystem may reject
+                            # trusted xattrs; the copy remains usable and the
+                            # caller can still fail closed on a later probe.
+                            pass
+
+    def rebase_upper_generation(self) -> None:
+        """Recreate the retained upper as a pure logical generation.
+
+        Partial commit changes the host lower tree while a speculative suffix
+        may remain.  Re-copying the unmounted upper through AgentTX's inode
+        memo discards OverlayFS workdir/index coupling and gives the next
+        mount a fresh generation without changing logical effects.
+        """
+
+        self._stop_worker()
+        assert self.sandbox_dir is not None and self.layers is not None
+        upper = self.sandbox_dir / "upperdir"
+        temporary = Path(
+            tempfile.mkdtemp(prefix=".agenttx-rebase-", dir=str(self.sandbox_dir))
+        )
+        saved = temporary / "upper"
+        try:
+            if upper.exists():
+                self.layers.copy_tree(upper, saved)
+                self._strip_overlay_origins(saved)
+                _remove_overlay_tree(upper)
+            upper.mkdir(parents=True, exist_ok=True)
+            if saved.exists():
+                self.layers.copy_tree(saved, upper)
+            self._cached_summary = {}
+            self._cached_digests = self.upperdir_digests()
+            self._pending_snapshot_changes = None
+        finally:
+            _remove_overlay_tree(temporary)
+
     def commit_from_snapshot(
-        self, before_step_id: int, paths: Sequence[str]
+        self,
+        before_step_id: int,
+        paths: Sequence[str],
+        hardlink_groups: Sequence[HardlinkGroup] = (),
     ) -> subprocess.CompletedProcess:
         """Commit selected paths from a historical frontier snapshot.
 
@@ -999,7 +1331,7 @@ class SharedSemisolate:
             self.layers.copy_tree(upper, saved)
             saved_current = True
             self.layers.copy_tree(snapshot, upper)
-            return self.commit(paths=paths)
+            return self.commit(paths=paths, hardlink_groups=hardlink_groups)
         finally:
             if saved_current:
                 self.layers.copy_tree(saved, upper)
@@ -1008,34 +1340,58 @@ class SharedSemisolate:
                 self._pending_snapshot_changes = None
             _remove_overlay_tree(temporary)
 
-    def commit(self, paths: Optional[Sequence[str]] = None) -> subprocess.CompletedProcess:
+    def commit(
+        self,
+        paths: Optional[Sequence[str]] = None,
+        hardlink_groups: Sequence[HardlinkGroup] = (),
+    ) -> subprocess.CompletedProcess:
         """Commit all effects, or only exact ledger-selected paths, to the host."""
         self._stop_worker()
         assert self.sandbox_dir is not None
         if paths is not None and not paths:
-            return subprocess.CompletedProcess([], 0, "", "")
-        metadata = self._capture_commit_metadata(paths)
+            if not hardlink_groups:
+                return subprocess.CompletedProcess([], 0, "", "")
+        upper_groups = self._discover_upper_hardlink_groups(paths)
+        groups_by_key = {
+            frozenset(group.paths): group
+            for group in [*hardlink_groups, *upper_groups]
+        }
+        materialized_groups = list(groups_by_key.values())
+        hardlink_paths = {
+            path for group in materialized_groups for path in group.paths
+        }
+        self._validate_upper_hardlink_scope(paths, materialized_groups)
+        ordinary_paths = (
+            [path for path in paths if path not in hardlink_paths]
+            if paths is not None
+            else paths
+        )
+        metadata = self._capture_commit_metadata(ordinary_paths)
         cmd = [str(self.try_bin)]
-        if paths is not None:
-            for pattern in self._include_patterns(paths):
+        if ordinary_paths is not None:
+            for pattern in self._include_patterns(ordinary_paths):
                 cmd.extend(["-I", pattern])
         cmd.extend(["commit", str(self.sandbox_dir)])
         upper_modes: Dict[Path, int] = {}
         upper = self.sandbox_dir / "upperdir"
         if upper.exists():
             _grant_upper_commit_access(upper, upper_modes)
-        try:
-            cp = subprocess.run(
-                cmd,
-                cwd=str(self.workspace),
-                text=True,
-                input="y\n",
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False,
-            )
-        finally:
+        if ordinary_paths:
+            try:
+                cp = subprocess.run(
+                    cmd,
+                    cwd=str(self.workspace),
+                    text=True,
+                    input="y\n",
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                )
+            finally:
+                _restore_upper_modes(upper_modes)
+        else:
             _restore_upper_modes(upper_modes)
+            cp = subprocess.CompletedProcess(cmd, 0, "", "")
         commit_output = (cp.stdout or "") + "\n" + (cp.stderr or "")
         if cp.returncode == 0 and "couldn't commit" in commit_output:
             cp = subprocess.CompletedProcess(
@@ -1044,6 +1400,8 @@ class SharedSemisolate:
                 cp.stdout,
                 cp.stderr,
             )
+        if cp.returncode == 0 and materialized_groups:
+            self._materialize_hardlink_groups(materialized_groups)
         if cp.returncode == 0:
             self._restore_committed_metadata(metadata)
             self._cached_summary = {}

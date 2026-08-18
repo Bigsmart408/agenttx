@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Measure per-step overhead of the eBPF tracer vs strace vs no tracing.
+"""Measure persistent eBPF versus strace and no tracing.
 
-Compares the three dependency-capture modes on a short deterministic
+Compares three dependency-capture modes on a short deterministic
 workload and verifies that the chosen backend actually captures workspace
 reads and negative lookups.  The eBPF mode requires root and a working
-bpftrace; without them the benchmark exits non-zero with a clear message and
+    bpftrace; without them the benchmark exits non-zero with a clear message and
 writes no results (no placeholders).
 """
 
@@ -246,11 +246,11 @@ def main() -> int:
             "",
             f"strace incremental cost: {strace_delta:.2f} ms/step "
             f"({strace_delta / baseline * 100.0:.1f}%).",
-            f"eBPF incremental cost: {bpf_delta:.2f} ms/step "
+            f"Persistent eBPF incremental cost: {bpf_delta:.2f} ms/step "
             f"({bpf_delta / baseline * 100.0:.1f}%).",
             "",
             "Capture verification: every read step yielded both the `input.txt` "
-            "READ and the `missing.txt` NEGATIVE effect for both traced modes.",
+            "READ and the `missing.txt` NEGATIVE effect for all traced modes.",
         ]
     )
     md_lines.extend(retry_lines)

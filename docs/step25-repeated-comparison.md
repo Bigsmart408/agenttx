@@ -6,6 +6,17 @@ fifty times on fresh workspaces and reports mean, standard deviation, p50, p95,
 and p99.  It also repeats the recovery trajectory fifty times and reports the rate at
 which each policy satisfies the causal-retention predicate.
 
+## Current canonical x86 result
+
+The canonical result used by the paper is the 2026-08-18 x86 run on
+`pengpeng-ubuntu-01-1` (Linux 5.4.0-216-generic, x86_64).  It uses a fixed
+ten-write trajectory and 50 fresh workspaces per mode.  Full AgentTX uses
+`strace` explicitly and reports 58.757 ms/step mean, with p50/p95/p99 of
+57.738/63.511/68.169 ms and 50/50 causal-correct recoveries.  The complete
+table and host record are in `docs/x86-comparison-20260818.md`; the raw files
+are `experiments/results/comparison_repeats.{csv,json,md}`.  The older tiao2
+table below is retained as historical context and is not used in the paper.
+
 ## Reproduction
 
 ```bash
@@ -48,7 +59,7 @@ The deterministic workload is a scripted tool trajectory, not an LLM.  The
 real-agent path uses AgentTX's `LLMToolAgent`: an OpenAI-compatible
 `chat.completions` client with the fixed AgentTX tool schema (`write_file`,
 `read_file`, `run_shell`, `inspect_ledger`, `rollback_causal`, and `finish`).
-The prior successful live-agent/token runs used `deepseek-chat`; the class can
+The prior successful live-agent/token runs used `deepseek-v4-flash`; the class can
 also select `AGENTTX_MODEL`/`OPENAI_MODEL` and an OpenAI-compatible base URL.
 
 For a paper claim about causal recovery, one model is enough for the systems

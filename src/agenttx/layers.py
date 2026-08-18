@@ -49,16 +49,30 @@ def _copy_regular(source: Path, destination: Path, mode: int) -> None:
             source.chmod(original_mode)
 
 
-def _copy_overlay_entry(source: Path, destination: Path) -> None:
+def _copy_overlay_entry(
+    source: Path,
+    destination: Path,
+    inode_memo: Optional[Dict[tuple[int, int], Path]] = None,
+) -> None:
     entry_stat = source.lstat()
     mode = entry_stat.st_mode
     if stat.S_ISDIR(mode):
-        _copy_overlay_tree(source, destination)
+        _copy_overlay_tree(source, destination, inode_memo)
     elif stat.S_ISLNK(mode):
         destination.symlink_to(os.readlink(source))
         shutil.copystat(source, destination, follow_symlinks=False)
     elif stat.S_ISREG(mode):
-        _copy_regular(source, destination, mode)
+        if inode_memo is None:
+            inode_memo = {}
+        key = (entry_stat.st_dev, entry_stat.st_ino)
+        previous = inode_memo.get(key)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if previous is not None:
+            os.link(previous, destination, follow_symlinks=False)
+            shutil.copystat(source, destination, follow_symlinks=False)
+        else:
+            _copy_regular(source, destination, mode)
+            inode_memo[key] = destination
     elif stat.S_ISCHR(mode) and entry_stat.st_rdev == os.makedev(0, 0):
         os.link(source, destination, follow_symlinks=False)
     else:
@@ -108,14 +122,17 @@ def _remove_logical_entry(upperdir: Path, logical: Path) -> None:
 
 
 def _copy_logical_entry(
-    source_root: Path, destination_root: Path, logical: Path
+    source_root: Path,
+    destination_root: Path,
+    logical: Path,
+    inode_memo: Optional[Dict[tuple[int, int], Path]] = None,
 ) -> None:
     relative = logical.relative_to("/")
     source = source_root.joinpath(*relative.parts)
     destination = destination_root.joinpath(*relative.parts)
     if _lexists(source):
         destination.parent.mkdir(parents=True, exist_ok=True)
-        _copy_overlay_entry(source, destination)
+        _copy_overlay_entry(source, destination, inode_memo)
         return
 
     source_whiteout = source.parent / f".wh.{source.name}"
@@ -124,10 +141,15 @@ def _copy_logical_entry(
         _copy_overlay_entry(
             source_whiteout,
             destination.parent / source_whiteout.name,
+            inode_memo,
         )
 
 
-def _copy_overlay_tree(source: Path, destination: Path) -> None:
+def _copy_overlay_tree(
+    source: Path,
+    destination: Path,
+    inode_memo: Optional[Dict[tuple[int, int], Path]] = None,
+) -> None:
     """Copy an unmounted OverlayFS upperdir, preserving native whiteouts.
 
     OverlayFS represents a deletion as a character device with major/minor 0/0.
@@ -140,6 +162,8 @@ def _copy_overlay_tree(source: Path, destination: Path) -> None:
     restored before returning; ctime changes are not part of AgentTX's effect
     fingerprint.
     """
+    if inode_memo is None:
+        inode_memo = {}
     source_stat = source.lstat()
     original_mode = stat.S_IMODE(source_stat.st_mode)
     accessible_mode = original_mode | stat.S_IRUSR | stat.S_IXUSR
@@ -156,7 +180,9 @@ def _copy_overlay_tree(source: Path, destination: Path) -> None:
                 entry_stat = entry.stat(follow_symlinks=False)
                 mode = entry_stat.st_mode
 
-                _copy_overlay_entry(source_entry, destination_entry)
+                _copy_overlay_entry(
+                    source_entry, destination_entry, inode_memo
+                )
 
         shutil.copystat(source, destination, follow_symlinks=False)
         if changed_mode:
@@ -480,12 +506,15 @@ class LayerStore:
 
         source_modes: dict[Path, int] = {}
         destination_modes: dict[Path, int] = {}
+        inode_memo: Dict[tuple[int, int], Path] = {}
         _capture_tree_access(source_root, source_modes)
         _capture_tree_access(upperdir, destination_modes)
         try:
             for logical in top_level:
                 _remove_logical_entry(upperdir, logical)
-                _copy_logical_entry(source_root, upperdir, logical)
+                _copy_logical_entry(
+                    source_root, upperdir, logical, inode_memo
+                )
         finally:
             _restore_tree_modes(destination_modes)
             _restore_tree_modes(source_modes)

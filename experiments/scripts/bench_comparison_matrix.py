@@ -40,7 +40,16 @@ def run_bubblewrap(commands: List[str]) -> subprocess.CompletedProcess:
 
 def run_agenttx(commands: List[str], cwd: Path, session: Path, *, trace: bool) -> float:
     t0 = time.perf_counter()
-    tx = AgentTX.begin(workdir=cwd, session_dir=session, trace_reads=trace)
+    # Keep the comparison backend fixed across privilege profiles.  Running
+    # the suite under sudo makes eBPF discoverable, but the paper's main
+    # comparison is the strace path; selecting it explicitly avoids silently
+    # changing the measured tracer when the harness is rerun as root.
+    tx = AgentTX.begin(
+        workdir=cwd,
+        session_dir=session,
+        trace_reads=trace,
+        trace_backend="strace" if trace else "auto",
+    )
     try:
         for index, command in enumerate(commands):
             result = tx.run_tool(f"step-{index}", ["bash", "-c", command])
@@ -157,7 +166,7 @@ def run_recovery(mode: str) -> dict:
             finally: pool.close(destroy=True)
             note="full checkpoint restore removes independent c with the failed prefix"
         elif mode in {"agenttx_without_read_tracing","agenttx_full"}:
-            trace=mode == "agenttx_full"; tx=AgentTX.begin(workdir=ws, session_dir=scratch/"session", trace_reads=trace)
+            trace=mode == "agenttx_full"; tx=AgentTX.begin(workdir=ws, session_dir=scratch/"session", trace_reads=trace, trace_backend="strace" if trace else "auto")
             try:
                 records=[]
                 for name, command in TRAJECTORY: records.append(tx.run_tool(name,["bash","-c",command]))

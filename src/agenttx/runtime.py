@@ -13,6 +13,11 @@ from typing import List, Optional, Sequence
 from .commit_wal import CommitWAL
 from .effects import effects_from_paths
 from .ledger import Effect, EffectKind, Ledger
+from .object_identity import (
+    HardlinkCatalog,
+    HardlinkGroup,
+    expand_hardlink_paths,
+)
 from .policy import CommitPolicy
 from .semisolate import SharedSemisolate
 
@@ -77,6 +82,8 @@ class AgentTX:
     trace_reads: bool = True
     trace_backend: str = "auto"
     commit_policy: Optional[CommitPolicy] = None
+    object_catalog: HardlinkCatalog = field(default_factory=HardlinkCatalog)
+    _catalog_initialized: bool = False
     _meta_path: Optional[Path] = None
 
     def __post_init__(self) -> None:
@@ -114,6 +121,8 @@ class AgentTX:
             trace_backend=trace_backend,
             commit_policy=commit_policy,
         )
+        tx.object_catalog.refresh(workdir)
+        tx._catalog_initialized = True
         tx._recover_commit_wal()
         tx._persist()
         return tx
@@ -143,6 +152,7 @@ class AgentTX:
             trace_reads=bool(data.get("trace_reads", True)),
             trace_backend=str(data.get("trace_backend", "auto")),
             commit_policy=commit_policy,
+            object_catalog=HardlinkCatalog.from_dict(data.get("object_catalog")),
         )
         tx.pool = SharedSemisolate(
             workspace=tx.workspace,
@@ -153,6 +163,8 @@ class AgentTX:
         )
         tx.pool._owns_sandbox = True
         tx._recover_commit_wal()
+        tx.object_catalog.refresh(tx.workspace)
+        tx._catalog_initialized = True
         # Layer snapshots are keyed by ledger step id. Resume at the next id so
         # a loaded session cannot overwrite an earlier before_NNNN snapshot.
         tx.pool._step_count = len(tx.ledger.steps)
@@ -200,6 +212,7 @@ class AgentTX:
                 "deny_globs": list(self.commit_policy.deny_globs),
             },
             "ledger": self.ledger.to_dict(),
+            "object_catalog": self.object_catalog.to_dict(),
         }
         _atomic_write_json(meta, payload)
         self._meta_path = meta
@@ -303,6 +316,12 @@ class AgentTX:
     ) -> ToolCallRecord:
         self.start()
         assert self.pool is not None
+        # Host identity is stable while the overlay is mounted.  The catalog
+        # is initialized once per session (and refreshed at commit/rebase
+        # boundaries), avoiding a full workspace walk on every short tool.
+        if not self._catalog_initialized:
+            self.object_catalog.refresh(self.workspace)
+            self._catalog_initialized = True
         result = self.pool.run(list(argv), trace_reads=trace_reads)
         effects = list(result.effects)
         if extra_reads:
@@ -310,6 +329,7 @@ class AgentTX:
         if extra_effects:
             effects.extend(extra_effects)
         effects = self._canonicalize_effects(effects)
+        effects = self.object_catalog.annotate(effects)
         step = self.ledger.add_step(tool_name, effects)
         rec = ToolCallRecord(
             step_id=step.step_id,
@@ -431,13 +451,20 @@ class AgentTX:
                 if effect.kind in (EffectKind.WRITE, EffectKind.DELETE):
                     target.add(effect.path)
 
+        # A path-only frontier is unsound for an existing hard-link group:
+        # committing one name by rename creates a fresh inode and leaves every
+        # untouched alias stale.  Expand both sides before conflict checking so
+        # an alias written by a later step is treated as the same object.
+        selected_paths, _ = expand_hardlink_paths(selected, self.workspace)
+        later_paths, _ = expand_hardlink_paths(later, self.workspace)
+
         conflicts = sorted(
             (path, later_path)
-            for path in selected
-            for later_path in later
+            for path in selected_paths
+            for later_path in later_paths
             if self._paths_overlap(path, later_path)
         )
-        return sorted(selected), conflicts
+        return selected_paths, conflicts
 
     def _commit_paths(self, up_to: int) -> List[str]:
         selected, conflicts = self._commit_path_plan(up_to)
@@ -489,12 +516,38 @@ class AgentTX:
         assert self.commit_policy is not None
         self.commit_policy.assert_committable(self.ledger, up_to)
         paths, conflicts = self._commit_path_plan(up_to)
+        # The ledger policy sees the originally named effect paths.  Alias
+        # closure can add more directory entries, so enforce the same policy
+        # on every path that will actually be materialized.
+        denied_aliases = [
+            decision
+            for path in paths
+            if not (decision := self.commit_policy.check_path(path)).allowed
+        ]
+        if denied_aliases:
+            details = ", ".join(
+                f"{decision.path} ({decision.reason})"
+                for decision in denied_aliases[:8]
+            )
+            raise PermissionError(
+                "commit blocked by policy for a hard-link alias: " + details
+            )
         historical_step = self._historical_snapshot_step(up_to) if conflicts else None
+        retained_suffix = any(
+            step.step_id > up_to
+            and step.step_id > self.ledger.committed_frontier
+            and step.status != "rolled_back"
+            for step in self.ledger.steps
+        )
         assert self.pool is not None
         if not paths:
             self.ledger.advance_frontier(up_to)
             self._persist()
             return self.ledger.committed_frontier
+
+        # Keep the complete existing host hard-link groups in the durable WAL,
+        # then route those groups through in-place object materialization.
+        paths, hardlink_groups = expand_hardlink_paths(paths, self.workspace)
 
         ledger_before = self.ledger.to_dict()
         wal = CommitWAL.prepare(
@@ -508,13 +561,23 @@ class AgentTX:
         try:
             wal.mark("applying")
             if historical_step is None:
-                cp = self.pool.commit(paths=paths)
+                cp = self.pool.commit(paths=paths, hardlink_groups=hardlink_groups)
             else:
-                cp = self.pool.commit_from_snapshot(historical_step, paths)
+                cp = self.pool.commit_from_snapshot(
+                    historical_step, paths, hardlink_groups=hardlink_groups
+                )
             if cp.returncode != 0:
                 raise RuntimeError(f"try commit failed: {cp.stderr}")
+            if retained_suffix:
+                # The host lower generation changed while later speculative
+                # effects remain.  Normalize the retained upper before WAL
+                # publication so a remount cannot reuse stale index origins.
+                self.pool.rebase_upper_generation()
             wal.mark("materialized")
             self.ledger.advance_frontier(up_to)
+            self.object_catalog.generation += 1
+            self.object_catalog.refresh(self.workspace)
+            self._catalog_initialized = True
             self._persist()
         except Exception:
             if wal.phase == "materialized":

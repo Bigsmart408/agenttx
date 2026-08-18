@@ -14,9 +14,9 @@ Profiles are independent:
 
 | provider | key | default model | default base URL |
 |---|---|---|---|
-| `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-chat` | `https://api.deepseek.com` |
+| `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-v4-flash` | `https://api.deepseek.com` |
 | `openai` | `OPENAI_API_KEY` | `gpt-4o-mini` | OpenAI SDK default |
-| `openrouter` | `OPENROUTER_API_KEY` | `deepseek/deepseek-chat` | `https://openrouter.ai/api/v1` |
+| `openrouter` | `OPENROUTER_API_KEY` | `deepseek/deepseek-v4-flash` | `https://openrouter.ai/api/v1` |
 
 Use `--model` to override a profile's default. Benchmark result rows include
 the selected provider and model, so multi-model sweeps remain distinguishable.

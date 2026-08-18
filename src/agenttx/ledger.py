@@ -18,13 +18,29 @@ class EffectKind(str, Enum):
 class Effect:
     path: str
     kind: EffectKind
+    object_id: Optional[str] = None
+    object_version: Optional[int] = None
+    topology_op: Optional[str] = None
 
     def to_dict(self) -> dict:
-        return {"path": self.path, "kind": self.kind.value}
+        payload = {"path": self.path, "kind": self.kind.value}
+        if self.object_id is not None:
+            payload["object_id"] = self.object_id
+        if self.object_version is not None:
+            payload["object_version"] = self.object_version
+        if self.topology_op is not None:
+            payload["topology_op"] = self.topology_op
+        return payload
 
     @staticmethod
     def from_dict(d: dict) -> "Effect":
-        return Effect(path=d["path"], kind=EffectKind(d["kind"]))
+        return Effect(
+            path=d["path"],
+            kind=EffectKind(d["kind"]),
+            object_id=d.get("object_id"),
+            object_version=d.get("object_version"),
+            topology_op=d.get("topology_op"),
+        )
 
 
 @dataclass
@@ -77,17 +93,25 @@ class Ledger:
             or right.startswith(left + "/")
         )
 
-    def _writers(self) -> List[tuple[str, int]]:
+    @staticmethod
+    def _objects_overlap(left: Effect, right: Effect) -> bool:
+        return (
+            left.object_id is not None
+            and right.object_id is not None
+            and left.object_id == right.object_id
+        )
+
+    def _writers(self) -> List[tuple[Effect, int]]:
         return [
-            (effect.path, step.step_id)
+            (effect, step.step_id)
             for step in self._uncommitted()
             for effect in step.effects
             if effect.kind in (EffectKind.WRITE, EffectKind.DELETE)
         ]
 
-    def _negative_lookups(self) -> List[tuple[str, int]]:
+    def _negative_lookups(self) -> List[tuple[Effect, int]]:
         return [
-            (effect.path, step.step_id)
+            (effect, step.step_id)
             for step in self._uncommitted()
             for effect in step.effects
             if effect.kind == EffectKind.NEGATIVE
@@ -102,20 +126,23 @@ class Ledger:
             if effect.kind in (EffectKind.READ, EffectKind.NEGATIVE):
                 step.parents.update(
                     previous_id
-                    for previous_path, previous_id in writers
-                    if self._paths_overlap(effect.path, previous_path)
+                    for previous_effect, previous_id in writers
+                    if self._paths_overlap(effect.path, previous_effect.path)
+                    or self._objects_overlap(effect, previous_effect)
                 )
             if effect.kind in (EffectKind.WRITE, EffectKind.DELETE):
                 step.parents.update(
                     previous_id
-                    for previous_path, previous_id in writers
-                    if self._paths_overlap(effect.path, previous_path)
+                    for previous_effect, previous_id in writers
+                    if self._paths_overlap(effect.path, previous_effect.path)
+                    or self._objects_overlap(effect, previous_effect)
                 )
             if effect.kind == EffectKind.WRITE:
                 step.parents.update(
                     previous_id
-                    for previous_path, previous_id in negatives
-                    if self._paths_overlap(effect.path, previous_path)
+                    for previous_effect, previous_id in negatives
+                    if self._paths_overlap(effect.path, previous_effect.path)
+                    or self._objects_overlap(effect, previous_effect)
                 )
         self.steps.append(step)
         return step
