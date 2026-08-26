@@ -13,3 +13,5 @@ dependencies:
       - aider-chat==0.86.2
       - litellm==1.81.10
       - openai==2.20.0
+      - pyyaml
+      - zstandard

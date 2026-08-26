@@ -313,6 +313,7 @@ class AgentTX:
         extra_reads: Optional[Sequence[str]] = None,
         extra_effects: Optional[Sequence[Effect]] = None,
         trace_reads: Optional[bool] = None,
+        timeout_s: Optional[float] = None,
     ) -> ToolCallRecord:
         self.start()
         assert self.pool is not None
@@ -322,7 +323,7 @@ class AgentTX:
         if not self._catalog_initialized:
             self.object_catalog.refresh(self.workspace)
             self._catalog_initialized = True
-        result = self.pool.run(list(argv), trace_reads=trace_reads)
+        result = self.pool.run(list(argv), trace_reads=trace_reads, timeout_s=timeout_s)
         effects = list(result.effects)
         if extra_reads:
             effects.extend(effects_from_paths(reads=extra_reads))
@@ -561,7 +562,15 @@ class AgentTX:
         try:
             wal.mark("applying")
             if historical_step is None:
-                cp = self.pool.commit(paths=paths, hardlink_groups=hardlink_groups)
+                try:
+                    cp = self.pool.commit(paths=paths, hardlink_groups=hardlink_groups)
+                except TypeError as exc:
+                    # Keep older test doubles and third-party semisolate
+                    # backends source-compatible while the production pool
+                    # uses the hard-link-aware keyword.
+                    if "hardlink_groups" not in str(exc):
+                        raise
+                    cp = self.pool.commit(paths=paths)
             else:
                 cp = self.pool.commit_from_snapshot(
                     historical_step, paths, hardlink_groups=hardlink_groups

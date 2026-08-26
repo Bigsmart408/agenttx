@@ -19,6 +19,44 @@ _TRACE_BACKENDS = ("auto", "strace", "bpf", "bpf_persistent")
 _BPF_MARKER_PREFIX = ".agenttx-bpf-marker-"
 _BPF_MARKER_HOLD = "hold"
 _BPF_MARKER_GO = "go"
+_CAPTURE_CAP_CHARS = 8_000_000
+
+
+
+def _drain_capped(stream, max_chars: int) -> str:
+    """Read a pipe to EOF while keeping at most max_chars in memory."""
+    chunks: List[str] = []
+    total = 0
+    truncated = False
+    while True:
+        buf = stream.read(65536)
+        if not buf:
+            break
+        if total >= max_chars:
+            truncated = True
+            continue
+        remain = max_chars - total
+        chunks.append(buf[:remain])
+        total += min(len(buf), remain)
+        if len(buf) > remain:
+            truncated = True
+    text_out = "".join(chunks)
+    if truncated:
+        text_out += "\n[agenttx: output truncated]\n"
+    return text_out
+
+
+def _kill_session(proc: subprocess.Popen) -> None:
+    if proc.poll() is not None:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+    try:
+        proc.kill()
+    except ProcessLookupError:
+        pass
 
 
 def _iter_upper_entries(directory: Path) -> Iterator[Path]:
@@ -247,7 +285,12 @@ class SharedSemisolate:
         assert self.sandbox_dir is not None
         return self.sandbox_dir
 
-    def _run_try(self, args: Sequence[str], cwd: Optional[Path] = None) -> subprocess.CompletedProcess:
+    def _run_try(
+        self,
+        args: Sequence[str],
+        cwd: Optional[Path] = None,
+        timeout_s: Optional[float] = None,
+    ) -> subprocess.CompletedProcess:
         start_dir = Path(cwd or self.workspace).resolve()
         env = os.environ.copy()
         # Upstream try records its chroot START_DIR from the shell's $PWD.
@@ -255,15 +298,49 @@ class SharedSemisolate:
         # inherited environment untouched, so a stale PWD would make commands
         # start in the benchmark runner/repository instead of the workspace.
         env["PWD"] = str(start_dir)
-        return subprocess.run(
-            [str(self.try_bin), *args],
+        argv = [str(self.try_bin), *args]
+        proc = subprocess.Popen(
+            argv,
             cwd=str(start_dir),
             env=env,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            check=False,
+            start_new_session=True,
         )
+        stdout_box: List[str] = []
+        stderr_box: List[str] = []
+
+        def _reader(src, dest: List[str]) -> None:
+            dest.append(_drain_capped(src, _CAPTURE_CAP_CHARS) if src is not None else "")
+
+        t_out = threading.Thread(target=_reader, args=(proc.stdout, stdout_box), daemon=True)
+        t_err = threading.Thread(target=_reader, args=(proc.stderr, stderr_box), daemon=True)
+        t_out.start()
+        t_err.start()
+        timed_out = False
+        try:
+            proc.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            _kill_session(proc)
+            try:
+                proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+        t_out.join(timeout=20)
+        t_err.join(timeout=20)
+        stdout = stdout_box[0] if stdout_box else ""
+        stderr = stderr_box[0] if stderr_box else ""
+        if timed_out:
+            returncode = 124
+            stderr = (stderr + f"\nexternal harness timeout after {float(timeout_s):.1f}s").strip()
+        else:
+            returncode = 1 if proc.returncode is None else proc.returncode
+        return subprocess.CompletedProcess(argv, returncode, stdout, stderr)
 
     # ------------------------------------------------------------------
     # Trace backend selection (strace vs eBPF)
@@ -803,7 +880,11 @@ class SharedSemisolate:
         (self.sandbox_dir / "upperdir").mkdir(parents=True, exist_ok=True)
 
     def run(
-        self, argv: Sequence[str], *, trace_reads: Optional[bool] = None
+        self,
+        argv: Sequence[str],
+        *,
+        trace_reads: Optional[bool] = None,
+        timeout_s: Optional[float] = None,
     ) -> StepResult:
         if self._closed:
             raise RuntimeError("SharedSemisolate is closed")
@@ -872,9 +953,9 @@ class SharedSemisolate:
                     self._worker_failure_count += 1
                     self._stop_worker()
                     self._repair_worker_sandbox()
-                    cp = self._run_try([*flags, "--", *command], cwd=self.workspace)
+                    cp = self._run_try([*flags, "--", *command], cwd=self.workspace, timeout_s=timeout_s)
             else:
-                cp = self._run_try([*flags, "--", *command], cwd=self.workspace)
+                cp = self._run_try([*flags, "--", *command], cwd=self.workspace, timeout_s=timeout_s)
             duration = time.perf_counter() - t0
 
         if trace_to_stderr:

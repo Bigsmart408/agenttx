@@ -1,6 +1,6 @@
 # AgentTX 论文实验设计（第一性原理）
 
-Last updated: 2026-08-12  
+Last updated: 2026-08-24  
 Repo: `/home/pengpeng/agenttx`  
 Purpose: 统一「论文 Evaluation 应该怎么设计」与「当前仓库已实现哪些证据」，约束可声称结论的边界。
 
@@ -13,6 +13,17 @@ Purpose: 统一「论文 Evaluation 应该怎么设计」与「当前仓库已�
 > 在 opaque tool trajectory 上，能否用 effect DAG 做**非连续因果恢复**，并**保留独立工作**。
 
 当前仓库在语义主线（因果保留 + 依赖消融）和动机/消融上已经很强；弱项在外部系统公平对比、真实多模型端到端，以及把「实现完备性实验」与「论文主实验」分清。
+
+### 本轮 workload 口径（2026-08-24）
+
+应用层 workload 已统一为官方 SWE-Bench Lite 与 Terminal-Bench：当前清单
+包含每个套件的 short/medium/long 代表任务，motivation 与 evaluation 共用同一
+任务初始化、官方 verifier 和 recovery-DAG fault overlay。DeepSeek Harness 固定
+使用 `deepseek-v4-flash`，Codex 固定使用 `gpt-5.6-luna`；通过 `--model` 的其他
+模型只能作为显式独立 sweep。旧的 long trajectory、GitHub sidecar 和 synthetic
+document replay 结果仅保留作历史 provenance，不再作为应用 workload 或 token
+结论的来源。机制微基准（try、OverlayFS、trace、snapshot、DAG、WAL）仍可使用
+受控轨迹，但应在论文中标为 mechanism-only。
 
 ---
 
@@ -78,6 +89,12 @@ Purpose: 统一「论文 Evaluation 应该怎么设计」与「当前仓库已�
 
 **原则**：E2a 证明「接口可被 Agent 使用」；E2b 证明「语义转化为可量化收益」。二者缺一则要么“有机制无用途”，要么“有用途无机制”。
 
+### E2c — Official application workloads (SWE-Bench + Terminal-Bench)
+
+全文应用负载只保留这两套。协议：官方实例 → inject independent notes + faulty producer → causal/temporal/whole abort → 官方 gold/oracle 或 live agent → 官方 verifier **且** 独立文档保留。
+GitHub sidecar、long-coding mixed trajectory 不再作为应用负载进入主文。
+
+
 ### E3 — 系统成本与稳健性（主张 C）
 
 **问题**：实现上述语义要付多少税？坏掉时会不会静默污染？
@@ -129,7 +146,7 @@ E0 动机（贵 + 粗）
 | C：共享 overlay + 优化后成本 | full vs per_call；64-call 量级开销 | **中高**（VM 相关，需写清） |
 | C：稳健性 | worker crash、256-step reload、4 并发 | **中**（仅 disjoint workspace） |
 | B→C：真 Agent 调回滚 | `real_agent_recovery` 3/3 | **中**（单模型单任务） |
-| 收益：避免 replay token | `token_recovery` 27/27，metric 定义干净 | **中高**（粒度仿真，非外部系统） |
+| 收益：避免 replay token | `token_recovery` 27/27；`token_end_to_end` 6/6 causal success | **高**（须联读 success；非外部系统） |
 | 边界诚实 | Step23 hardlink OverlayFS 拆 inode | **高**（limitation 金矿） |
 
 ### 3.2 已实现但定位要小心
@@ -139,16 +156,22 @@ E0 动机（贵 + 粗）
 | Optimization iterations 00–06 | 易被读成「刷分」；应标为 engineering ablation |
 | Aider bakeoff | 环境/超时不公平时伤害可信度；「host 立刻污染」叙事可用，性能对比要克制 |
 | `shared_checkpoint` vs `temporal_checkpoint` | 名字易混；`experiments-explained.md` 已澄清，论文必须同样严格 |
-| Step26 端到端 token | 框架在，**credentialed 数字未齐**；不能当已完成主结果 |
+| Step26 端到端 token | **已有 deepseek-v4 数字**；须与 success 联读，不能单看 token 少 |
 | 外部系统（BranchFS / Waypoint / …） | 多数跑不起来；只能 qualitative |
 
 ### 3.3 明确缺口（相对完整评价）
 
+已闭合（2026-08-18）：
+- E2b 全自主回路数字：`token_end_to_end.*` + `FIG-Token-End-to-End`（须与 success 联读）。
+- RQ3 coverage / identity 表：`coverage_matrix.*`。
+- WAL phase fault matrix：`wal_fault_matrix.*`（每相位 5 次）。
+
+仍开放：
 1. **同构外部基线的 artifact-level 对比**（有则 RQ 更硬；无则必须在文中自我设限）。
-2. **多模型 / 多任务** 的 E2a（现在 DeepSeek + seeded repo）。
-3. **E2b 全自主回路**（Step26）的正式数字。
-4. **因果回滚仍非默认 API**（hardlink 边界）——实验上已证明边界；叙事须为 *explicit causal*，不是 *default-on*。
-5. 非 FS 副作用：正确列为 non-goal，不要用 `hide_network` 冒充覆盖。
+2. **多模型 / 多任务** 的 E2a（现在 DeepSeek + seeded repo）；GitHub-context 仍为每格 1 次。
+3. **因果回滚仍非默认 API**（hardlink / bind / external 边界）——叙事须为 *explicit causal*。
+4. 非 FS 副作用：正确列为 non-goal，不要用 `hide_network` 冒充覆盖。
+5. Aider 等外部 agent 的公平重复对比。
 
 ---
 
@@ -174,7 +197,7 @@ E0 动机（贵 + 粗）
 | RQ1 Overhead & scaling | E0a + E3 | `comparison_repeats`、`motivation_scaling`、robustness tails | 高 |
 | RQ2 Causal retention & ablation | E1 | `causal_retention.*` | **最高** |
 | RQ3a Real-agent recovery | E2a | `real_agent_recovery.*` | 高 |
-| RQ3b Avoided replay tokens | E2b | `token_recovery.*`；Step26 pending | 高 |
+| RQ3b Avoided replay tokens | E2b | `token_recovery.*` + `token_end_to_end.*` | 高 |
 | RQ4 Robustness | E3 | `robustness.*`、hardlink probe | 中高 |
 
 ---

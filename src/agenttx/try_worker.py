@@ -87,6 +87,11 @@ def main() -> int:
             completed = subprocess.run(
                 argv,
                 cwd=cwd if isinstance(cwd, str) else None,
+                # External harnesses such as Codex treat an open stdin as a
+                # request to append more prompt text.  The worker protocol
+                # owns its stdin, so child tools must see EOF instead of the
+                # worker pipe or a non-interactive task can wait forever.
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 check=False,

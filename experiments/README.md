@@ -1,3 +1,79 @@
+## Official application workloads (SWE-Bench + Terminal-Bench)
+
+The paper's application evaluation uses only SWE-Bench Lite and Terminal-Bench.
+Mechanism microbenchmarks (isolation scaling, causal DAGs, coverage, WAL) remain
+available below but are not additional application workloads.
+
+The default model tiers are fixed for this round: DeepSeek Harness runs
+`deepseek-v4-flash`, and Codex runs `gpt-5.6-luna`.  Motivation and evaluation
+invoke the same six official task manifests; the recovery DAG is only a
+controlled fault overlay used to compare rollback policies.  The compatibility
+names `bench_token_recovery.py`, `bench_token_end_to_end.py`, and the scripts
+under `motivation/` dispatch to this runner and no longer create the old
+synthetic document/long-trajectory repositories.
+
+```bash
+# Prefetch official instances
+PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python \
+  experiments/scripts/bench_official_tasks.py --oracle --preflight-only
+
+# Oracle repair after causal / temporal / whole-session recovery
+PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python \
+  experiments/scripts/bench_official_tasks.py --oracle --suite all
+
+# Live-agent run with the real DeepSeek Harness (requires
+# `/home/pengpeng/.agenttx_llm.env` or a project `.agent.env`)
+PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python \
+  experiments/scripts/bench_official_tasks.py --suite all \
+  --harness deepseek_harness
+
+# The same workload through the official Codex CLI
+PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python \
+  experiments/scripts/bench_official_tasks.py --suite all \
+  --harness codex
+
+/home/pengpeng/miniconda3/envs/agenttx/bin/python \
+  experiments/scripts/plot_official_tasks.py
+```
+
+Results are separated by external harness under
+`experiments/results/{deepseek_harness,codex}/official_tasks.{csv,json,md}`;
+the token-specific aggregate is `official_token_summary.{csv,json,md}`, and the
+oracle remains under `experiments/results/official/`. Codex's `--json` stream
+supplies token usage. DeepSeek Harness persists usage in `session.jsonl` or
+`session.jsonl.zstd`; AgentTX reads the log from the transaction upperdir,
+prefers the final message over the duplicate chunk event for each turn/step,
+and counts input, cache-read, cache-write, and output buckets. Every raw row
+records `usage_source` (`dsh_session_jsonl`, `stdout_jsonl`, or `none`) so
+missing usage is visible rather than silently estimated. The driver never
+falls back to the old in-process LLM loop.
+
+The harness adapters load credentials in this order: `AGENTTX_ENV_FILE`,
+`<project>/.agent.env`, `<project>/.env`, `~/.agenttx_llm.env`, and
+`/home/pengpeng/.agenttx_llm.env`.  Values are inherited by the child process
+but are never printed.  If `agentTX-clash` is installed, every external
+command is launched as `agentTX-clash run -- ...` so the benchmark uses the
+same proxy path as the live agent.  Override it with `AGENTTX_CLASH_COMMAND`
+when running elsewhere.
+
+At this interface stage each external harness is recorded as one opaque task
+boundary inside AgentTX.  The harness still owns its own turns, tools, and
+retries; any machine-readable usage events are normalized into prompt,
+completion, total, p50, p95, and p99 fields. DeepSeek cache buckets are part
+of normalized prompt tokens, and the aggregate records the source used for
+each group. Missing usage remains explicitly zero/unknown rather than being
+estimated from final text. This boundary is
+intentional: the paper measures tokens discarded by recovery policies, not
+turn-equivalent replay.
+
+Historical long-trajectory and synthetic token result files are retained for
+provenance only.  They must not be regenerated or cited as application
+workloads; use `bench_official_tasks.py` (or one of its compatibility entry
+points) for all new data.
+
+The legacy GitHub sidecar suite remains for historical CSVs; do not add it to
+the paper as an application workload.
+
 # Experiments
 
 The Chinese experiment guide `docs/experiments-explained.md` explains the
@@ -228,3 +304,15 @@ tracing, snapshot, and robustness artifacts.  It also records the attempted
 BranchFS build and the Waypoint/CRIU blocker without fabricating external
 numbers.  See [`docs/tiao2-comparison-run.md`](../docs/tiao2-comparison-run.md)
 for the exact host profile, commands, results, and external-baseline status.
+
+
+## Coverage and WAL matrices (Steps 30–31)
+
+```bash
+PYTHONPATH=src:. python3 experiments/scripts/bench_coverage_matrix.py
+AGENTTX_WAL_REPEATS=5 PYTHONPATH=src:. python3 -u experiments/scripts/bench_wal_fault_matrix.py
+PYTHONPATH=src:. python3 motivation/plot_token_end_to_end.py
+```
+
+Artifacts: `experiments/results/coverage_matrix.*`, `experiments/results/wal_fault_matrix.*`,
+`experiments/results/deepseek/token_end_to_end.*`, `paper/img/FIG-Token-End-to-End.pdf`.
