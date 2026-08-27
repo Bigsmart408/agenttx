@@ -10,13 +10,15 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
 import urllib.request
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 from experiments.workloads.recovery_inject import (
     DocSpec,
@@ -213,30 +215,188 @@ PYTHON_DEPS = {
     ],
 }
 
+REPO_PIP = {
+    "astropy/astropy": [
+        "numpy",
+        "hypothesis",
+        "pytest",
+        "pytest-astropy",
+        "packaging",
+        "pyerfa",
+        "Jinja2",
+    ],
+    "django/django": ["asgiref", "sqlparse", "tblib", "pytz", "typing_extensions"],
+    "matplotlib/matplotlib": ["numpy", "pytest", "cycler", "pyparsing", "python-dateutil"],
+    "mwaskom/seaborn": ["numpy", "pandas", "matplotlib", "pytest"],
+    "pallets/flask": [
+        "pytest", "werkzeug", "click", "jinja2", "itsdangerous", "blinker", "markupsafe",
+    ],
+    "psf/requests": ["pytest"],
+    "pydata/xarray": ["numpy", "pandas", "pytest", "packaging"],
+    "pylint-dev/pylint": ["pytest", "astroid", "isort", "mccabe", "toml", "dill", "platformdirs"],
+    "pytest-dev/pytest": ["iniconfig", "packaging", "pluggy", "exceptiongroup", "tomli", "attrs"],
+    "scikit-learn/scikit-learn": ["numpy", "scipy", "pytest", "joblib", "threadpoolctl"],
+    "sphinx-doc/sphinx": ["pytest", "docutils", "Jinja2", "Pygments"],
+    "sympy/sympy": ["mpmath", "pytest"],
+}
 
-def ensure_python_deps(task: SWETask, python: str, cache_root: Optional[Path] = None) -> str:
-    return ensure_venv(task, python, cache_root)
+
+DOCKER_TESTBED_PYTHON = "/opt/miniconda3/envs/testbed/bin/python"
 
 
-def ensure_venv(task: SWETask, python: str, cache_root: Optional[Path] = None) -> str:
+def swe_eval_image(instance_id: str) -> str:
+    """Official SWE-bench eval image. Docker names cannot contain '__'."""
+    docker_id = str(instance_id).replace("__", "_1776_").lower()
+    return f"swebench/sweb.eval.x86_64.{docker_id}:latest"
+
+
+def swe_eval_group(instance_id: str) -> str:
+    """Repo-level key so shared env layers stay until that repo is finished."""
+    name = str(instance_id)
+    if "__" not in name:
+        return name
+    owner, rest = name.split("__", 1)
+    if "-" in rest:
+        repo, maybe_num = rest.rsplit("-", 1)
+        if maybe_num.isdigit():
+            return f"{owner}__{repo}"
+    return name
+
+
+def docker_available() -> bool:
+    try:
+        result = subprocess.run(
+            ["docker", "info"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+            check=False,
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def ensure_eval_image(instance_id: str, timeout: int = 1800) -> str:
+    """Pull the instance eval image if it is not already local."""
+    image = swe_eval_image(instance_id)
+    inspect = subprocess.run(
+        ["docker", "image", "inspect", image],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if inspect.returncode == 0:
+        return image
+    print(f"pulling {image}", flush=True)
+    subprocess.run(["docker", "pull", image], check=True, timeout=timeout)
+    return image
+
+
+def remove_eval_image(instance_id: str) -> None:
+    """Drop the instance image; parent env layers stay until prune."""
+    if not docker_available():
+        return
+    image = swe_eval_image(instance_id)
+    subprocess.run(
+        ["docker", "rmi", "-f", image],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+        timeout=120,
+    )
+
+
+def prune_unused_eval_layers() -> None:
+    """Delete dangling layers after a repo group no longer needs them."""
+    if not docker_available():
+        return
+    subprocess.run(
+        ["docker", "image", "prune", "-f"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+        timeout=300,
+    )
+
+
+def _docker_container_name(instance_id: str) -> str:
+    token = str(instance_id).replace("__", "-").replace("/", "-").lower()
+    return f"agenttx-eval-{token}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+
+
+def ensure_python_deps(
+    task: SWETask,
+    python: str,
+    cache_root: Optional[Path] = None,
+    instance: Optional[dict] = None,
+) -> str:
+    return ensure_venv(task, python, cache_root, instance)
+
+
+def _venv_key(task: SWETask, instance: Optional[dict]) -> str:
+    if task.instance_id in PYTHON_DEPS:
+        return task.instance_id
+    repo = str((instance or {}).get("repo") or "")
+    version = str((instance or {}).get("version") or "")
+    if repo:
+        return f"{repo.replace('/', '__')}__{version or 'default'}"
+    return "_catalog_pytest"
+
+
+def ensure_venv(
+    task: SWETask,
+    python: str,
+    cache_root: Optional[Path] = None,
+    instance: Optional[dict] = None,
+) -> str:
+    """Per-repo/version interpreter so official tests can import the project."""
     cache_root = Path(cache_root or ROOT_CACHE_HINT)
-    # Full Lite catalogs contain hundreds of instances, but the dynamic
-    # loader deliberately uses the same minimal pytest contract for each one.
-    # Reusing one catalog-level environment avoids 300 duplicate venv/pip
-    # builds while preserving the specialized environments for the three
-    # representative tasks with pinned package sets.
-    env_key = task.instance_id if task.instance_id in PYTHON_DEPS else "_catalog_pytest"
+    instance = instance or {}
+    env_key = _venv_key(task, instance)
     venv = Path(cache_root) / "swe_bench" / "venvs" / env_key
+    py = venv / "bin" / "python"
+    marker = venv / ".agenttx_pkgs"
+    repo = str(instance.get("repo") or "")
+    pkgs = PYTHON_DEPS.get(task.instance_id) or list(REPO_PIP.get(repo) or ["pytest"])
+    wanted = "\n".join(pkgs) + "\n"
+    if py.exists() and marker.exists() and marker.read_text(encoding="utf-8") == wanted:
+        return str(py)
+    venv.parent.mkdir(parents=True, exist_ok=True)
+    if not py.exists():
+        subprocess.run([python, "-m", "venv", str(venv)], check=True)
+    pip = str(venv / "bin" / "pip")
+    subprocess.run([pip, "install", "-q", "--upgrade", "pip"], check=False)
+    subprocess.run([pip, "install", "-q", *pkgs], check=True)
+    marker.write_text(wanted, encoding="utf-8")
+    return str(py)
+
+
+def ensure_workspace_venv(workdir: Path, python: str) -> str:
+    """Interpreter inside the protected workspace so live-agent pip cannot leak.
+
+    Official Docker verify still uses ``DOCKER_TESTBED_PYTHON`` in the SWE-Bench
+    image.  This venv is only for the agent's own test and pip commands, which
+    the commit policy requires to stay under ``workdir``.
+    """
+    workdir = Path(workdir)
+    venv = workdir / ".venv"
     py = venv / "bin" / "python"
     if py.exists():
         return str(py)
-    venv.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run([python, "-m", "venv", str(venv)], check=True)
-    pip = str(venv / "bin" / "pip")
-    pkgs = PYTHON_DEPS.get(task.instance_id) or ["pytest"]
-    subprocess.run([pip, "install", "-q", "--upgrade", "pip"], check=False)
-    subprocess.run([pip, "install", "-q", *pkgs], check=True)
+    subprocess.run(
+        [python, "-m", "venv", "--system-site-packages", str(venv)],
+        check=True,
+    )
     return str(py)
+
+
+def _strip_live_agent_scratch(workdir: Path) -> None:
+    """Drop agent-only dirs so they are not copied into the official eval image."""
+    for name in (".venv", ".codex", ".cache", ".tmp"):
+        path = Path(workdir) / name
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
 
 
 def _urlopen(url: str, timeout: int = 60):
@@ -355,6 +515,9 @@ def ensure_generated_files(workdir: Path) -> None:
             'version = "7.0.0"\nversion_tuple = (7, 0, 0)\n',
             encoding="utf-8",
         )
+    astropy_version = Path(workdir) / "astropy" / "_version.py"
+    if (Path(workdir) / "astropy").is_dir() and not astropy_version.exists():
+        astropy_version.write_text('version = "4.3.0"\n', encoding="utf-8")
 
 
 def fail_to_pass(instance: dict) -> List[str]:
@@ -364,16 +527,79 @@ def fail_to_pass(instance: dict) -> List[str]:
     return list(raw)
 
 
+def django_test_labels(names: Sequence[str], instance: Optional[dict] = None) -> List[str]:
+    """Convert SWE-Bench Django FAIL_TO_PASS ids into runtests.py labels.
+
+    Official Lite ids come in three shapes:
+    - ``test_foo (module.Class)``
+    - ``test_foo (module.Class.test_foo)``  (already fully qualified)
+    - a docstring, which runtests.py treats as a module name and must be skipped
+    """
+    labels: List[str] = []
+    for raw in names:
+        name = str(raw).strip()
+        if " (" in name and name.endswith(")"):
+            method, rest = name.rsplit(" (", 1)
+            path = rest[:-1]
+            if path.endswith("." + method):
+                labels.append(path)
+            else:
+                labels.append(f"{path}.{method}")
+        elif name.startswith("test_") and " " not in name:
+            labels.append(name)
+    if not labels and instance:
+        labels = _django_modules_from_test_patch(str(instance.get("test_patch") or ""))
+    return labels
+
+
+def _django_modules_from_test_patch(patch: str) -> List[str]:
+    modules: List[str] = []
+    for line in patch.splitlines():
+        if line.startswith("+++ b/tests/"):
+            rel = line[len("+++ b/tests/") :].strip()
+            if rel and rel != "/dev/null":
+                modules.append(rel.split("/", 1)[0].replace(".py", ""))
+    return list(dict.fromkeys(modules))
+
+
+def _sympy_test_targets(instance: dict, names: Sequence[str]) -> List[str]:
+    files: List[str] = []
+    for line in str(instance.get("test_patch") or "").splitlines():
+        if line.startswith("+++ b/") and "/tests/" in line:
+            path = line[6:].strip()
+            if path and path != "/dev/null":
+                files.append(path)
+    if files:
+        return list(dict.fromkeys(files))
+    return [str(name) for name in names if str(name).strip()]
+
+
+def _quoted(parts: Sequence[str]) -> str:
+    return " ".join(shlex.quote(str(part)) for part in parts)
+
+
 def test_command(task: SWETask, instance: dict, python: str = sys.executable) -> str:
-    nodes = " ".join(fail_to_pass(instance))
+    """Repo-aware official verifier.  Node ids are always shell-quoted."""
+    repo = str(instance.get("repo") or "")
+    names = fail_to_pass(instance)
+    py = shlex.quote(python)
+    if repo == "django/django":
+        return (
+            f"PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. {py} tests/runtests.py "
+            f"--verbosity 1 --settings=test_sqlite --parallel 1 "
+            f"{_quoted(django_test_labels(names, instance))}"
+        )
+    if repo == "sympy/sympy":
+        return (
+            f"PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. {py} bin/test -C --verbose "
+            f"{_quoted(_sympy_test_targets(instance, names))}"
+        )
     pythonpath = task.pythonpath
     if pythonpath == "auto":
-        # Including both roots is harmless when one is absent and covers the
-        # two layouts used by the Lite repositories without a per-repo table.
-        pythonpath = "src:."
+        pythonpath = "src:." if repo in {"pytest-dev/pytest", "pallets/flask"} else "."
     return (
         f"PYTHONDONTWRITEBYTECODE=1 PYTHONPATH={pythonpath} "
-        f"{python} -m pytest -q {nodes} -p no:cacheprovider"
+        f"{py} -m pytest -q --tb=line -p no:cacheprovider {_quoted(names)}"
     )
 
 
@@ -408,6 +634,15 @@ def inject_task_trajectory(agent, task: SWETask, instance: dict, python: str) ->
         f"cp '{task.faulty_relpath}' recovery_build/derived.txt"
     )
     official = test_command(task, instance, python)
+    # Open the producer with the traced Python so the test step parents the
+    # faulty write even when the official runner never imports that file.
+    read_producer = (
+        f"{shlex.quote(python)} -c "
+        + shlex.quote(
+            "from pathlib import Path; Path(%r).read_text(encoding='utf-8')"
+            % task.faulty_relpath
+        )
+    )
     return inject_recovery_dag(
         agent,
         docs=docs,
@@ -416,11 +651,33 @@ def inject_task_trajectory(agent, task: SWETask, instance: dict, python: str) ->
         faulty_path=task.faulty_relpath,
         faulty_content=_faulty_content(agent.harness.workdir, task.faulty_relpath),
         derived_cmd=derived,
-        test_cmd=f"cat '{task.faulty_relpath}' >/dev/null && {official}",
+        test_cmd=f"{read_producer} && {official}",
     )
 
 
-def task_prompt(task: SWETask, instance: dict, python: str) -> str:
+def task_prompt(
+    task: SWETask,
+    instance: dict,
+    python: str,
+    mode: str = "causal",
+    recovery_manifest: Optional[Mapping[str, object]] = None,
+) -> str:
+    if recovery_manifest is not None:
+        note_rule = (
+            "Do not write logs or build artifacts under /tmp; keep them inside the workspace. "
+            "The machine-generated AgentTX recovery state is authoritative for recovery artifacts."
+        )
+    elif mode == "causal":
+        note_rule = (
+            "Do not write logs or build artifacts under /tmp; keep them inside the workspace. "
+            "Independent recovery notes were retained; do not open or rewrite them."
+        )
+    else:
+        note_rule = (
+            "Do not write logs or build artifacts under /tmp; keep them inside the workspace. "
+            "If a recovery note is missing, create it with lines after the title starting exactly "
+            "DESIGN-001: / CHANGE-001: and no '1. ' numbering prefix. If it already exists, do not open or rewrite it."
+        )
     return recovery_prompt(
         title=task.instance_id,
         context=(
@@ -432,7 +689,11 @@ def task_prompt(task: SWETask, instance: dict, python: str) -> str:
         test_cmd=test_command(task, instance, python),
         extra_rules=(
             "Do not apply a hidden gold patch file; implement the issue in the repository sources.",
+            "Use only the interpreter in the verifier command for tests and pip installs. Do not pip-install into a host conda or system Python.",
+            note_rule,
         ),
+        mode=mode,
+        recovery_manifest=recovery_manifest,
     )
 
 
@@ -451,12 +712,10 @@ def apply_oracle(agent, instance: dict) -> None:
     agent.harness.call_tool("delete_file", {"path": ".agenttx_oracle.diff"})
 
 
-def verify(workdir: Path, task: SWETask, instance: dict, python: str) -> dict:
+def _verify_tests_host(workdir: Path, task: SWETask, instance: dict, python: str) -> dict:
     cmd = test_command(task, instance, python)
-    pythonpath = task.pythonpath
-    if pythonpath == "auto":
-        pythonpath = "src:."
-    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": pythonpath}
+    env = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     result = subprocess.run(
         cmd,
         cwd=str(workdir),
@@ -468,13 +727,122 @@ def verify(workdir: Path, task: SWETask, instance: dict, python: str) -> dict:
         timeout=300,
         check=False,
     )
-    docs_ok = all_documents_valid(workdir, task.docs())
-    derived_removed = not (Path(workdir) / "recovery_build" / "derived.txt").exists()
     return {
         "tests_rc": result.returncode,
         "tests_ok": result.returncode == 0,
-        "documents_valid": docs_ok,
-        "derived_removed": derived_removed,
         "verifier_stdout": (result.stdout or "")[-2000:],
         "verifier_stderr": (result.stderr or "")[-2000:],
+        "verifier_backend": "host",
     }
+
+
+def _verify_tests_docker(workdir: Path, task: SWETask, instance: dict) -> dict:
+    """Run FAIL_TO_PASS in the official eval image, overlaying the AgentTX workdir.
+
+    Compiled extensions stay in the image; ``docker cp`` only overwrites files
+    present in the host tree, so ``.so`` artifacts are kept.
+    """
+    image = ensure_eval_image(task.instance_id)
+    name = _docker_container_name(task.instance_id)
+    cmd = test_command(task, instance, DOCKER_TESTBED_PYTHON)
+    _strip_live_agent_scratch(workdir)
+    try:
+        subprocess.run(
+            ["docker", "rm", "-f", name],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        created = subprocess.run(
+            [
+                "docker",
+                "create",
+                "--name",
+                name,
+                "--workdir",
+                "/testbed",
+                "--entrypoint",
+                "bash",
+                image,
+                "-lc",
+                "sleep infinity",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if created.returncode != 0:
+            raise RuntimeError((created.stderr or created.stdout or "docker create failed")[-2000:])
+        started = subprocess.run(
+            ["docker", "start", name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if started.returncode != 0:
+            raise RuntimeError((started.stderr or started.stdout or "docker start failed")[-2000:])
+        copied = subprocess.run(
+            ["docker", "cp", f"{workdir}/.", f"{name}:/testbed/"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if copied.returncode != 0:
+            raise RuntimeError((copied.stderr or copied.stdout or "docker cp failed")[-2000:])
+        result = subprocess.run(
+            ["docker", "exec", "-w", "/testbed", name, "bash", "-lc", cmd],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=600,
+            check=False,
+        )
+        return {
+            "tests_rc": result.returncode,
+            "tests_ok": result.returncode == 0,
+            "verifier_stdout": (result.stdout or "")[-2000:],
+            "verifier_stderr": (result.stderr or "")[-2000:],
+            "verifier_backend": "docker",
+            "docker_image": image,
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "tests_rc": "timeout",
+            "tests_ok": False,
+            "verifier_stdout": "",
+            "verifier_stderr": "docker eval timed out",
+            "verifier_backend": "docker",
+            "docker_image": image,
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "tests_rc": "error",
+            "tests_ok": False,
+            "verifier_stdout": "",
+            "verifier_stderr": str(exc)[-2000:],
+            "verifier_backend": "docker",
+            "docker_image": image,
+        }
+    finally:
+        subprocess.run(
+            ["docker", "rm", "-f", name],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+
+
+def verify(workdir: Path, task: SWETask, instance: dict, python: str) -> dict:
+    mode = (os.environ.get("AGENTTX_SWE_VERIFY") or "auto").strip().lower()
+    if mode == "docker" or (mode == "auto" and docker_available()):
+        tests = _verify_tests_docker(workdir, task, instance)
+    else:
+        tests = _verify_tests_host(workdir, task, instance, python)
+    docs_ok = all_documents_valid(workdir, task.docs())
+    derived_removed = not (Path(workdir) / "recovery_build" / "derived.txt").exists()
+    tests["documents_valid"] = docs_ok
+    tests["derived_removed"] = derived_removed
+    return tests

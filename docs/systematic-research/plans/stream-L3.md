@@ -77,9 +77,10 @@ all sample counts and claim boundaries.
 ## LaTeX and visual QA
 
 - `latexmk` completes with no undefined references or citations.
-- Output is US Letter, eleven pages including references; the main text ends on
-  page 10.
-- Evaluation pages 6--9 were rendered to PNG and inspected after the rewrite.
+- Output is US Letter, twelve pages including references; the main text ends on
+  page 11.
+- Overview/design pages 4--6 and evaluation pages 7--10 were rendered to PNG
+  and inspected after the structure update.
 - No text, table, equation, caption, footer, or figure is clipped or overlapped.
 - Only cosmetic underfull-box warnings remain; no overfull box is reported.
 

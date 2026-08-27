@@ -16,6 +16,13 @@ IGNORE_COMMIT_GLOBS = (
     "*.pyo",
     "*/.pytest_cache/*",
     "*/.git/*",
+    "*/.agenttx",
+    "*/.agenttx/*",
+    "*/var/cache/fontconfig/*",
+    "*/.fontconfig/*",
+    "/tmp/build.log",
+    "/tmp/*.log",
+    "*/build.log",
 )
 
 DEFAULT_DENY = (
@@ -53,6 +60,10 @@ class CommitPolicy:
     def __post_init__(self) -> None:
         self.workdir = Path(self.workdir).resolve()
 
+    def is_ignored(self, path: str) -> bool:
+        """Ephemeral tooling artifacts are recorded but never materialized."""
+        return self._match(path, IGNORE_COMMIT_GLOBS)
+
     def _match(self, path: str, patterns: Iterable[str]) -> bool:
         p = path
         for pat in patterns:
@@ -83,7 +94,7 @@ class CommitPolicy:
         out: List[PolicyDecision] = []
         for e in effects:
             if e.kind in (EffectKind.WRITE, EffectKind.DELETE):
-                if self._match(e.path, IGNORE_COMMIT_GLOBS):
+                if self.is_ignored(e.path):
                     continue  # ephemeral tooling artifacts
                 out.append(self.check_path(e.path))
         return out

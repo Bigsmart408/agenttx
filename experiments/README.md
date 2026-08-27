@@ -4,9 +4,23 @@ The paper's application evaluation uses only SWE-Bench Lite and Terminal-Bench.
 Mechanism microbenchmarks (isolation scaling, causal DAGs, coverage, WAL) remain
 available below but are not additional application workloads.
 
+The measurement is the same as the original recovery and token experiments:
+inject a faulty producer, independent notes, a derived artifact, and a failing
+official test; compare `causal`, `temporal_checkpoint`, and
+`whole_branch_abort`; succeed only when the official verifier passes **and**
+the independent notes remain.  `bare` / per-call `try` / session `try` stay in
+the isolation-cost benches below.  A process SIGKILL is not the application
+fault model.
+
+Keep two grouping axes.  Official labels stay unmodified: SWE-Bench Lite by
+`repo`, Terminal-Bench by `task.yaml` `difficulty` (easy/medium/hard) and
+`category`.  AgentTX `short`/`medium`/`long` is only a length-budget line for
+injected note size and max-turns; do not report it as the benchmark's own
+difficulty.
+
 The default model tiers are fixed for this round: DeepSeek Harness runs
-`deepseek-v4-flash`, and Codex runs `gpt-5.6-luna`.  Motivation and evaluation
-invoke the same six official task manifests; the recovery DAG is only a
+`deepseek-v4-flash`, and Codex runs `gpt-5.6-luna`.  Motivation and evaluation use the full official catalogs (SWE-Bench Lite
+and Terminal-Bench original-tasks); the recovery DAG is only a
 controlled fault overlay used to compare rollback policies.  The compatibility
 names `bench_token_recovery.py`, `bench_token_end_to_end.py`, and the scripts
 under `motivation/` dispatch to this runner and no longer create the old

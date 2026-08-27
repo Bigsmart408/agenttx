@@ -1,0 +1,197 @@
+suite,task,scale,difficulty,category,version,official_group,repo,commit,mode,repeat,oracle,provider,model,harness_backend,execution_boundary,trace_backend,wall_s,recovery_wall_s,prompt_tokens,completion_tokens,total_tokens,tool_calls,usage_source,model_calls,harness_returncode,harness_stdout,harness_stderr,recovery_ledger_steps,rollback_targets,regenerated_paths,independent_retained,independent_unchanged,documents_valid,derived_removed,host_leak_before_commit,tests_rc,tests_ok,finished,finish_called,committed,success,injected,error,verifier_stdout,verifier_stderr
+swe,astropy__astropy-12907,medium,,astropy/astropy,4.3,astropy/astropy,astropy/astropy,d16bfe05a744909de4b27f5875fe0d4ed41ce607,causal,0,True,oracle,oracle,oracle,oracle,strace,40.691012,29.068383,0,0,0,0,oracle,0,0,,,3,"[0, 3, 4]","[""tmp/agenttx-swe-astropy__astropy-12907-causal-0-mtp9ylwt/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-astropy__astropy-12907-causal-0-mtp9ylwt/repo/astropy"", ""tmp/agenttx-swe-astropy__astropy-12907-causal-0-mtp9ylwt/repo/astropy/modeling"", ""tmp/agenttx-swe-astropy__astropy-12907-causal-0-mtp9ylwt/repo/astropy/modeling/separable.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1, 2], ""derived_step"": 3, ""test_run_step"": 4, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Internet access disabled
+..                                                                       [100%]
+2 passed in 0.32s
+","<frozen importlib._bootstrap>:228: RuntimeWarning: numpy.ndarray size changed, may indicate binary incompatibility. Expected 80 from C header, got 96 from PyObject
+"
+swe,astropy__astropy-14182,medium,,astropy/astropy,5.1,astropy/astropy,astropy/astropy,a5917978be39d13cd90b517e1de4e7a539ffaa48,causal,0,True,oracle,oracle,oracle,oracle,strace,21.558977,10.478201,0,0,0,0,oracle,0,0,,,3,"[0, 3, 4]","[""tmp/agenttx-swe-astropy__astropy-14182-causal-0-splislu4/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-astropy__astropy-14182-causal-0-splislu4/repo/astropy"", ""tmp/agenttx-swe-astropy__astropy-14182-causal-0-splislu4/repo/astropy/io"", ""tmp/agenttx-swe-astropy__astropy-14182-causal-0-splislu4/repo/astropy/io/ascii"", ""tmp/agenttx-swe-astropy__astropy-14182-causal-0-splislu4/repo/astropy/io/ascii/rst.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1, 2], ""derived_step"": 3, ""test_run_step"": 4, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Internet access disabled
+[32m.[0m[32m                                                                        [100%][0m
+[32m[32m[1m1 passed[0m[32m in 0.02s[0m[0m
+","<frozen importlib._bootstrap>:228: RuntimeWarning: numpy.ndarray size changed, may indicate binary incompatibility. Expected 80 from C header, got 96 from PyObject
+"
+swe,astropy__astropy-14365,short,,astropy/astropy,5.1,astropy/astropy,astropy/astropy,7269fa3e33e8d02485a647da91a5a2a60a06af61,causal,0,True,oracle,oracle,oracle,oracle,strace,36.578523,26.927236,0,0,0,0,oracle,0,0,,,3,"[0, 2, 3]","[""tmp/agenttx-swe-astropy__astropy-14365-causal-0-s4q3te_a/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-astropy__astropy-14365-causal-0-s4q3te_a/repo/astropy"", ""tmp/agenttx-swe-astropy__astropy-14365-causal-0-s4q3te_a/repo/astropy/io"", ""tmp/agenttx-swe-astropy__astropy-14365-causal-0-s4q3te_a/repo/astropy/io/ascii"", ""tmp/agenttx-swe-astropy__astropy-14365-causal-0-s4q3te_a/repo/astropy/io/ascii/qdp.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1], ""derived_step"": 2, ""test_run_step"": 3, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Internet access disabled
+[32m.[0m[32m                                                                        [100%][0m
+[32m[32m[1m1 passed[0m[32m in 0.03s[0m[0m
+","<frozen importlib._bootstrap>:228: RuntimeWarning: numpy.ndarray size changed, may indicate binary incompatibility. Expected 80 from C header, got 96 from PyObject
+"
+swe,astropy__astropy-14995,medium,,astropy/astropy,5.2,astropy/astropy,astropy/astropy,b16c7d12ccbc7b2d20364b89fb44285bcbfede54,causal,0,True,oracle,oracle,oracle,oracle,strace,30.456906,18.909027,0,0,0,0,oracle,0,0,,,3,"[0, 3, 4]","[""tmp/agenttx-swe-astropy__astropy-14995-causal-0-yhihu38b/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-astropy__astropy-14995-causal-0-yhihu38b/repo/astropy"", ""tmp/agenttx-swe-astropy__astropy-14995-causal-0-yhihu38b/repo/astropy/nddata"", ""tmp/agenttx-swe-astropy__astropy-14995-causal-0-yhihu38b/repo/astropy/nddata/mixins"", ""tmp/agenttx-swe-astropy__astropy-14995-causal-0-yhihu38b/repo/astropy/nddata/mixins/ndarithmetic.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1, 2], ""derived_step"": 3, ""test_run_step"": 4, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Internet access disabled
+[32m.[0m[32m                                                                        [100%][0m
+[32m[32m[1m1 passed[0m[32m in 0.32s[0m[0m
+","<frozen importlib._bootstrap>:228: RuntimeWarning: numpy.ndarray size changed, may indicate binary incompatibility. Expected 80 from C header, got 96 from PyObject
+"
+swe,astropy__astropy-6938,short,,astropy/astropy,1.3,astropy/astropy,astropy/astropy,c76af9ed6bb89bfba45b9f5bc1e635188278e2fa,causal,0,True,oracle,oracle,oracle,oracle,strace,44.855551,34.027746,0,0,0,0,oracle,0,0,,,3,"[0, 2, 3]","[""tmp/agenttx-swe-astropy__astropy-6938-causal-0-ng9hdom3/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-astropy__astropy-6938-causal-0-ng9hdom3/repo/astropy"", ""tmp/agenttx-swe-astropy__astropy-6938-causal-0-ng9hdom3/repo/astropy/io"", ""tmp/agenttx-swe-astropy__astropy-6938-causal-0-ng9hdom3/repo/astropy/io/fits"", ""tmp/agenttx-swe-astropy__astropy-6938-causal-0-ng9hdom3/repo/astropy/io/fits/fitsrec.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1], ""derived_step"": 2, ""test_run_step"": 3, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"..                                                                       [100%]
+=============================== warnings summary ===============================
+None
+  Module already imported so cannot be rewritten: astropy.tests.plugins.display
+
+-- Docs: http://doc.pytest.org/en/latest/warnings.html
+2 passed, 1 warnings in 0.81 seconds
+",
+swe,astropy__astropy-7746,medium,,astropy/astropy,1.3,astropy/astropy,astropy/astropy,d5bd3f68bb6d5ce3a61bdce9883ee750d1afade5,causal,0,True,oracle,oracle,oracle,oracle,strace,46.046528,33.574874,0,0,0,0,oracle,0,0,,,3,"[0, 3, 4]","[""tmp/agenttx-swe-astropy__astropy-7746-causal-0-agw48780/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-astropy__astropy-7746-causal-0-agw48780/repo/astropy"", ""tmp/agenttx-swe-astropy__astropy-7746-causal-0-agw48780/repo/astropy/wcs"", ""tmp/agenttx-swe-astropy__astropy-7746-causal-0-agw48780/repo/astropy/wcs/wcs.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1, 2], ""derived_step"": 3, ""test_run_step"": 4, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,".                                                                        [100%]
+=============================== warnings summary ===============================
+None
+  Module already imported so cannot be rewritten: astropy.tests.plugins.display
+
+-- Docs: http://doc.pytest.org/en/latest/warnings.html
+1 passed, 1 warnings in 0.21 seconds
+",
+swe,django__django-10914,short,,django/django,3.0,django/django,django/django,e7fd69d051eaa67cb17f172a39b57253e9cb831a,causal,0,True,oracle,oracle,oracle,oracle,strace,22.107412,12.141563,0,0,0,0,oracle,0,0,,,3,"[0, 2, 3]","[""tmp/agenttx-swe-django__django-10914-causal-0-uu14_vgc/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-django__django-10914-causal-0-uu14_vgc/repo/django"", ""tmp/agenttx-swe-django__django-10914-causal-0-uu14_vgc/repo/django/conf"", ""tmp/agenttx-swe-django__django-10914-causal-0-uu14_vgc/repo/django/conf/global_settings.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1], ""derived_step"": 2, ""test_run_step"": 3, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Testing against Django installed in '/testbed/django'
+System check identified no issues (0 silenced).
+",".
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+OK
+"
+swe,django__django-10924,short,,django/django,3.0,django/django,django/django,bceadd2788dc2dad53eba0caae172bd8522fd483,causal,0,True,oracle,oracle,oracle,oracle,strace,48.598617,38.663681,0,0,0,0,oracle,0,0,,,3,"[0, 2, 3]","[""tmp/agenttx-swe-django__django-10924-causal-0-b_44rjra/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-django__django-10924-causal-0-b_44rjra/repo/django"", ""tmp/agenttx-swe-django__django-10924-causal-0-b_44rjra/repo/django/db"", ""tmp/agenttx-swe-django__django-10924-causal-0-b_44rjra/repo/django/db/models"", ""tmp/agenttx-swe-django__django-10924-causal-0-b_44rjra/repo/django/db/models/fields"", ""tmp/agenttx-swe-django__django-10924-causal-0-b_44rjra/repo/django/db/models/fields/__init__.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1], ""derived_step"": 2, ""test_run_step"": 3, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Testing against Django installed in '/testbed/django'
+System check identified no issues (0 silenced).
+",".
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+OK
+"
+swe,django__django-11001,medium,,django/django,3.0,django/django,django/django,ef082ebb84f00e38af4e8880d04e8365c2766d34,causal,0,True,oracle,oracle,oracle,oracle,strace,94.686373,83.175864,0,0,0,0,oracle,0,0,,,3,"[0, 3, 4]","[""tmp/agenttx-swe-django__django-11001-causal-0-84jvwit0/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-django__django-11001-causal-0-84jvwit0/repo/django"", ""tmp/agenttx-swe-django__django-11001-causal-0-84jvwit0/repo/django/db"", ""tmp/agenttx-swe-django__django-11001-causal-0-84jvwit0/repo/django/db/models"", ""tmp/agenttx-swe-django__django-11001-causal-0-84jvwit0/repo/django/db/models/sql"", ""tmp/agenttx-swe-django__django-11001-causal-0-84jvwit0/repo/django/db/models/sql/compiler.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1, 2], ""derived_step"": 3, ""test_run_step"": 4, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Testing against Django installed in '/testbed/django'
+System check identified no issues (0 silenced).
+","Creating test database for alias 'default'...
+..
+----------------------------------------------------------------------
+Ran 2 tests in 0.004s
+
+OK
+Destroying test database for alias 'default'...
+"
+swe,django__django-11019,long,,django/django,3.0,django/django,django/django,93e892bb645b16ebaf287beb5fe7f3ffe8d10408,causal,0,True,oracle,oracle,oracle,oracle,strace,49.369783,35.9696,0,0,0,0,oracle,0,0,,,3,"[0, 4, 5]","[""tmp/agenttx-swe-django__django-11019-causal-0-1bd2yrds/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-django__django-11019-causal-0-1bd2yrds/repo/django"", ""tmp/agenttx-swe-django__django-11019-causal-0-1bd2yrds/repo/django/forms"", ""tmp/agenttx-swe-django__django-11019-causal-0-1bd2yrds/repo/django/forms/widgets.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1, 2, 3], ""derived_step"": 4, ""test_run_step"": 5, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Testing against Django installed in '/testbed/django'
+System check identified no issues (0 silenced).
+","Creating test database for alias 'default'...
+................
+----------------------------------------------------------------------
+Ran 16 tests in 0.156s
+
+OK
+Destroying test database for alias 'default'...
+"
+swe,django__django-11039,short,,django/django,3.0,django/django,django/django,d5276398046ce4a102776a1e67dcac2884d80dfe,causal,0,True,oracle,oracle,oracle,oracle,strace,47.309772,37.459121,0,0,0,0,oracle,0,0,,,3,"[0, 2, 3]","[""tmp/agenttx-swe-django__django-11039-causal-0-h8jcnntm/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-django__django-11039-causal-0-h8jcnntm/repo/django"", ""tmp/agenttx-swe-django__django-11039-causal-0-h8jcnntm/repo/django/core"", ""tmp/agenttx-swe-django__django-11039-causal-0-h8jcnntm/repo/django/core/management"", ""tmp/agenttx-swe-django__django-11039-causal-0-h8jcnntm/repo/django/core/management/commands"", ""tmp/agenttx-swe-django__django-11039-causal-0-h8jcnntm/repo/django/core/management/commands/sqlmigrate.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1], ""derived_step"": 2, ""test_run_step"": 3, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Testing against Django installed in '/testbed/django'
+System check identified no issues (0 silenced).
+","Creating test database for alias 'default'...
+Creating test database for alias 'other'...
+.
+----------------------------------------------------------------------
+Ran 1 test in 0.010s
+
+OK
+Destroying test database for alias 'default'...
+Destroying test database for alias 'other'...
+"
+swe,django__django-11049,short,,django/django,3.0,django/django,django/django,17455e924e243e7a55e8a38f45966d8cbb27c273,causal,0,True,oracle,oracle,oracle,oracle,strace,49.118927,38.28166,0,0,0,0,oracle,0,0,,,3,"[0, 2, 3]","[""tmp/agenttx-swe-django__django-11049-causal-0-cuvmg088/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-django__django-11049-causal-0-cuvmg088/repo/django"", ""tmp/agenttx-swe-django__django-11049-causal-0-cuvmg088/repo/django/db"", ""tmp/agenttx-swe-django__django-11049-causal-0-cuvmg088/repo/django/db/models"", ""tmp/agenttx-swe-django__django-11049-causal-0-cuvmg088/repo/django/db/models/fields"", ""tmp/agenttx-swe-django__django-11049-causal-0-cuvmg088/repo/django/db/models/fields/__init__.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1], ""derived_step"": 2, ""test_run_step"": 3, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Testing against Django installed in '/testbed/django'
+System check identified no issues (0 silenced).
+",".
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+OK
+"
+swe,django__django-11099,short,,django/django,3.0,django/django,django/django,d26b2424437dabeeca94d7900b37d2df4410da0c,causal,0,True,oracle,oracle,oracle,oracle,strace,97.706703,86.848821,0,0,0,0,oracle,0,0,,,3,"[0, 2, 3]","[""tmp/agenttx-swe-django__django-11099-causal-0-2j7st8gd/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-django__django-11099-causal-0-2j7st8gd/repo/django"", ""tmp/agenttx-swe-django__django-11099-causal-0-2j7st8gd/repo/django/contrib"", ""tmp/agenttx-swe-django__django-11099-causal-0-2j7st8gd/repo/django/contrib/auth"", ""tmp/agenttx-swe-django__django-11099-causal-0-2j7st8gd/repo/django/contrib/auth/validators.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1], ""derived_step"": 2, ""test_run_step"": 3, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Testing against Django installed in '/testbed/django'
+System check identified no issues (0 silenced).
+","Creating test database for alias 'default'...
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.001s
+
+OK
+Destroying test database for alias 'default'...
+"
+swe,django__django-11133,short,,django/django,3.0,django/django,django/django,879cc3da6249e920b8d54518a0ae06de835d7373,causal,0,True,oracle,oracle,oracle,oracle,strace,46.804332,35.830127,0,0,0,0,oracle,0,0,,,3,"[0, 2, 3]","[""tmp/agenttx-swe-django__django-11133-causal-0-1as6nw7z/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-django__django-11133-causal-0-1as6nw7z/repo/django"", ""tmp/agenttx-swe-django__django-11133-causal-0-1as6nw7z/repo/django/http"", ""tmp/agenttx-swe-django__django-11133-causal-0-1as6nw7z/repo/django/http/response.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1], ""derived_step"": 2, ""test_run_step"": 3, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Testing against Django installed in '/testbed/django'
+System check identified no issues (0 silenced).
+",".
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+OK
+"
+swe,django__django-11179,short,,django/django,3.0,django/django,django/django,19fc6376ce67d01ca37a91ef2f55ef769f50513a,causal,0,True,oracle,oracle,oracle,oracle,strace,87.741521,76.877228,0,0,0,0,oracle,0,0,,,3,"[0, 2, 3]","[""tmp/agenttx-swe-django__django-11179-causal-0-pogj2juv/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-django__django-11179-causal-0-pogj2juv/repo/django"", ""tmp/agenttx-swe-django__django-11179-causal-0-pogj2juv/repo/django/db"", ""tmp/agenttx-swe-django__django-11179-causal-0-pogj2juv/repo/django/db/models"", ""tmp/agenttx-swe-django__django-11179-causal-0-pogj2juv/repo/django/db/models/deletion.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1], ""derived_step"": 2, ""test_run_step"": 3, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Testing against Django installed in '/testbed/django'
+System check identified no issues (0 silenced).
+","Creating test database for alias 'default'...
+.
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK
+Destroying test database for alias 'default'...
+"
+swe,django__django-11283,short,,django/django,3.0,django/django,django/django,08a4ee06510ae45562c228eefbdcaac84bd38c7a,causal,0,True,oracle,oracle,oracle,oracle,strace,83.542184,72.768954,0,0,0,0,oracle,0,0,,,3,"[0, 2, 3]","[""tmp/agenttx-swe-django__django-11283-causal-0-madprnll/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-django__django-11283-causal-0-madprnll/repo/django"", ""tmp/agenttx-swe-django__django-11283-causal-0-madprnll/repo/django/contrib"", ""tmp/agenttx-swe-django__django-11283-causal-0-madprnll/repo/django/contrib/auth"", ""tmp/agenttx-swe-django__django-11283-causal-0-madprnll/repo/django/contrib/auth/migrations"", ""tmp/agenttx-swe-django__django-11283-causal-0-madprnll/repo/django/contrib/auth/migrations/0011_update_proxy_permissions.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1], ""derived_step"": 2, ""test_run_step"": 3, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Testing against Django installed in '/testbed/django'
+System check identified no issues (0 silenced).
+","Creating test database for alias 'default'...
+.
+----------------------------------------------------------------------
+Ran 1 test in 0.025s
+
+OK
+Destroying test database for alias 'default'...
+"
+swe,django__django-11422,short,,django/django,3.0,django/django,django/django,df46b329e0900e9e4dc1d60816c1dce6dfc1094e,causal,0,True,oracle,oracle,oracle,oracle,strace,87.666925,76.800645,0,0,0,0,oracle,0,0,,,3,"[0, 2, 3]","[""tmp/agenttx-swe-django__django-11422-causal-0-i_tnonmr/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-django__django-11422-causal-0-i_tnonmr/repo/django"", ""tmp/agenttx-swe-django__django-11422-causal-0-i_tnonmr/repo/django/utils"", ""tmp/agenttx-swe-django__django-11422-causal-0-i_tnonmr/repo/django/utils/autoreload.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1], ""derived_step"": 2, ""test_run_step"": 3, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Testing against Django installed in '/testbed/django'
+System check identified no issues (0 silenced).
+",".
+----------------------------------------------------------------------
+Ran 1 test in 0.027s
+
+OK
+"
+swe,django__django-11564,short,,django/django,3.1,django/django,django/django,580e644f24f1c5ae5b94784fb73a9953a178fd26,causal,0,True,oracle,oracle,oracle,oracle,strace,106.836432,96.166634,0,0,0,0,oracle,0,0,,,3,"[0, 2, 3]","[""tmp/agenttx-swe-django__django-11564-causal-0-k25fsg95/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-django__django-11564-causal-0-k25fsg95/repo/django"", ""tmp/agenttx-swe-django__django-11564-causal-0-k25fsg95/repo/django/conf"", ""tmp/agenttx-swe-django__django-11564-causal-0-k25fsg95/repo/django/conf/__init__.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1], ""derived_step"": 2, ""test_run_step"": 3, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Testing against Django installed in '/testbed/django'
+System check identified no issues (0 silenced).
+","..
+----------------------------------------------------------------------
+Ran 2 tests in 0.083s
+
+OK
+"
+swe,django__django-11583,long,,django/django,3.0,django/django,django/django,60dc957a825232fdda9138e2f8878b2ca407a7c9,causal,0,True,oracle,oracle,oracle,oracle,strace,108.946775,94.55975,0,0,0,0,oracle,0,0,,,3,"[0, 4, 5]","[""tmp/agenttx-swe-django__django-11583-causal-0-9vfy1fe4/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-django__django-11583-causal-0-9vfy1fe4/repo/django"", ""tmp/agenttx-swe-django__django-11583-causal-0-9vfy1fe4/repo/django/utils"", ""tmp/agenttx-swe-django__django-11583-causal-0-9vfy1fe4/repo/django/utils/autoreload.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1, 2, 3], ""derived_step"": 4, ""test_run_step"": 5, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Testing against Django installed in '/testbed/django'
+System check identified no issues (0 silenced).
+","..
+----------------------------------------------------------------------
+Ran 2 tests in 0.024s
+
+OK
+"
+swe,django__django-11620,short,,django/django,3.0,django/django,django/django,514efa3129792ec2abb2444f3e7aeb3f21a38386,causal,0,True,oracle,oracle,oracle,oracle,strace,87.513421,76.354422,0,0,0,0,oracle,0,0,,,3,"[0, 2, 3]","[""tmp/agenttx-swe-django__django-11620-causal-0-hzauga1j/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-django__django-11620-causal-0-hzauga1j/repo/django"", ""tmp/agenttx-swe-django__django-11620-causal-0-hzauga1j/repo/django/views"", ""tmp/agenttx-swe-django__django-11620-causal-0-hzauga1j/repo/django/views/debug.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1], ""derived_step"": 2, ""test_run_step"": 3, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Testing against Django installed in '/testbed/django'
+System check identified no issues (0 silenced).
+",".
+----------------------------------------------------------------------
+Ran 1 test in 0.011s
+
+OK
+"
+swe,django__django-11630,short,,django/django,3.0,django/django,django/django,65e86948b80262574058a94ccaae3a9b59c3faea,causal,0,True,oracle,oracle,oracle,oracle,strace,107.051725,96.047192,0,0,0,0,oracle,0,0,,,3,"[0, 2, 3]","[""tmp/agenttx-swe-django__django-11630-causal-0-115l4ti5/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-django__django-11630-causal-0-115l4ti5/repo/django"", ""tmp/agenttx-swe-django__django-11630-causal-0-115l4ti5/repo/django/core"", ""tmp/agenttx-swe-django__django-11630-causal-0-115l4ti5/repo/django/core/checks"", ""tmp/agenttx-swe-django__django-11630-causal-0-115l4ti5/repo/django/core/checks/model_checks.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1], ""derived_step"": 2, ""test_run_step"": 3, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Testing against Django installed in '/testbed/django'
+System check identified no issues (0 silenced).
+","..
+----------------------------------------------------------------------
+Ran 2 tests in 0.009s
+
+OK
+"
+swe,django__django-11742,short,,django/django,3.0,django/django,django/django,fee75d2aed4e58ada6567c464cfd22e89dc65f4a,causal,0,True,oracle,oracle,oracle,oracle,strace,106.62137,95.832531,0,0,0,0,oracle,0,0,,,3,"[0, 2, 3]","[""tmp/agenttx-swe-django__django-11742-causal-0-tgbkkbcz/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-django__django-11742-causal-0-tgbkkbcz/repo/django"", ""tmp/agenttx-swe-django__django-11742-causal-0-tgbkkbcz/repo/django/db"", ""tmp/agenttx-swe-django__django-11742-causal-0-tgbkkbcz/repo/django/db/models"", ""tmp/agenttx-swe-django__django-11742-causal-0-tgbkkbcz/repo/django/db/models/fields"", ""tmp/agenttx-swe-django__django-11742-causal-0-tgbkkbcz/repo/django/db/models/fields/__init__.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1], ""derived_step"": 2, ""test_run_step"": 3, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Testing against Django installed in '/testbed/django'
+System check identified no issues (0 silenced).
+","..
+----------------------------------------------------------------------
+Ran 2 tests in 0.001s
+
+OK
+"
+swe,django__django-11797,short,,django/django,3.1,django/django,django/django,3346b78a8a872286a245d1e77ef4718fc5e6be1a,causal,0,True,oracle,oracle,oracle,oracle,strace,108.084782,97.010314,0,0,0,0,oracle,0,0,,,3,"[0, 2, 3]","[""tmp/agenttx-swe-django__django-11797-causal-0-18_u6uun/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-django__django-11797-causal-0-18_u6uun/repo/django"", ""tmp/agenttx-swe-django__django-11797-causal-0-18_u6uun/repo/django/db"", ""tmp/agenttx-swe-django__django-11797-causal-0-18_u6uun/repo/django/db/models"", ""tmp/agenttx-swe-django__django-11797-causal-0-18_u6uun/repo/django/db/models/lookups.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1], ""derived_step"": 2, ""test_run_step"": 3, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Testing against Django installed in '/testbed/django'
+System check identified no issues (0 silenced).
+","Creating test database for alias 'default'...
+.
+----------------------------------------------------------------------
+Ran 1 test in 0.006s
+
+OK
+Destroying test database for alias 'default'...
+"
+swe,django__django-11815,medium,,django/django,3.1,django/django,django/django,e02f67ef2d03d48128e7a118bf75f0418e24e8ac,causal,0,True,oracle,oracle,oracle,oracle,strace,110.772826,98.418469,0,0,0,0,oracle,0,0,,,3,"[0, 3, 4]","[""tmp/agenttx-swe-django__django-11815-causal-0-7g6p1yx1/repo/.agenttx_oracle.diff"", ""tmp/agenttx-swe-django__django-11815-causal-0-7g6p1yx1/repo/django"", ""tmp/agenttx-swe-django__django-11815-causal-0-7g6p1yx1/repo/django/db"", ""tmp/agenttx-swe-django__django-11815-causal-0-7g6p1yx1/repo/django/db/migrations"", ""tmp/agenttx-swe-django__django-11815-causal-0-7g6p1yx1/repo/django/db/migrations/serializer.py""]",True,False,True,True,False,0,True,True,True,True,True,"{""prefix_steps"": [], ""root_step"": 0, ""independent_steps"": [1, 2], ""derived_step"": 3, ""test_run_step"": 4, ""root_is_parent_of_derived"": true, ""root_is_parent_of_tests"": true, ""independent_is_parent_of_derived"": false, ""tests_failed"": true}",,"Testing against Django installed in '/testbed/django'
+System check identified no issues (0 silenced).
+","..
+----------------------------------------------------------------------
+Ran 2 tests in 0.003s
+
+OK
+"

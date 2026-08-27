@@ -450,6 +450,10 @@ class AgentTX:
             target = selected if step.step_id <= up_to else later
             for effect in step.effects:
                 if effect.kind in (EffectKind.WRITE, EffectKind.DELETE):
+                    if self.commit_policy is not None and self.commit_policy.is_ignored(
+                        effect.path
+                    ):
+                        continue
                     target.add(effect.path)
 
         # A path-only frontier is unsound for an existing hard-link group:

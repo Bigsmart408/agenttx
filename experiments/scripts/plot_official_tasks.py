@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""FAST/USENIX-style figure for SWE-Bench + Terminal-Bench recovery."""
+"""FAST/USENIX-style figure for SWE-Bench + Terminal-Bench recovery.
+
+X axis is the official grouping (SWE repo, Terminal-Bench difficulty),
+not AgentTX short/medium/long length budgets.
+"""
 
 from __future__ import annotations
 
+import argparse
 import csv
 from collections import defaultdict
 from pathlib import Path
@@ -21,14 +26,10 @@ STANDARD_WIDTH = 17.8  # cm
 RED = "#c00000"
 ORANGE = "#e78129"
 BLACK = "#000000"
-BLUE = "#2f5496"
-GRAY = "#7f7f7f"
 MODES = [
     ("causal", "Causal", RED, "s"),
     ("temporal_checkpoint", "Temporal", ORANGE, "x"),
     ("whole_branch_abort", "Whole abort", BLACK, "o"),
-    ("chat_only", "Chat-only", GRAY, "^"),
-    ("chat_fs", "Chat+FS", BLUE, "D"),
 ]
 
 
@@ -50,6 +51,12 @@ def rate(rows, field) -> float:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Plot official recovery rates grouped by SWE repo / TB difficulty."
+    )
+    parser.add_argument("--csv", type=Path, default=CSV, help="official_tasks_raw.csv")
+    parser.add_argument("--out", type=Path, default=OUT, help="output PDF")
+    args = parser.parse_args()
     plt.rcParams.update(
         {
             "font.family": "serif",
@@ -61,30 +68,17 @@ def main() -> int:
             "pdf.fonttype": 42,
         }
     )
-    rows = load_rows(CSV)
-    keep_tasks = {
-        "pytest-dev__pytest-8906",
-        "pallets__flask-4992",
-        "pylint-dev__pylint-5859",
-        "hello-world",
-        "csv-to-parquet",
-        "log-summary",
-    }
-    labels_map = {
-        "swe:pytest-dev__pytest-8906": "SWE pytest",
-        "swe:pallets__flask-4992": "SWE flask",
-        "swe:pylint-dev__pylint-5859": "SWE pylint",
-        "tb:hello-world": "TB hello",
-        "tb:csv-to-parquet": "TB csv",
-        "tb:log-summary": "TB logs",
-    }
+    rows = load_rows(args.csv)
     grouped = defaultdict(lambda: defaultdict(list))
     labels = []
     seen = set()
     for row in rows:
-        if row.get("task") not in keep_tasks:
-            continue
-        label = labels_map.get(f"{row.get('suite')}:{row.get('task')}", f"{row.get('suite')}:{row.get('task')}")
+        suite = row.get("suite") or ""
+        if suite == "swe":
+            group = row.get("official_group") or row.get("repo") or row.get("task")
+        else:
+            group = row.get("official_group") or row.get("difficulty") or row.get("task")
+        label = f"{suite}:{group}"
         grouped[label][row["mode"]].append(row)
         if label not in seen:
             labels.append(label)
@@ -123,13 +117,13 @@ def main() -> int:
         ax.set_ylim(-0.05, 1.05)
         ax.yaxis.set_major_locator(MultipleLocator(0.25))
         ax.set_xticks(x)
-        ax.set_xticklabels(labels, rotation=20, ha="right")
+        ax.set_xticklabels(labels, rotation=35, ha="right")
         ax.grid(True, axis="y", linestyle=":", linewidth=0.4)
         ax.set_axisbelow(True)
     axes[0].legend(frameon=False, loc="lower left")
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(OUT, bbox_inches="tight")
-    print(f"wrote {OUT}")
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(args.out, bbox_inches="tight")
+    print(f"wrote {args.out}")
     return 0
 
 

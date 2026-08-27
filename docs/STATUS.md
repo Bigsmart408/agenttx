@@ -1,6 +1,6 @@
 # AgentTX status — done vs remaining
 
-Last updated: 2026-08-16 (container `/home/pengpeng/agenttx`).
+Last updated: 2026-08-18 (container `/home/pengpeng/agenttx`).
 
 ## Completed
 
@@ -96,7 +96,7 @@ Last updated: 2026-08-16 (container `/home/pengpeng/agenttx`).
   aliases, incomplete groups, and full arbitrary topology publication still fail
   closed.
 - Token replay: 27/27 controlled `deepseek-v4-flash` recovery samples passed with zero pre-commit host leaks. Causal rollback retained both valid artifacts and required no LLM replay; optimistic temporal recovery replayed one document (864.3/1,060.3/1,424.7 mean tokens at 12/24/48 lines), while whole branch/session abort replayed two (1,797.3/2,231.7/3,340.3). These are avoided replay tokens, not total end-to-end recovery tokens or external-artifact results.
-- End-to-end token comparison: Step 26 charges the complete post-policy autonomous recovery loop and records prompt/completion/total usage, tool/model calls, regeneration, success, leakage, and latency. The x86 conda environment, root-compatible `try` substrate, root preflight, and 79-test suite are ready; the 27-sample numeric sweep remains pending only because no API credential is configured, and no placeholders were added.
+- End-to-end token comparison: Step 26 charges the complete post-policy autonomous recovery loop and records prompt/completion/total usage, tool/model calls, regeneration, success, leakage, and latency. The x86 conda environment, root-compatible `try` substrate, root preflight, and 79-test suite are ready; the credentialed deepseek-v4 sweep is recorded under `experiments/results/deepseek/token_end_to_end.*` and must be read with the success predicate.
 - eBPF tracing: Step 27 introduced the tracepoint parser and kept the original per-step attach measurements as historical evidence only. The maintained runtime path is the session-persistent tracer selected by trace_backend=bpf; no benchmark or CLI entry point produces the removed per-step mode.
 - Persistent eBPF tracing: Step 28 now documents trace_backend=bpf as the single eBPF mode. The current indexed-overlay sweep (12 steps x 2 repeats) reports 61.39 ms/step mean (p50 26.29, p95 413.54) with 24/24 READ and 24/24 NEGATIVE captures; the old per-step attach numbers remain archival only.
 - Unprivileged overlay recovery: Ubuntu 5.4 kernels carry a SAUCE `clone_private_mount` check that rejects overlay lowerdirs whose subtree contains MNT_LOCKED child mounts (docker/snap/workspace mounts are all locked in this sandbox), which previously made the `try` backend unusable without root. `scripts/bootstrap.sh` now patches `try` with a recursive-overlay fallback that overlays each mount-free subtree and each child mount root individually; the full 102-test suite, evidence suite, comparison matrix, long-workload, scaling, robustness, causal-retention, token-replay, real-agent, and Aider comparison experiments all pass unprivileged on this host. The eBPF numeric sweep needs root (bpf syscall); it was measured on this host's root-capable session.
@@ -125,6 +125,9 @@ Last updated: 2026-08-16 (container `/home/pengpeng/agenttx`).
 6. **Non-filesystem effects** - network/cloud side effects (currently coarse hide_network only).
 
 ### Evaluation gaps
+Closed 2026-08-18: coverage matrix, WAL fault matrix, and credentialed Step 26 full-loop tokens are in-tree and reflected in `paper/main.tex` (Tables `tab:coverage`/`tab:wal`, Fig `fig:token-e2e`).
+
+Still open:
 8. Harder / longer agent workloads: deterministic 54/64/96-call scaling, a reloadable 256-step session, controlled 16/32/64-call causal DAGs, and real-agent requested recovery are covered by Steps 16-21; real multi-package LLM agents remain.
 9. External baselines: tiao2 now runs the previously missing bubblewrap lower bound. BranchFS was cloned but its ARM64 build is blocked by the host Cargo 1.75/fuser API mismatch; Waypoint is blocked by the missing CRIU executable; Sandlock/YoloFS/DeltaBox/Crab/Cordon remain artifact- or environment-blocked. See `docs/tiao2-comparison-run.md` for command-level evidence.
 10. Stronger Aider (or other agents) bakeoff with fair timeouts and success criteria.

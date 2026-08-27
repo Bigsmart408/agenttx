@@ -1,4 +1,4 @@
-"""Named OpenAI-compatible provider profiles for repeatable agent runs."""
+"""Named LLM provider profiles for repeatable agent runs."""
 from __future__ import annotations
 
 import os
@@ -27,8 +27,8 @@ _DEFAULTS = {
         "key": "OPENAI_API_KEY",
         "base": "OPENAI_BASE_URL",
         "model": "OPENAI_MODEL",
-        "default_base": None,
-        "default_model": "gpt-4o-mini",
+        "default_base": "https://api.openai.com/v1",
+        "default_model": "gpt-5.6-luna",
     },
     "openrouter": {
         "key": "OPENROUTER_API_KEY",
@@ -37,6 +37,20 @@ _DEFAULTS = {
         "default_base": "https://openrouter.ai/api/v1",
         "default_model": "deepseek/deepseek-v4-flash",
     },
+    "anthropic": {
+        "key": "ANTHROPIC_API_KEY",
+        "base": "ANTHROPIC_BASE_URL",
+        "model": "ANTHROPIC_MODEL",
+        "default_base": "https://jojocode.com",
+        "default_model": "claude-fable-5",
+    },
+    "jojocode": {
+        "key": "JOJOCODE_GPT_API_KEY",
+        "base": "JOJOCODE_GPT_BASE_URL",
+        "model": "JOJOCODE_GPT_MODEL",
+        "default_base": "https://jojocode.com/v1",
+        "default_model": "gpt-5.6-sol",
+    },
 }
 
 
@@ -44,13 +58,14 @@ def provider_names() -> tuple[str, ...]:
     return tuple(_DEFAULTS)
 
 
-def load_provider_env() -> Optional[Path]:
+def load_provider_env(root: Optional[Path] = None) -> Optional[Path]:
     """Load the shared profile file without printing or persisting secrets."""
     candidates = []
     if os.environ.get("AGENTTX_ENV_FILE"):
         candidates.append(Path(os.environ["AGENTTX_ENV_FILE"]))
+    project_root = Path(root or Path.cwd()).resolve()
+    candidates.extend((project_root / ".agent.env", project_root / ".env"))
     candidates.append(Path.home() / ".agenttx_llm.env")
-    # Root-run experiments still use the pengpeng-owned config by default.
     candidates.append(Path("/home/pengpeng/.agenttx_llm.env"))
     for envfile in candidates:
         if not envfile.is_file():
@@ -66,8 +81,8 @@ def load_provider_env() -> Optional[Path]:
     return None
 
 
-def resolve_provider(name: Optional[str] = None) -> ProviderProfile:
-    load_provider_env()
+def resolve_provider(name: Optional[str] = None, root: Optional[Path] = None) -> ProviderProfile:
+    load_provider_env(root)
     selected = (name or os.environ.get("AGENTTX_PROVIDER") or "deepseek").lower()
     if selected not in _DEFAULTS:
         raise ValueError(
@@ -75,9 +90,13 @@ def resolve_provider(name: Optional[str] = None) -> ProviderProfile:
         )
     config = _DEFAULTS[selected]
     key = os.environ.get(config["key"], "")
+    if selected == "openrouter" and not key:
+        key = os.environ.get("OPENROUTER_KEY", "")
+    if selected == "anthropic" and not key:
+        key = os.environ.get("JOJOCODE_API_KEY", "") or os.environ.get("NEW_API_KEY", "")
     base = os.environ.get(config["base"], config["default_base"])
     if selected == "openai" and not base:
-        base = os.environ.get("OPENAI_API_BASE")
+        base = os.environ.get("OPENAI_API_BASE") or config["default_base"]
     model = os.environ.get(config["model"], config["default_model"])
     return ProviderProfile(selected, key, base, model)
 

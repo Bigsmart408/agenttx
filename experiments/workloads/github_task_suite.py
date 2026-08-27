@@ -1,11 +1,9 @@
-"""GitHub-context workloads for multi-scale token-recovery experiments.
+"""Legacy GitHub-context sidecar tasks.
 
-The repositories are real public projects, pinned by commit in the benchmark
-script.  Each task adds a small, self-contained maintenance exercise under
-separate top-level directories so that the experiment does not depend on the repository's
-full test matrix or on a network service.  The exercise still gives the agent
-the repository context, package layout, documentation, and tooling of a real
-open-source project.
+Application evaluation now uses official SWE-Bench Lite and Terminal-Bench
+instances (``swe_bench_suite`` / ``terminal_bench_suite``).  This module remains
+for historical GitHub-context CSV artifacts and still shares the recovery DAG
+helper.
 """
 
 from __future__ import annotations
@@ -13,6 +11,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, Tuple
+
+from experiments.workloads.recovery_inject import (
+    DocSpec,
+    all_documents_valid as _all_documents_valid,
+    inject_recovery_dag,
+)
 
 
 @dataclass(frozen=True)
@@ -305,52 +309,20 @@ def seed_task_workspace(workdir: Path, task: GitHubTask) -> None:
 def inject_task_trajectory(agent, task: GitHubTask) -> dict:
     """Create valid test context, a faulty producer, independent work, and a fault."""
 
-    root = Path("agenttx_solution")
-    test = agent.harness.call_tool(
-        "write_file",
-        {"path": "recovery_tests/test_task.py", "content": task.test_body},
-    )
-    faulty = agent.harness.call_tool(
-        "write_file",
-        {
-            "path": str(root / "solution.py"),
-            "content": task.buggy_solution,
-        },
-    )
-    independent_steps = []
-    for path, prefix in task.doc_specs:
-        independent_steps.append(
-            agent.harness.call_tool(
-                "write_file",
-                {"path": path, "content": task.document_content(prefix)},
-            )
-        )
-    derived = agent.harness.call_tool(
-        "run_shell",
-        {"cmd": task.derived_command},
-    )
-    failing = agent.harness.call_tool(
-        "run_tests",
-        {
-            "cmd": (
-                "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. "
-                "python -m pytest -q recovery_tests/test_task.py -p no:cacheprovider"
-            )
-        },
-    )
-    return {
-        "test_step": test.step_id,
-        "root_step": faulty.step_id,
-        "independent_steps": [step.step_id for step in independent_steps],
-        "derived_step": derived.step_id,
-        "test_run_step": failing.step_id,
-        "root_is_parent_of_derived": faulty.step_id in derived.parents,
-        "root_is_parent_of_tests": faulty.step_id in failing.parents,
-        "independent_is_parent_of_derived": any(
-            step.step_id in derived.parents for step in independent_steps
+    docs = tuple(DocSpec(path, prefix, task.doc_lines) for path, prefix in task.doc_specs)
+    return inject_recovery_dag(
+        agent,
+        docs=docs,
+        task_name=task.name,
+        prefix_writes=(("recovery_tests/test_task.py", task.test_body),),
+        faulty_path="agenttx_solution/solution.py",
+        faulty_content=task.buggy_solution,
+        derived_cmd=task.derived_command,
+        test_cmd=(
+            "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. "
+            "python -m pytest -q recovery_tests/test_task.py -p no:cacheprovider"
         ),
-        "tests_failed": failing.exit_code != 0,
-    }
+    )
 
 
 def document_valid(path: Path, prefix: str, lines: int) -> bool:
@@ -365,7 +337,5 @@ def document_valid(path: Path, prefix: str, lines: int) -> bool:
 
 
 def all_documents_valid(workdir: Path, task: GitHubTask) -> bool:
-    return all(
-        document_valid(Path(workdir) / path, prefix, task.doc_lines)
-        for path, prefix in task.doc_specs
-    )
+    docs = tuple(DocSpec(path, prefix, task.doc_lines) for path, prefix in task.doc_specs)
+    return _all_documents_valid(workdir, docs)

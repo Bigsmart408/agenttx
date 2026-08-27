@@ -1,0 +1,26 @@
+[
+  {
+    "axis": "length",
+    "suite": "swe",
+    "official_group": "pytest-dev/pytest",
+    "scale": "short",
+    "harness_backend": "oracle",
+    "model": "oracle",
+    "mode": "causal",
+    "repeats": 1,
+    "success_rate": 1.0,
+    "tests_pass_rate": 1.0,
+    "independent_retention_rate": 1.0,
+    "invalid_removed_rate": 1.0,
+    "total_tokens_mean": 0.0,
+    "success_tokens_mean": 0.0,
+    "success_prompt_tokens_mean": 0.0,
+    "success_completion_tokens_mean": 0.0,
+    "avoided_tokens_mean": 0.0,
+    "doc_replay_tokens_mean": 0.0,
+    "success_doc_replay_tokens_mean": 0.0,
+    "avoided_replay_tokens_mean": 0.0,
+    "saved_tokens_mean": 0.0,
+    "paired_success_repeats": 1
+  }
+]

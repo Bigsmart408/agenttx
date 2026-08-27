@@ -1,0 +1,18 @@
+[
+  "deepseek/deepseek-v4-pro-0813",
+  "deepseek/deepseek-v4-flash-0731",
+  "meta-llama/llama-4-maverick",
+  "meta-llama/llama-4-scout",
+  "qwen/qwen3.8-27b",
+  "qwen/qwen3.8-2.4t-a95b",
+  "x-ai/grok-4.6",
+  "x-ai/grok-4.5",
+  "mistralai/mistral-medium-3-5",
+  "mistralai/mistral-small-2603",
+  "amazon/nova-2-lite-v1",
+  "moonshotai/kimi-k3",
+  "moonshotai/kimi-k2.7-code",
+  "minimax/minimax-m3",
+  "z-ai/glm-5.3",
+  "z-ai/glm-5.2"
+]

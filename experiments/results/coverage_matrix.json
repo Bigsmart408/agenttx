@@ -1,0 +1,312 @@
+{
+  "host": "pengpeng-ubuntu-01-1",
+  "repeats": 3,
+  "wall_s": 460.25811056396924,
+  "summary": [
+    {
+      "case": "ordinary_path",
+      "expected": "correct",
+      "repeats": 3,
+      "pass_rate": 1.0,
+      "all_ok": true,
+      "sample_detail": "EffectKind.WRITE:/tmp/agenttx-cov-iv9pk0fs/ws/data.txt EffectKind.READ:/tmp/agenttx-cov-iv9pk0fs/ws/data.txt",
+      "status": "measured"
+    },
+    {
+      "case": "openat_at_fdcwd",
+      "expected": "correct",
+      "repeats": 3,
+      "pass_rate": 1.0,
+      "all_ok": true,
+      "sample_detail": "EffectKind.WRITE:/tmp/agenttx-cov-wyi03wvv/ws/x.txt EffectKind.READ:/tmp/agenttx-cov-wyi03wvv/ws/x.txt",
+      "status": "measured"
+    },
+    {
+      "case": "negative_lookup",
+      "expected": "correct",
+      "repeats": 3,
+      "pass_rate": 1.0,
+      "all_ok": true,
+      "sample_detail": "EffectKind.NEGATIVE:/tmp/agenttx-cov-4qx000s2/ws/missing.txt",
+      "status": "measured"
+    },
+    {
+      "case": "symlink_alias",
+      "expected": "correct",
+      "repeats": 3,
+      "pass_rate": 1.0,
+      "all_ok": true,
+      "sample_detail": "aborted=[0, 1]; EffectKind.WRITE:/tmp/agenttx-cov-noht24tl/ws/real EffectKind.WRITE:/tmp/agenttx-cov-noht24tl/ws/real/data.txt EffectKind.READ:/tmp/agenttx-cov-noht24tl/ws/real",
+      "status": "measured"
+    },
+    {
+      "case": "rename_delete_create",
+      "expected": "correct",
+      "repeats": 3,
+      "pass_rate": 1.0,
+      "all_ok": true,
+      "sample_detail": "rename materialized",
+      "status": "measured"
+    },
+    {
+      "case": "preexisting_hardlink",
+      "expected": "correct",
+      "repeats": 3,
+      "pass_rate": 1.0,
+      "all_ok": true,
+      "sample_detail": "same_inode=True",
+      "status": "measured"
+    },
+    {
+      "case": "upper_created_hardlink",
+      "expected": "correct",
+      "repeats": 3,
+      "pass_rate": 1.0,
+      "all_ok": true,
+      "sample_detail": "same_inode=True",
+      "status": "measured"
+    },
+    {
+      "case": "external_alias",
+      "expected": "fail_closed",
+      "repeats": 3,
+      "pass_rate": 1.0,
+      "all_ok": true,
+      "sample_detail": "HardlinkTopologyError: cannot prove complete hard-link group for /tmp/agenttx-cov-75l5bwfq/ws/first.txt: inode link count is 2, workspace scan ",
+      "status": "measured"
+    },
+    {
+      "case": "bind_mount",
+      "expected": "fail_closed_or_unavailable",
+      "repeats": 3,
+      "pass_rate": 1.0,
+      "all_ok": true,
+      "sample_detail": "unavailable: mount: only root can use \"--bind\" option\n",
+      "status": "unavailable"
+    },
+    {
+      "case": "fd_relative_dirfd",
+      "expected": "correct_or_fail_closed",
+      "repeats": 3,
+      "pass_rate": 1.0,
+      "all_ok": true,
+      "sample_detail": "EffectKind.READ:/tmp/agenttx-cov-ibdrqfuv/ws/subdir EffectKind.READ:/tmp/agenttx-cov-ibdrqfuv/ws/subdir/leaf.txt",
+      "status": "measured"
+    }
+  ],
+  "raw": [
+    {
+      "case": "ordinary_path",
+      "expected": "correct",
+      "ok": true,
+      "detail": "EffectKind.WRITE:/tmp/agenttx-cov-iv9pk0fs/ws/data.txt EffectKind.READ:/tmp/agenttx-cov-iv9pk0fs/ws/data.txt",
+      "repeat": 0
+    },
+    {
+      "case": "ordinary_path",
+      "expected": "correct",
+      "ok": true,
+      "detail": "EffectKind.WRITE:/tmp/agenttx-cov-n18bs3c8/ws/data.txt EffectKind.READ:/tmp/agenttx-cov-n18bs3c8/ws/data.txt",
+      "repeat": 1
+    },
+    {
+      "case": "ordinary_path",
+      "expected": "correct",
+      "ok": true,
+      "detail": "EffectKind.WRITE:/tmp/agenttx-cov-iz8pyo14/ws/data.txt EffectKind.READ:/tmp/agenttx-cov-iz8pyo14/ws/data.txt",
+      "repeat": 2
+    },
+    {
+      "case": "openat_at_fdcwd",
+      "expected": "correct",
+      "ok": true,
+      "detail": "EffectKind.WRITE:/tmp/agenttx-cov-wyi03wvv/ws/x.txt EffectKind.READ:/tmp/agenttx-cov-wyi03wvv/ws/x.txt",
+      "repeat": 0
+    },
+    {
+      "case": "openat_at_fdcwd",
+      "expected": "correct",
+      "ok": true,
+      "detail": "EffectKind.WRITE:/tmp/agenttx-cov-zpkxbxaq/ws/x.txt EffectKind.READ:/tmp/agenttx-cov-zpkxbxaq/ws/x.txt",
+      "repeat": 1
+    },
+    {
+      "case": "openat_at_fdcwd",
+      "expected": "correct",
+      "ok": true,
+      "detail": "EffectKind.WRITE:/tmp/agenttx-cov-m_um7hpv/ws/x.txt EffectKind.READ:/tmp/agenttx-cov-m_um7hpv/ws/x.txt",
+      "repeat": 2
+    },
+    {
+      "case": "negative_lookup",
+      "expected": "correct",
+      "ok": true,
+      "detail": "EffectKind.NEGATIVE:/tmp/agenttx-cov-4qx000s2/ws/missing.txt",
+      "repeat": 0
+    },
+    {
+      "case": "negative_lookup",
+      "expected": "correct",
+      "ok": true,
+      "detail": "EffectKind.NEGATIVE:/tmp/agenttx-cov-1k2bxlh7/ws/missing.txt",
+      "repeat": 1
+    },
+    {
+      "case": "negative_lookup",
+      "expected": "correct",
+      "ok": true,
+      "detail": "EffectKind.NEGATIVE:/tmp/agenttx-cov-2ivqiotk/ws/missing.txt",
+      "repeat": 2
+    },
+    {
+      "case": "symlink_alias",
+      "expected": "correct",
+      "ok": true,
+      "detail": "aborted=[0, 1]; EffectKind.WRITE:/tmp/agenttx-cov-noht24tl/ws/real EffectKind.WRITE:/tmp/agenttx-cov-noht24tl/ws/real/data.txt EffectKind.READ:/tmp/agenttx-cov-noht24tl/ws/real",
+      "repeat": 0
+    },
+    {
+      "case": "symlink_alias",
+      "expected": "correct",
+      "ok": true,
+      "detail": "aborted=[0, 1]; EffectKind.WRITE:/tmp/agenttx-cov-bg3tgcke/ws/real EffectKind.WRITE:/tmp/agenttx-cov-bg3tgcke/ws/real/data.txt EffectKind.READ:/tmp/agenttx-cov-bg3tgcke/ws/real",
+      "repeat": 1
+    },
+    {
+      "case": "symlink_alias",
+      "expected": "correct",
+      "ok": true,
+      "detail": "aborted=[0, 1]; EffectKind.WRITE:/tmp/agenttx-cov-aff6im90/ws/real EffectKind.WRITE:/tmp/agenttx-cov-aff6im90/ws/real/data.txt EffectKind.READ:/tmp/agenttx-cov-aff6im90/ws/real",
+      "repeat": 2
+    },
+    {
+      "case": "rename_delete_create",
+      "expected": "correct",
+      "ok": true,
+      "detail": "rename materialized",
+      "repeat": 0
+    },
+    {
+      "case": "rename_delete_create",
+      "expected": "correct",
+      "ok": true,
+      "detail": "rename materialized",
+      "repeat": 1
+    },
+    {
+      "case": "rename_delete_create",
+      "expected": "correct",
+      "ok": true,
+      "detail": "rename materialized",
+      "repeat": 2
+    },
+    {
+      "case": "preexisting_hardlink",
+      "expected": "correct",
+      "ok": true,
+      "detail": "same_inode=True",
+      "repeat": 0
+    },
+    {
+      "case": "preexisting_hardlink",
+      "expected": "correct",
+      "ok": true,
+      "detail": "same_inode=True",
+      "repeat": 1
+    },
+    {
+      "case": "preexisting_hardlink",
+      "expected": "correct",
+      "ok": true,
+      "detail": "same_inode=True",
+      "repeat": 2
+    },
+    {
+      "case": "upper_created_hardlink",
+      "expected": "correct",
+      "ok": true,
+      "detail": "same_inode=True",
+      "repeat": 0
+    },
+    {
+      "case": "upper_created_hardlink",
+      "expected": "correct",
+      "ok": true,
+      "detail": "same_inode=True",
+      "repeat": 1
+    },
+    {
+      "case": "upper_created_hardlink",
+      "expected": "correct",
+      "ok": true,
+      "detail": "same_inode=True",
+      "repeat": 2
+    },
+    {
+      "case": "external_alias",
+      "expected": "fail_closed",
+      "ok": true,
+      "detail": "HardlinkTopologyError: cannot prove complete hard-link group for /tmp/agenttx-cov-75l5bwfq/ws/first.txt: inode link count is 2, workspace scan ",
+      "repeat": 0
+    },
+    {
+      "case": "external_alias",
+      "expected": "fail_closed",
+      "ok": true,
+      "detail": "HardlinkTopologyError: cannot prove complete hard-link group for /tmp/agenttx-cov-8e1xqv68/ws/first.txt: inode link count is 2, workspace scan ",
+      "repeat": 1
+    },
+    {
+      "case": "external_alias",
+      "expected": "fail_closed",
+      "ok": true,
+      "detail": "HardlinkTopologyError: cannot prove complete hard-link group for /tmp/agenttx-cov-njzu3v1p/ws/first.txt: inode link count is 2, workspace scan ",
+      "repeat": 2
+    },
+    {
+      "case": "bind_mount",
+      "expected": "fail_closed_or_unavailable",
+      "ok": true,
+      "detail": "unavailable: mount: only root can use \"--bind\" option\n",
+      "status": "unavailable",
+      "repeat": 0
+    },
+    {
+      "case": "bind_mount",
+      "expected": "fail_closed_or_unavailable",
+      "ok": true,
+      "detail": "unavailable: mount: only root can use \"--bind\" option\n",
+      "status": "unavailable",
+      "repeat": 1
+    },
+    {
+      "case": "bind_mount",
+      "expected": "fail_closed_or_unavailable",
+      "ok": true,
+      "detail": "unavailable: mount: only root can use \"--bind\" option\n",
+      "status": "unavailable",
+      "repeat": 2
+    },
+    {
+      "case": "fd_relative_dirfd",
+      "expected": "correct_or_fail_closed",
+      "ok": true,
+      "detail": "EffectKind.READ:/tmp/agenttx-cov-ibdrqfuv/ws/subdir EffectKind.READ:/tmp/agenttx-cov-ibdrqfuv/ws/subdir/leaf.txt",
+      "repeat": 0
+    },
+    {
+      "case": "fd_relative_dirfd",
+      "expected": "correct_or_fail_closed",
+      "ok": true,
+      "detail": "EffectKind.READ:/tmp/agenttx-cov-gbvk5riv/ws/subdir EffectKind.READ:/tmp/agenttx-cov-gbvk5riv/ws/subdir/leaf.txt",
+      "repeat": 1
+    },
+    {
+      "case": "fd_relative_dirfd",
+      "expected": "correct_or_fail_closed",
+      "ok": true,
+      "detail": "EffectKind.READ:/tmp/agenttx-cov-6ahododr/ws/subdir EffectKind.READ:/tmp/agenttx-cov-6ahododr/ws/subdir/leaf.txt",
+      "repeat": 2
+    }
+  ]
+}

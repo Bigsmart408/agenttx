@@ -2,8 +2,10 @@
 
 This outline instantiates the L0 thesis: a long agent trajectory is the
 speculation unit, while a causal subgraph of versioned effects is the recovery
-unit.  It reflects the merged Background and Motivation section in the current
-LaTeX draft.
+unit.  It follows the current separation between Background and Observation
+and Motivation.  Sections 4 and 5 use the model--implementation boundary shown
+by the supplied OSDI reference: Section 4 defines semantics, and Section 5
+realizes them with Linux mechanisms.
 
 ## Page budget
 
@@ -11,13 +13,14 @@ LaTeX draft.
 |---|---:|---|
 | Abstract | 0.25 | Problem, recovery-unit gap, AET, AgentTX, two strongest results |
 | 1. Introduction | 1.25 | Multi-step agents, gap, example, three challenges, solution, evidence |
-| 2. Background and Motivation | 1.50 | Minimum vocabulary, execution evidence, recovery evidence, requirements |
-| 3. Agent Effect Transactions | 1.50 | Abstract state, DAG, recovery invariant, publication frontier |
-| 4. Design and Implementation | 2.00 | Capture, identity, reconstruction, publication, performance engineering |
-| 5. Evaluation | 4.00 | Semantics, cost, mechanism ablations, live agents, tokens, robustness |
-| 6. Discussion and Limitations | 0.50 | Precise support boundary |
-| 7. Related Work | 0.75 | Compare native recovery units |
-| 8. Conclusion | 0.25 | Thesis, system, evidence, scope |
+| 2. Background | 0.75 | Stateful workspaces and native recovery units |
+| 3. Observation and Motivation | 1.25 | Execution evidence, recovery evidence, and resulting challenges |
+| 4. Agent Effect Transactions | 1.50 | Abstract state, causal recovery, reconstruction, approved frontier |
+| 5. AgentTX Implementation | 2.00 | Runtime path, capture, identity, reconstruction, publication, optimizations |
+| 6. Evaluation | 3.50 | Semantics, cost, mechanism ablations, live agents, tokens, robustness |
+| 7. Discussion and Limitations | 0.50 | Precise support boundary |
+| 8. Related Work | 0.75 | Compare native recovery units |
+| 9. Conclusion | 0.25 | Thesis, system, evidence, scope |
 | **Total** | **12.00** | References excluded |
 
 ## Flow by section
@@ -41,9 +44,9 @@ or unverified repeated-performance data in the abstract.
 6. Introduce AET, then AgentTX, then bounded headline evidence.
 7. End with problem, abstraction, implementation, and evaluation contributions.
 
-### 2. Background and Motivation
+### 2--3. Background and Observation/Motivation
 
-Keep one background subsection and let the measurements drive the section:
+Keep background definitions separate, then let measurements drive motivation:
 
 1. Define trajectory and READ, NEGATIVE, WRITE, DELETE effects.
 2. Separate isolation from recovery granularity with Table 1.
@@ -54,28 +57,44 @@ Keep one background subsection and let the measurements drive the section:
 Keep no more than two main motivation figures in the final paper.  Merge the
 optimization, scaling, and tail plots if space becomes tight.
 
-### 3. Agent Effect Transactions
+### 4. Agent Effect Transactions
 
-Define AET as $\langle V,L,H,F\rangle$, then Append, Recover, and Finalize.
-Describe overlap and object identity abstractly, compute the descendant closure,
-state the reconstruction invariant, and define a monotonic frontier that permits
-durably rolled-back holes.  Do not mention strace, OverlayFS, upperdir, worker
-processes, or concrete WAL files in this section.
+Follow one semantic chain:
 
-### 4. AgentTX Design and Implementation
+1. Introduce the overview and four design principles: trajectory-level
+   speculation, effect-based causality, versioned reconstruction, and separate
+   publication.
+2. Define $\langle V,L,H,F\rangle$, Append, Recover, Finalize, and the three
+   invariants.
+3. Define effect records, overlap, producer--consumer edges, and the descendant
+   closure.
+4. Define object-aware historical reconstruction and the retained-overlap rule.
+5. Define the approved frontier, rolled-back holes, and publication boundary.
 
-Follow the correctness data path:
+The section contains no strace, OverlayFS, upperdir, worker, or concrete WAL
+details.  The overview figure is single-column and precedes the state model.
 
-1. Capture writes from upperdir differences and reads or negative lookups from
-   persistent tracing, with an explicit coverage gate.
-2. Normalize hierarchy, symlink, rename, and supported hard-link identity;
-   reject bind mounts, external aliases, and unsupported generations.
-3. Reconstruct selected object versions and reject retained-effect overlap.
-4. Apply policy before WAL preparation, then prepare, install, and finalize.
-5. Describe persistent workers and incremental snapshots only as performance
-   engineering.
+### 5. AgentTX Implementation
 
-### 5. Evaluation
+Follow the same chain using concrete mechanisms:
+
+1. Build the shared four-directory OverlayFS view and preserve state across
+   tool calls.
+2. Combine syscall observations with upperdir differences and construct ledger
+   records and cross-call edges.
+3. Maintain historical versions and normalize supported object identities.
+4. Plan, validate, and install a causal reconstruction in a fresh upper
+   generation.
+5. Publish an approved frontier with policy, alias-aware materialization, and a
+   Prepare--Install--Finalize WAL.
+6. Isolate persistent workers, incremental snapshots, and content-addressed
+   blobs as performance engineering.
+
+The per-call runtime figure is single-column at the start of this section.  Its
+caption states that effect capture produces DAG input rather than the DAG
+itself.
+
+### 6. Evaluation
 
 The final order should put semantics before performance:
 
@@ -89,7 +108,7 @@ Each RQ must state a hypothesis, sample count, validator, result, and boundary.
 Token plots must pair token count with success.  A failed run with fewer tokens
 is not a saving.
 
-### 6 to 8
+### 7 to 9
 
 Discussion states unsupported topology, syscall coverage, external side effects,
 and publication visibility.  Related Work compares native recovery units without
@@ -102,13 +121,14 @@ filesystem-scoped boundary without adding a future-work list.
 |---|---|---|
 | Table 1 | Recovery granularity | ready |
 | Figure 1 | Motivation performance, scaling, tail | merge before final |
-| Figure 2 | AET lifecycle | replace box sketch |
-| Figure 3 | Causal retention and dependency ablation | ready |
-| Figure 4 | Canonical x86 runtime distribution, 50 fresh workspaces/mode | ready |
+| Figure 2 | AgentTX system overview and causal recovery flow | ready (current draft Figure 4) |
+| Figure 3 | Per-call runtime, effect capture, and snapshot flow | ready, single-column |
+| Figure 4 | Causal retention and dependency ablation | ready |
+| Figure 5 | Canonical x86 runtime distribution, 50 fresh workspaces/mode | ready |
 | Table 2 | Syscall and object-identity coverage | missing |
-| Figure 5 | Controlled avoided replay tokens | ready |
-| Figure 6 | Token versus success on live tasks | needs repeats |
-| Figure 7 | WAL, session, and concurrency robustness | ready within stated scope |
+| Figure 6 | Controlled avoided replay tokens | ready |
+| Figure 7 | Token versus success on live tasks | needs repeats |
+| Figure 8 | WAL, session, and concurrency robustness | ready within stated scope |
 
 The detailed execution plan and evidence provenance are in
 `docs/paper-outline-and-experiment-plan.md`.

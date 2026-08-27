@@ -1,28 +1,55 @@
 # AgentTX motivation experiments
 
 This directory turns the iterative AgentTX optimization work into a reproducible
-paper-motivation section. The central observation is that a long coding-agent
-trajectory multiplies per-tool overhead: syscall tracing, temporary command
-scripts, blob-store maintenance, shell parsing, try namespace setup, and full
-upperdir traversal.
+paper-motivation section. All model-bearing application runs use the same
+official SWE-Bench Lite and Terminal-Bench manifests as the main evaluation;
+the recovery DAG is a controlled fault overlay on those tasks. The default
+models are `deepseek-v4-flash` (DeepSeek Harness) and `gpt-5.6-luna` (Codex).
+
+The single entry point is:
+
+```bash
+PYTHONPATH=src:. python3 motivation/bench_official_application.py \
+  --suite all --harness deepseek_harness --repeats 1
+```
+
+It writes raw rows and `official_token_summary.{csv,json,md}` below the selected
+harness result directory. Use `--harness codex` to repeat the same task matrix
+with Codex. The compatibility scripts in this directory dispatch to this
+entry point; they no longer generate the historical synthetic long trajectory.
+
+The deterministic trajectories retained elsewhere in the repository are
+mechanism-only microbenchmarks for syscall, overlay, snapshot, DAG, and WAL
+costs. They are not application workloads and are not used for token claims.
 
 For a Chinese, paper-oriented explanation of terminology, baseline semantics,
 experimental design, results, and claim boundaries, start with
 `docs/experiments-explained.md`.
 
-## Reproduce the current comparison
+## Historical compatibility names
 
-The runtime comparison reuses the deterministic 64-call workload and current
-baseline implementations:
+The old command names remain callable so existing automation does not fail:
 
 ```bash
 PYTHONPATH=src:. python3 motivation/bench_optimization_comparison.py \
   --length 64 --repeats 2
 ```
 
-It writes `experiments/results/motivation_runtime_comparison.{csv,json,md}` for:
-bare execution, per-call try, shared try, shared checkpoint, AgentTX without
-read tracing, and full AgentTX.
+They now forward to the official application runner and produce the canonical
+official result bundle. Historical CSVs are retained for provenance only.
+
+## Official multi-step comparison
+
+The paper compares causal recovery against temporal checkpoint and whole-branch
+abort on the same short/medium/long official tasks:
+
+```bash
+PYTHONPATH=src:. python3 motivation/bench_existing_systems.py \
+  --suite all --harness deepseek_harness --repeats 1
+```
+
+The result is the same official task bundle used by evaluation; token/model
+aggregates are in `official_token_summary.csv`.
 
 ## Summarize all optimization iterations
 

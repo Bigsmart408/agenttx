@@ -511,6 +511,19 @@ class DeepSeekHarness(ExternalHarness):
         return result
 
 
+
+def _fontconfig_xml(cache_home: Path) -> str:
+    cachedir = Path(cache_home) / "fontconfig"
+    return (
+        '<?xml version="1.0"?>\n'
+        '<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">\n'
+        "<fontconfig>\n"
+        "  <dir>/usr/share/fonts</dir>\n"
+        f"  <cachedir>{cachedir}</cachedir>\n"
+        "</fontconfig>\n"
+    )
+
+
 class CodexHarness(ExternalHarness):
     """Run the official Codex CLI in unattended execution mode."""
 
@@ -554,15 +567,25 @@ class CodexHarness(ExternalHarness):
             "--json",
         ]
         # Codex creates its own temporary command wrappers and lock files.
-        # Keep CODEX_HOME inside the protected workspace; otherwise the
-        # transaction commit policy quite correctly rejects ~/.codex/tmp as
-        # an external host write even though the agent was sandboxed.
+        # Keep CODEX_HOME and package caches inside the protected workspace;
+        # otherwise the transaction commit policy quite correctly rejects
+        # ~/.codex/tmp or ~/.cache/pip as an external host write even though
+        # the agent was sandboxed.
         codex_home = workdir / ".codex"
+        cache_home = workdir / ".cache"
+        pip_cache = cache_home / "pip"
+        tmp_home = workdir / ".tmp"
         shell = [
             "bash",
             "-lc",
             f"cd {shlex.quote(str(workdir))} && "
-            "mkdir -p .codex && "
+            "mkdir -p .codex .cache/pip .cache/fontconfig .cache/matplotlib .cache/pyc .tmp && "
+            'if [ -x .venv/bin/python ]; then '
+            'export VIRTUAL_ENV="$PWD/.venv"; '
+            'export PATH="$PWD/.venv/bin:$PATH"; '
+            "fi && "
+            "export PYTHONNOUSERSITE=1 PIP_USER=0 PYTHONDONTWRITEBYTECODE=1 && "
+            f"printf %s {shlex.quote(_fontconfig_xml(cache_home))} > {shlex.quote(str(cache_home / 'fonts.conf'))} && "
             # A ChatGPT OAuth login normally lives in ~/.codex/auth.json.
             # Read it through a workspace-local symlink so the CLI can use
             # the subscription allowance without placing its temp/session
@@ -582,6 +605,14 @@ class CodexHarness(ExternalHarness):
             # an additional prompt after the initial task argument.
             "printf '' | "
             f"CODEX_HOME={shlex.quote(str(codex_home))} "
+            f"XDG_CACHE_HOME={shlex.quote(str(cache_home))} "
+            f"FONTCONFIG_FILE={shlex.quote(str(cache_home / 'fonts.conf'))} "
+            f"PIP_CACHE_DIR={shlex.quote(str(pip_cache))} "
+            f"MPLCONFIGDIR={shlex.quote(str(cache_home / 'matplotlib'))} "
+            f"PYTHONPYCACHEPREFIX={shlex.quote(str(cache_home / 'pyc'))} "
+            f"TMPDIR={shlex.quote(str(tmp_home))} "
+            f"TEMP={shlex.quote(str(tmp_home))} "
+            f"TMP={shlex.quote(str(tmp_home))} "
             f"OPENAI_MODEL={shlex.quote(self.model)} "
             f"{shlex.join(prefix + [task])}",
         ]

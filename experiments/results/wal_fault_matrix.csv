@@ -1,0 +1,7 @@
+phase,expected,repeats,recovery_rate,all_ok,host_consistent_rate
+before_prepare,no_wal_recommit,5,1.0,True,1.0
+prepared,restore_then_recommit,5,1.0,True,1.0
+applying,restore_then_recommit,5,1.0,True,1.0
+during_install,restore_then_recommit,5,1.0,True,1.0
+materialized,finalize_or_converge,5,1.0,True,1.0
+committed,durable_frontier,5,1.0,True,1.0

@@ -14,7 +14,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
 
 try:
     import yaml
@@ -45,6 +45,7 @@ class TBTask:
     oracle_cmd: str
     official_full: bool = False
     difficulty: str = ""
+    category: str = ""
 
     @property
     def name(self) -> str:
@@ -214,6 +215,7 @@ def load_tasks(cache_root: Path) -> Dict[str, TBTask]:
             oracle_cmd="bash solution.sh",
             official_full=True,
             difficulty=str(config.get("difficulty") or ""),
+            category=str(config.get("category") or ""),
         )
     return result
 
@@ -317,13 +319,20 @@ def inject_task_trajectory(agent, task: TBTask, python: str) -> dict:
     )
 
 
-def task_prompt(task: TBTask, python: str) -> str:
+def task_prompt(
+    task: TBTask,
+    python: str,
+    mode: str = "causal",
+    recovery_manifest: Optional[Mapping[str, object]] = None,
+) -> str:
     return recovery_prompt(
         title=task.task_id,
         context="Suite: Terminal-Bench\nWorkspace root corresponds to /app.",
         instruction=task.instruction,
         docs=task.docs(),
         test_cmd=test_command(python, task),
+        mode=mode,
+        recovery_manifest=recovery_manifest,
     )
 
 

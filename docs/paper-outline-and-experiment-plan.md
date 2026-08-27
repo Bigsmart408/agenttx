@@ -144,11 +144,12 @@ AgentTX 的核心论点是：多步 coding agent 的执行状态应以整条 tra
 | 50-run comparison | 已完成，可用于正文 | 统一 x86 artifact、50 fresh workspaces、p50/p95/p99、causal predicate | `comparison_repeats.*`, `docs/x86-comparison-20260818.md` |
 | Real-agent recovery | 可用，样本小 | 模型能使用 control plane | `experiments/results/deepseek/real_agent_recovery.*` |
 | Controlled replay tokens | 可用 | avoided replay tokens | `experiments/results/deepseek/token_recovery.*` |
-| Full-loop tokens | preliminary | token 和成功率需要联合解释 | `experiments/results/deepseek/token_end_to_end.*` |
+| Full-loop tokens | 可用（2 repeats） | 与 success 联合解释；已入正文 | `experiments/results/deepseek/token_end_to_end.*` |
 | GitHub-context tasks | preliminary | 三种规模上 causal 均成功 | `experiments/results/deepseek/github_token_tasks.*` |
 | Aider comparison | preliminary | 单次功能对照，不能作统计优势 | `experiments/results/deepseek/refactor_agent_compare.*` |
 | Robustness | 可用但需 crash matrix | worker、reload、disjoint agents | `experiments/results/robustness.*` |
-| Identity and tracing | 有边界证据 | hard-link supported subset 与 fail-closed contract | `hardlink_alias_probe.*`, `bpf_trace_overhead.*` |
+| Identity and tracing | 可用 | coverage + hard-link fail-closed | `coverage_matrix.*`, `hardlink_alias_probe.*` |
+| WAL fault matrix | 可用 | 六相位 5/5 恢复 | `wal_fault_matrix.*` |
 
 ## 5. 投稿前的实验优先级
 
@@ -156,9 +157,9 @@ AgentTX 的核心论点是：多步 coding agent 的执行状态应以整条 tra
 
 1. ~~统一 x86 canonical dataset，清除论文中混入的 tiao2 50-run 数字。~~ 已完成；正文使用新 x86 表，历史数字仅留在 history。
 2. 在 x86 上随机交错运行 50 次 runtime comparison，生成 mean、p50、p95、p99 和置信区间。
-3. 将 GitHub-context 和 full autonomous recovery 扩展到至少 3 次重复，并联合报告 token 与 success。
-4. 建立 WAL phase fault-injection matrix。
-5. 建立 syscall/object-identity coverage matrix。
+3. 将 GitHub-context 扩展到至少 3 次重复；full autonomous recovery 已有 2 次/格并写入正文（须联读 success）。
+4. ~~建立 WAL phase fault-injection matrix。~~ 已完成（5/phase，`wal_fault_matrix.*`）。
+5. ~~建立 syscall/object-identity coverage matrix。~~ 已完成（3/case，`coverage_matrix.*`）。
 6. 在 Setup 中补齐 CPU、memory、storage、kernel、Python、`try` commit、AgentTX commit 和频率控制信息。
 
 ### P1: 强烈建议
@@ -183,9 +184,9 @@ AgentTX 的核心论点是：多步 coding agent 的执行状态应以整条 tra
 | Section 3 | AET lifecycle | 当前是 LaTeX box sketch | 重画为正式双栏架构图 |
 | RQ1 | Causal retention | 可用 | 作为 evaluation 第一张主图 |
 | RQ2 | x86 runtime distribution | 当前混入非 x86 50-run 数据 | 重跑后生成 CDF 或 p50/p95/p99 |
-| RQ3 | Mechanism and coverage table | 缺失 | 新增 |
+| RQ3 | Mechanism and coverage table | 已写入 `tab:coverage` / `tab:wal` | 保持 |
 | RQ4 | Controlled replay tokens | 可用 | 保留并明确 avoided replay |
-| RQ4 | Full-loop/GitHub token-success | preliminary | 重复后合并为 token-success 图 |
+| RQ4 | Full-loop token-success | 已有 `FIG-Token-End-to-End` | GitHub 仍需重复 |
 | RQ5 | Robustness | 可用但较杂 | 用 crash matrix、session 和 concurrency 三个 panel |
 
 ## 7. 数据管理规则

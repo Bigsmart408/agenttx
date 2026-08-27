@@ -47,6 +47,13 @@ snapshot 的启动/扫描成本，而且独立的 per-call sandbox 无法自然�
 | 5. 接入真实 Agent | LLM 能否识别错误根并主动请求因果回滚？ | real-agent recovery |
 | 6. 转化为用户收益 | 保留工作具体减少多少 LLM 重放 token？ | token-recovery sweep |
 | 7. 验证工程稳定性 | 长 session、worker 崩溃、并发和尾延迟是否可控？ | robustness bundle |
+| 8. 放大应用 workload | 同一套注入 DAG 与三种恢复策略，换到官方 SWE/TB 后是否仍然成立？ | official tasks（oracle 与 live harness） |
+
+第 1–7 阶段的**测量原理不变**。引入 SWE-Bench Lite 与 Terminal-Bench 只是把
+应用层仓库、官方 verifier 和独立工作的体量变大，不改变故障形态、对照策略
+或成功定义。`bare` / `per_call_try` / `session_try` / `shared_try` 仍只出现
+在第 1 阶段的隔离成本实验中，不进入官方题的恢复对照。官方题上也不把
+进程 SIGKILL 当作故障：故障仍是轨迹里的错误 producer 这一步的 effect。
 
 ---
 
@@ -63,9 +70,14 @@ Agent 发起的一次外部动作，例如 `write_file`、`read_file`、`run_she
 - **Trajectory**：一次 Agent session 中按时间排列的 tool-call 序列。
 - **Workload**：为了实验而构造的完整任务，包括初始仓库、trajectory、故障、
   修复、预期结果和验证条件。
-- **Long Agent workload**：当前主要的确定性 workload，包含探索、多文件重构、
-  故障注入、失败 CI、独立文档/配置修改、修复和清理，共测试 54、64、96 次
-  tool call 等长度。
+- **Long Agent workload**：机制与 motivation 使用的确定性轨迹，包含探索、
+  多文件重构、故障注入、失败 CI、独立文档/配置修改、修复和清理，共测试
+  54、64、96 次 tool call 等长度。它证明隔离成本和因果保留，不是论文的
+  应用层题目来源。
+- **Official application workload**：SWE-Bench Lite 的 300 道 test 实例，以及
+  Terminal-Bench `original-tasks` 树中带 `task.yaml` 的官方任务（当前缓存为
+  241 道）。二者只提供官方仓库/工作区、instruction 或 issue、以及官方
+  verifier。恢复实验仍在其上叠加与第 8、10 节相同的注入 DAG。
 
 ### 2.3 Speculative state / host state
 
@@ -97,6 +109,41 @@ AgentTX 为每个步骤记录四类文件系统 effect：
   speculative suffix。
 - **Selective commit**：只把 ledger 中允许且属于目标 frontier 的路径物化到
   host，而不是复制整个 overlay。
+
+### 2.6 Official application instance
+
+每一道官方题在实验里被实例化成一个 AgentTX session，而不是改成另一种故障模型。
+分类必须保留官方原样，和我们自己的长度预算分成两条线，互不替代。
+
+**分类轴 A — 官方原样（论文/表里的主分类）。**
+
+- SWE-Bench Lite：官方没有 easy/medium/hard。主分类就是 12 个 `repo`
+  （django 114、sympy 77、matplotlib 23、scikit-learn 23、pytest 17、
+  sphinx 16，其余 astropy/requests/pylint/xarray/seaborn/flask）。
+  辅助字段用官方自带的 `version`、`FAIL_TO_PASS` / `PASS_TO_PASS` 列表，
+  不另发明难度标签。
+- Terminal-Bench：用 `task.yaml` 原字段。难度是 easy / medium / hard
+  （当前缓存 64 / 120 / 57），类别是 software-engineering、
+  system-administration、security 等。不把 easy 改写成 short。
+
+**分类轴 B — 实验长度预算（只影响注入文档行数和 max-turns）。**
+
+short / medium / long 是 AgentTX 为了让独立工作体积可扫而设的内部桶
+（SWE 按 `len(issue)+300×|FAIL_TO_PASS|` 得到 171/111/18；TB 按 instruction
+长度辅助得到 48/125/68）。图上可以单独画一条“长短”线，**不能**当作官方
+难度，也不能覆盖轴 A。
+
+**实例内容（官方字段不改）。** SWE 300 道 test split：`repo`、`base_commit`、
+`problem_statement`、gold `patch`、`test_patch`、`FAIL_TO_PASS`、
+`PASS_TO_PASS`；Lite gold 全部只改一个源文件。TB 当前 241 道
+`original-tasks`：instruction、Docker、`tests/`、多数有 `solution.sh`，
+工作区对应 `/app`。
+
+**叠加层（与旧 token/recovery 实验同构）。** 官方 snapshot 拷进共享 overlay
+后，仍用 tool-call 边界写入：错误 producer（SWE 取 gold 中的那个源文件，
+TB 取测试/solution 提到的输出路径）、时间上更晚的独立 `recovery_notes/`、
+由 producer 派生的 artifact、以及应失败的官方测试命令。成功定义不变：
+官方 verifier 通过，且独立文档仍在。
 
 ---
 
@@ -317,23 +364,29 @@ agenttx_full
 
 ### 5.2 当前结果
 
+64-call 长 workload（`motivation_runtime_comparison.csv`）：
+
 | 模式 | ms/step | 相对角色 | commit 前 host |
 |---|---:|---|:---:|
-| `bare` | 49.682 | 无保护性能下界 | 已污染 |
-| `per_call_try` | 260.690 | 每次调用重建隔离 | 干净 |
-| `shared_try` | 253.969 | upperdir 连续，但无因果恢复 | 干净 |
-| `shared_checkpoint` | 63.498 | 共享执行/快照组件成本 | 干净 |
-| `agenttx_without_read_tracing` | 62.560 | 依赖跟踪消融 | 干净 |
-| `agenttx_full` | 148.465 | 完整正确性路径 | 干净 |
+| `bare` | 45.379 | 无保护性能下界 | 已污染 |
+| `per_call_try` | 1671.902 | 每次调用重建隔离 | 干净 |
+| `shared_try` | 1675.566 | upperdir 连续，但无因果恢复 | 干净 |
+| `shared_checkpoint` | 110.804 | 共享执行/快照组件成本 | 干净 |
+| `agenttx_without_read_tracing` | 109.970 | 依赖跟踪消融 | 干净 |
+| `agenttx_full` | 161.098 | 完整正确性路径 | 干净 |
+
+同一 mixed workload 上 32/64/96/128-call 的完整对比（含 YoloFS/BranchFS/Crab/
+DeltaBox 与 AgentTX 系列）见 `motivation_complete_scaling.csv`，即论文评估
+Table `tab:runtime`（64-call 切片）与 Table `tab:scaling`（多步 sweep）。
 
 ### 5.3 说明了什么
 
 1. `bare` 最快，但代价是修改立即进入 host，不能作为安全系统结论；
-2. `per_call_try` 和 `shared_try` 都约为 254–261 ms/step，说明简单反复调用 try
+2. `per_call_try` 和 `shared_try` 都约为 1672–1676 ms/step，说明简单反复调用 try
    会产生很大的固定成本；
-3. 当前完整 AgentTX 为 148.465 ms/step，比 `per_call_try` 低约 43%，说明复用
+3. 当前完整 AgentTX 为 161.098 ms/step，比 `per_call_try` 低约 90%，说明复用
    worker/overlay 的优化有效；
-4. 完整 AgentTX 仍约为 `bare` 的 3 倍，说明性能问题尚未完全解决；
+4. 完整 AgentTX 仍约为 `bare` 的 3.5 倍，说明性能问题尚未完全解决；
 5. no-trace 虽接近 `shared_checkpoint`，但它不是正确性等价系统，会漏掉派生依赖。
 
 这组实验支撑的 motivation 是：既不能接受 bare 的污染，也不能接受朴素 per-call
@@ -392,13 +445,17 @@ src/agenttx/optimization_history/iteration_NN_<name>/
 
 | 长度 | bare ms/step | no-trace ms/step | full ms/step |
 |---:|---:|---:|---:|
-| 54 | 59.792 | 78.277 | 156.421 |
-| 64 | 50.357 | 64.332 | 139.520 |
-| 96 | 34.365 | 50.725 | 107.020 |
+| 54 | 53.970 | 148.711 | 205.308 |
+| 64 | 45.027 | 115.262 | 165.251 |
+| 96 | 31.249 | 81.591 | 116.870 |
 
 随着长度增加，三种模式的 ms/step 都下降，说明 workload 中存在可被更多步骤
-摊薄的固定成本。full 的总 wall time 仍从约 8.45 s 增长到 10.27 s，因此不能只
+摊薄的固定成本。full 的总 wall time 仍从约 11.1 s 增长到 11.2 s，因此不能只
 看下降的 ms/step 就声称更长 workload 总体更快。
+
+论文评估中的多步 sweep（Table `tab:scaling`）使用与 motivation 图
+（32/64/96/128-call mixed workload）完全相同的长度轴，并把 YoloFS/BranchFS/
+Crab/DeltaBox 与 AgentTX 系列放在同一张表里，见 `motivation_complete_scaling.csv`。
 
 ### 7.2 Tail 设计
 
@@ -407,11 +464,11 @@ full 模式：
 
 | 长度 | step p50 (ms) | step p95 (ms) | run p50 (ms) | run p95 (ms) |
 |---:|---:|---:|---:|---:|
-| 54 | 19.584 | 724.025 | 8,198.834 | 8,273.296 |
-| 64 | 21.373 | 718.572 | 8,987.127 | 9,674.797 |
-| 96 | 24.390 | 684.802 | 9,948.028 | 10,187.065 |
+| 54 | 19.496 | 632.163 | 8,932.783 | 9,402.304 |
+| 64 | 19.975 | 624.587 | 8,799.933 | 8,918.493 |
+| 96 | 20.748 | 596.413 | 9,545.836 | 9,698.088 |
 
-p50 只有约 20–24 ms，而 p95 接近 685–724 ms，说明成本由少数测试、tracing 或
+p50 只有约 19–21 ms，而 p95 接近 596–632 ms，说明成本由少数测试、tracing 或
 状态边界步骤主导。后续优化应优先针对长尾重操作，而不是只优化普通小写入。
 
 ### 7.3 Notebook 对应关系
@@ -501,7 +558,52 @@ retention、invalid removal 和 tests pass 均为 100%，host leak 为 0%；wall
 p50/p95 为 42.939/44.430 s。
 
 这回答了“LLM 是否能够使用因果恢复控制面”，但尚未覆盖多 package、大型真实
-repository、恶意 prompt 或长时间开放式 CI 修复。
+repository、恶意 prompt 或长时间开放式 CI 修复。官方 SWE/TB 实验（§9.3）
+把同一控制面放到真实开源仓库和官方 verifier 上，不改故障与回滚定义。
+
+### 9.3 Official SWE-Bench / Terminal-Bench recovery
+
+#### 设计思路
+
+第 8 节用受控 DAG 证明因果保留，第 9.2 节用 seeded 仓库证明 LLM 能调用
+回滚接口。二者的应用层仓库都偏小，因此引入两个官方 benchmark 放大
+workload。**测量原理与第 8、10 节相同**：
+
+1. 把官方 snapshot 放进共享 `try -N` overlay；
+2. 注入错误 producer、独立文档、派生 artifact、失败的官方测试；
+3. 比较 `causal`、`temporal_checkpoint`、`whole_branch_abort`；
+4. 再以 oracle（SWE gold patch / TB `solution.sh`）或 live harness
+   （DeepSeek `deepseek-v4-flash` / Codex `gpt-5.6-luna`）完成官方题。
+
+报告时两条分类线并存：轴 A 用官方 repo / TB difficulty·category；轴 B 才是
+short/medium/long 的独立工作体积。主表按轴 A 汇总，轴 B 只作长度扫描。
+
+成功谓词仍是官方 tests 通过 **且** independent documents 保留；token 分子
+仍是回滚之后的 replay / 全回路用量，故障前 token 不算节省。
+
+明确不混入的对照：
+
+- `bare` / `per_call_try` / `session_try` / `shared_try` 属于第 5 节隔离
+  成本，不在官方题上再跑一遍；
+- 进程 SIGKILL、Crab 式 chat 恢复不是本实验的故障或主对照；
+- 外部 harness 在账本里记成一次 opaque task，被恢复的是注入 DAG 的
+  tool-call 步骤，不是 harness 内部 turn。
+
+#### 当前结果
+
+协议与 runner 已接到 `experiments/scripts/bench_official_tasks.py`。结果按
+harness 分目录：`experiments/results/{deepseek_harness,codex}/` 与
+`experiments/results/official/`（oracle）。全量 catalog 的配对 live 数字
+仍以该 runner 写出的 `official_tasks.*` 与 `official_token_summary.*` 为准，
+不能把未完成 inflight 行、旧 synthetic token CSV 或已回退的 crash-restore
+目录拼进同一张表。
+
+#### 结论
+
+官方 benchmark 只替换 workload 的仓库与 verifier。若因果策略在 Lite/TB
+上不能同时满足 useful retained、invalid removed 和官方 tests，则第 8 节
+的机制结论不能直接写成应用层结论；若能，则第 10 节的 replay-token 收益
+可以引用官方题上的配对 token，而不是只引用 12/24/48 行玩具文档。
 
 ---
 
@@ -517,6 +619,10 @@ repository、恶意 prompt 或长时间开放式 CI 修复。
 而必须发生的 LLM replay”分开，只测后者。
 
 ### 10.2 Workload 与三种恢复策略
+
+机制归因仍使用下面这条五步轨迹。官方 SWE/TB 实验把**同一条轨迹形状**
+叠在官方 snapshot 上：producer 换成官方相关文件，独立文档换成
+`recovery_notes/`，测试换成官方 verifier。对照策略不变。
 
 轨迹固定为：
 
@@ -575,6 +681,14 @@ AgentTX saving 定义为粗粒度策略的完整恢复 token 减去 causal 的�
 CSV、JSON 或图片；数值结果必须来自后续 credentialed run。详见
 `docs/step26-end-to-end-token-comparison.md`。
 
+### 10.5 Official application token path
+
+兼容入口 `bench_token_recovery.py` 与 `bench_token_end_to_end.py` 不再创建
+synthetic 文档仓库，而是转到 `bench_official_tasks.py`。应用层 token 结论
+只应来自官方题回滚之后的 harness usage（`official_token_summary.*`），并
+与 success / independent retention 联读。§10.3 的 12/24/48 行数字保留为
+机制归因 provenance，不能再标成应用 workload。
+
 ---
 
 ## 11. Robustness 与辅助 microbench
@@ -629,8 +743,9 @@ snapshot 存储，但不代表 snapshot 遍历和 WAL copy 已经完全解决。
 | 因果回滚是否保留有效工作？ | 受控 DAG 中 100% 保留且 100% 删除无效结果 | 144-run DAG sweep |
 | 没有依赖捕获行不行？ | 不行，64-call 时只删掉 4% invalid subgraph | dependency ablation |
 | 真实 LLM 会使用恢复接口吗？ | 3/3 正确选根并恢复 | real-agent recovery |
-| 能节省多少 token？ | 最高测试点相对 checkpoint/whole abort 节省 1,424.7/3,340.3 | token sweep |
-| 完整恢复循环能否节省 token？ | 对比设计和实现已完成；数值待有凭据 VM 运行 | end-to-end token sweep |
+| 能节省多少 token？ | 最高测试点相对 checkpoint/whole abort 节省 1,424.7/3,340.3 | token sweep（机制归因） |
+| 完整恢复循环能否节省 token？ | deepseek-v4 已跑；须与 success 联读（causal 6/6） | `token_end_to_end.*` |
+| 换到官方 SWE/TB 后原理变了吗？ | 没有。仍是注入 DAG + causal/temporal/abort，只是仓库和 verifier 换成官方题 | `bench_official_tasks.py` |
 | 优化路径是否稳健？ | worker crash、256-step reload、4-agent concurrency 均通过 | robustness bundle |
 
 当前最准确的总体结论是：
@@ -646,13 +761,15 @@ snapshot 存储，但不代表 snapshot 遍历和 WAL copy 已经完全解决。
 ## 13. 当前不能越界声称的内容
 
 1. checkpoint/whole-branch 是恢复粒度 emulation，不是外部 artifact 端到端结果；
-2. Step 24 token 结果是 avoided replay tokens；Step 26 才计入完整 post-policy Agent 恢复循环，但当前尚无数值；
-3. 当前真实 Agent 任务是 seeded repository，不是大型真实开源项目；
+2. Step 24 token 结果是 avoided replay tokens；Step 26 才计入完整 post-policy Agent 恢复循环；应用层 token 必须来自官方题配对行，并与 success 联读；
+3. 第 9.1/9.2 节的真实 Agent 任务仍是 seeded repository；官方 SWE/TB 才是大型真实仓库上的应用层，二者不能混写成同一次实验；
 4. full tracing 依赖 Linux `strace` 或 eBPF tracepoint 后端（Step 27，`--trace-backend auto` 优先 eBPF），两者均未覆盖所有 syscall 和非文件系统 effect；
 5. hard-link/bind-mount alias 仍是 causal-by-default 的正确性边界；
 6. concurrency 目前只覆盖 disjoint workspaces；
 7. 历史优化数据部分未 interleave，适合 motivation 和成本分解，不应包装成严格
-   的最终统计显著性结论。
+   的最终统计显著性结论；
+8. 不能把进程 SIGKILL 或 Crab chat 恢复说成本工作的主故障模型；也不能把
+   `bare`/`try` 隔离成本数字写成官方题上的恢复收益。
 
 ---
 
@@ -685,6 +802,16 @@ snapshot 存储，但不代表 snapshot 遍历和 WAL copy 已经完全解决。
 - `motivation/plot_token_end_to_end.ipynb`
 - `docs/step26-end-to-end-token-comparison.md`
 
+### Official application workloads
+
+- `experiments/scripts/bench_official_tasks.py`
+- `experiments/workloads/swe_bench_suite.py`
+- `experiments/workloads/terminal_bench_suite.py`
+- `experiments/workloads/recovery_inject.py`
+- `experiments/results/{deepseek_harness,codex,official}/official_tasks.{csv,json,md}`
+- `experiments/results/{deepseek_harness,codex}/official_token_summary.{csv,json,md}`
+- `experiments/scripts/plot_official_tasks.py`
+
 ### 主要复现命令
 
 ```bash
@@ -710,4 +837,18 @@ python experiments/scripts/bench_robustness.py \
 
 python3 experiments/scripts/bench_token_end_to_end.py \
   --document-lines 12 24 48 --repeats 3 --max-turns 20
+
+# Official SWE/TB: same inject-DAG + causal/temporal/abort.
+# Compatibility token scripts dispatch here and must not recreate the
+# synthetic document repository.
+PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python \
+  experiments/scripts/bench_official_tasks.py --oracle --suite all
+
+PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python \
+  experiments/scripts/bench_official_tasks.py --suite all \
+  --harness deepseek_harness --modes causal temporal_checkpoint whole_branch_abort
+
+PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python \
+  experiments/scripts/bench_official_tasks.py --suite all \
+  --harness codex --modes causal temporal_checkpoint whole_branch_abort
 ```

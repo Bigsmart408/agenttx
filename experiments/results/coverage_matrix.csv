@@ -1,0 +1,12 @@
+case,expected,repeats,pass_rate,all_ok,status,sample_detail
+ordinary_path,correct,3,1.0,True,measured,EffectKind.WRITE:/tmp/agenttx-cov-iv9pk0fs/ws/data.txt EffectKind.READ:/tmp/agenttx-cov-iv9pk0fs/ws/data.txt
+openat_at_fdcwd,correct,3,1.0,True,measured,EffectKind.WRITE:/tmp/agenttx-cov-wyi03wvv/ws/x.txt EffectKind.READ:/tmp/agenttx-cov-wyi03wvv/ws/x.txt
+negative_lookup,correct,3,1.0,True,measured,EffectKind.NEGATIVE:/tmp/agenttx-cov-4qx000s2/ws/missing.txt
+symlink_alias,correct,3,1.0,True,measured,"aborted=[0, 1]; EffectKind.WRITE:/tmp/agenttx-cov-noht24tl/ws/real EffectKind.WRITE:/tmp/agenttx-cov-noht24tl/ws/real/data.txt EffectKind.READ:/tmp/agenttx-cov-noht24tl/ws/real"
+rename_delete_create,correct,3,1.0,True,measured,rename materialized
+preexisting_hardlink,correct,3,1.0,True,measured,same_inode=True
+upper_created_hardlink,correct,3,1.0,True,measured,same_inode=True
+external_alias,fail_closed,3,1.0,True,measured,"HardlinkTopologyError: cannot prove complete hard-link group for /tmp/agenttx-cov-75l5bwfq/ws/first.txt: inode link count is 2, workspace scan "
+bind_mount,fail_closed_or_unavailable,3,1.0,True,unavailable,"unavailable: mount: only root can use ""--bind"" option
+"
+fd_relative_dirfd,correct_or_fail_closed,3,1.0,True,measured,EffectKind.READ:/tmp/agenttx-cov-ibdrqfuv/ws/subdir EffectKind.READ:/tmp/agenttx-cov-ibdrqfuv/ws/subdir/leaf.txt

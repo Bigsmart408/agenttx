@@ -45,3 +45,31 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def test_fontconfig_cache_writes_are_ignored(tmp_path: Path) -> None:
+    pol = CommitPolicy(workdir=tmp_path)
+    path = "/home/pengpeng/miniconda3/envs/agenttx/var/cache/fontconfig/foo.cache-12"
+    assert pol.is_ignored(path)
+    led = Ledger()
+    led.add_step("fc", [Effect(path, EffectKind.WRITE)])
+    pol.assert_committable(led, 0)
+
+
+def test_tmp_build_log_is_ignored(tmp_path: Path) -> None:
+    pol = CommitPolicy(workdir=tmp_path)
+    path = "/tmp/build.log"
+    assert pol.is_ignored(path)
+    led = Ledger()
+    led.add_step("log", [Effect(path, EffectKind.WRITE)])
+    pol.assert_committable(led, 0)
+
+
+def test_agenttx_recovery_receipt_is_not_materialized(tmp_path: Path) -> None:
+    pol = CommitPolicy(workdir=tmp_path)
+    path = str(tmp_path / ".agenttx/recovery_manifest.json")
+    assert pol.is_ignored(str(tmp_path / ".agenttx"))
+    assert pol.is_ignored(path)
+    led = Ledger()
+    led.add_step("manifest", [Effect(path, EffectKind.WRITE)])
+    pol.assert_committable(led, 0)
