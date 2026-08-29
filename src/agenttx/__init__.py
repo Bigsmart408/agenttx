@@ -1,6 +1,6 @@
 """AgentTX: transactional side-effect control for agent trajectories."""
 
-__version__ = "0.0.15"
+__version__ = "0.0.16"
 
 from .conversation import ConversationLog
 from .harness import CodingAgentHarness, TrajectoryStep

@@ -1,9 +1,10 @@
 """Conversation log bound to the effect ledger.
 
 Filesystem rollback without conversation rewind leaves the model believing
-rolled-back tool results still happened.  This module stores TurnRecords at
-each LLM/tool boundary and rebuilds an OpenAI-format message list that matches
-the *active* ledger after causal or temporal rollback.
+rolled-back tool results still happened.  This module stores per-tool-call
+spans, infers copy-from-result dependencies that never appear as file-read
+edges, and rebuilds an OpenAI-format message list that matches the *active*
+spans after causal or temporal rollback.
 
 This is not CRIU / process checkpointing, and it does not restore hidden
 provider chain-of-thought.  External black-box agents still use a retained-
@@ -14,16 +15,30 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
-from typing import Iterable, List, Optional, Sequence
+from typing import Iterable, List, Optional, Sequence, Set
 
 from .ledger import EffectKind, Ledger
 
-SCHEMA = "agenttx.conversation/v1"
+SCHEMA = "agenttx.conversation/v2"
 CONTROL_TOOLS = frozenset(
     {"inspect_ledger", "rollback_causal", "rollback", "finish"}
 )
 ROLLBACK_TOOLS = frozenset({"rollback_causal", "rollback"})
+MIN_COPY_LEN = 8
+_SKIP_TOKENS = CONTROL_TOOLS | {
+    "write_file",
+    "append_file",
+    "read_file",
+    "run_shell",
+    "run_tests",
+    "delete_file",
+    "true",
+    "false",
+    "null",
+}
+_TOKEN_SPLIT = re.compile(r"[^\w.:/=+-]+")
 
 
 def canonical_json(payload: object) -> str:
@@ -32,6 +47,45 @@ def canonical_json(payload: object) -> str:
 
 def hash_payload(payload: object) -> str:
     return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def _walk_strings(value: object, acc: List[str]) -> None:
+    if isinstance(value, str):
+        acc.append(value)
+        return
+    if isinstance(value, dict):
+        for item in value.values():
+            _walk_strings(item, acc)
+        return
+    if isinstance(value, list):
+        for item in value:
+            _walk_strings(item, acc)
+
+
+def copied_tokens(*texts: str) -> List[str]:
+    """Distinctive strings copied from a tool result into later arguments."""
+    found: List[str] = []
+    seen = set()
+    for text in texts:
+        if not text:
+            continue
+        candidates = [text]
+        try:
+            parsed = json.loads(text)
+        except (TypeError, json.JSONDecodeError):
+            parsed = None
+        if parsed is not None:
+            _walk_strings(parsed, candidates)
+        for raw in candidates:
+            pieces = [raw]
+            pieces.extend(part for part in _TOKEN_SPLIT.split(raw) if part)
+            for piece in pieces:
+                token = piece.strip()
+                if len(token) < MIN_COPY_LEN or token in _SKIP_TOKENS or token in seen:
+                    continue
+                seen.add(token)
+                found.append(token)
+    return found
 
 
 def render_ledger_recovery_notice(
@@ -72,21 +126,78 @@ def render_ledger_recovery_notice(
 
 
 @dataclass
+class CallSpan:
+    call_id: str
+    tool_name: str
+    arguments: str = ""
+    result: str = ""
+    step_id: Optional[int] = None
+    parents: List[int] = field(default_factory=list)
+    status: str = "active"
+
+    def to_dict(self) -> dict:
+        return {
+            "call_id": self.call_id,
+            "tool_name": self.tool_name,
+            "arguments": self.arguments,
+            "result": self.result,
+            "step_id": self.step_id,
+            "parents": list(self.parents),
+            "status": self.status,
+        }
+
+    @staticmethod
+    def from_dict(data: dict) -> "CallSpan":
+        step_id = data.get("step_id")
+        return CallSpan(
+            call_id=str(data.get("call_id") or ""),
+            tool_name=str(data.get("tool_name") or ""),
+            arguments=str(data.get("arguments") or ""),
+            result=str(data.get("result") or ""),
+            step_id=None if step_id is None else int(step_id),
+            parents=[int(parent) for parent in data.get("parents") or []],
+            status=str(data.get("status") or "active"),
+        )
+
+
+@dataclass
 class TurnRecord:
     turn_id: int
     kind: str
     messages: List[dict] = field(default_factory=list)
-    step_ids: List[int] = field(default_factory=list)
-    tool_names: List[str] = field(default_factory=list)
+    assistant: dict = field(default_factory=dict)
+    calls: List[CallSpan] = field(default_factory=list)
     status: str = "active"
     request_hash: str = ""
     response_hash: str = ""
+
+    @property
+    def step_ids(self) -> List[int]:
+        return [call.step_id for call in self.calls if call.step_id is not None]
+
+    @property
+    def tool_names(self) -> List[str]:
+        return [call.tool_name for call in self.calls]
+
+    def active_calls(self) -> List[CallSpan]:
+        return [call for call in self.calls if call.status == "active"]
+
+    def refresh_status(self) -> None:
+        if self.kind in {"recovery", "user"}:
+            return
+        if self.calls:
+            if any(call.status == "active" for call in self.calls):
+                self.status = "active"
+            else:
+                self.status = "invalidated"
 
     def to_dict(self) -> dict:
         return {
             "turn_id": self.turn_id,
             "kind": self.kind,
             "messages": list(self.messages),
+            "assistant": dict(self.assistant),
+            "calls": [call.to_dict() for call in self.calls],
             "step_ids": list(self.step_ids),
             "tool_names": list(self.tool_names),
             "status": self.status,
@@ -96,16 +207,86 @@ class TurnRecord:
 
     @staticmethod
     def from_dict(data: dict) -> "TurnRecord":
-        return TurnRecord(
+        calls = [CallSpan.from_dict(item) for item in data.get("calls") or []]
+        messages = list(data.get("messages") or [])
+        assistant = dict(data.get("assistant") or {})
+        if not calls and messages:
+            calls = _spans_from_messages(
+                messages,
+                step_ids=data.get("step_ids") or [],
+                tool_names=data.get("tool_names") or [],
+            )
+            assistant = _assistant_from_messages(messages)
+        turn = TurnRecord(
             turn_id=int(data["turn_id"]),
             kind=str(data.get("kind") or "effect"),
-            messages=list(data.get("messages") or []),
-            step_ids=[int(step_id) for step_id in data.get("step_ids") or []],
-            tool_names=[str(name) for name in data.get("tool_names") or []],
+            messages=messages,
+            assistant=assistant,
+            calls=calls,
             status=str(data.get("status") or "active"),
             request_hash=str(data.get("request_hash") or ""),
             response_hash=str(data.get("response_hash") or ""),
         )
+        if turn.status == "invalidated":
+            for call in turn.calls:
+                call.status = "invalidated"
+        return turn
+
+
+def _assistant_from_messages(messages: Sequence[dict]) -> dict:
+    for message in messages:
+        if message.get("role") == "assistant":
+            return dict(message)
+    return {}
+
+
+def _spans_from_messages(
+    messages: Sequence[dict],
+    step_ids: Optional[Sequence[int]] = None,
+    tool_names: Optional[Sequence[str]] = None,
+) -> List[CallSpan]:
+    assistant = _assistant_from_messages(messages)
+    results = {
+        str(message.get("tool_call_id") or ""): str(message.get("content") or "")
+        for message in messages
+        if message.get("role") == "tool"
+    }
+    leftover_ids = [int(step_id) for step_id in (step_ids or [])]
+    leftover_names = [str(name) for name in (tool_names or [])]
+    spans: List[CallSpan] = []
+    for index, tool_call in enumerate(assistant.get("tool_calls") or []):
+        function = tool_call.get("function") or {}
+        call_id = str(tool_call.get("id") or f"call-{index}")
+        result = results.get(call_id, "")
+        step_id = _step_id_from_result(result)
+        if step_id is None and leftover_ids:
+            step_id = leftover_ids.pop(0)
+        name = str(function.get("name") or "")
+        if not name and leftover_names:
+            name = leftover_names.pop(0)
+        arguments = function.get("arguments") or ""
+        if not isinstance(arguments, str):
+            arguments = canonical_json(arguments)
+        spans.append(
+            CallSpan(
+                call_id=call_id,
+                tool_name=name,
+                arguments=arguments,
+                result=result,
+                step_id=step_id,
+            )
+        )
+    return spans
+
+
+def _step_id_from_result(result: str) -> Optional[int]:
+    try:
+        payload = json.loads(result)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if isinstance(payload, dict) and "step_id" in payload:
+        return int(payload["step_id"])
+    return None
 
 
 @dataclass
@@ -128,10 +309,46 @@ class ConversationLog:
         self.system = system
         self.task = task
 
+    def last_followup_text(self) -> str:
+        for turn in reversed(self.turns):
+            if turn.status != "active" or turn.kind != "user":
+                continue
+            if turn.messages:
+                return str(turn.messages[0].get("content") or "")
+        return ""
+
+    def append_followup(self, task: str) -> TurnRecord:
+        turn = TurnRecord(
+            turn_id=self._next_turn_id(),
+            kind="user",
+            messages=[{"role": "user", "content": task}],
+            status="active",
+        )
+        self.turns.append(turn)
+        return turn
+
     def _next_turn_id(self) -> int:
         if not self.turns:
             return 0
         return self.turns[-1].turn_id + 1
+
+    def _prior_spans(self) -> List[CallSpan]:
+        spans: List[CallSpan] = []
+        for turn in self.turns:
+            spans.extend(turn.calls)
+        return spans
+
+    def infer_parents(self, arguments: str, extra_spans: Optional[Sequence[CallSpan]] = None) -> List[int]:
+        parents: List[int] = []
+        seen = set()
+        for span in list(self._prior_spans()) + list(extra_spans or []):
+            if span.step_id is None or span.step_id in seen:
+                continue
+            tokens = copied_tokens(span.result)
+            if any(token and token in arguments for token in tokens):
+                parents.append(span.step_id)
+                seen.add(span.step_id)
+        return parents
 
     def append_turn(
         self,
@@ -140,39 +357,66 @@ class ConversationLog:
         tool_names: Optional[Sequence[str]] = None,
         kind: Optional[str] = None,
     ) -> TurnRecord:
-        step_ids = [int(step_id) for step_id in (step_ids or [])]
-        tool_names = [str(name) for name in (tool_names or [])]
         stored = [dict(message) for message in messages]
+        assistant = _assistant_from_messages(stored)
+        spans = _spans_from_messages(stored, step_ids=step_ids, tool_names=tool_names)
+        assigned: List[CallSpan] = []
+        for span in spans:
+            span.parents = self.infer_parents(span.arguments, extra_spans=assigned)
+            assigned.append(span)
         if kind is None:
-            if step_ids:
+            if any(span.step_id is not None for span in spans):
                 kind = "effect"
-            elif any(name in CONTROL_TOOLS for name in tool_names):
+            elif any(span.tool_name in CONTROL_TOOLS for span in spans):
+                kind = "control"
+            elif assistant:
                 kind = "control"
             else:
-                kind = "control"
-        assistant = next((msg for msg in stored if msg.get("role") == "assistant"), {})
-        tools = [msg for msg in stored if msg.get("role") == "tool"]
+                kind = "user"
+        tools = [message for message in stored if message.get("role") == "tool"]
         turn = TurnRecord(
             turn_id=self._next_turn_id(),
             kind=kind,
             messages=stored,
-            step_ids=step_ids,
-            tool_names=tool_names,
+            assistant=assistant,
+            calls=spans,
             request_hash=hash_payload(assistant),
             response_hash=hash_payload(tools),
         )
         self.turns.append(turn)
         return turn
 
+    def conversation_closure(self, step_ids: Iterable[int]) -> Set[int]:
+        frontier = {int(step_id) for step_id in step_ids}
+        changed = True
+        while changed:
+            changed = False
+            for turn in self.turns:
+                for span in turn.calls:
+                    if span.step_id is None or span.step_id in frontier:
+                        continue
+                    if frontier.intersection(span.parents):
+                        frontier.add(span.step_id)
+                        changed = True
+        return frontier
+
     def invalidate_steps(self, step_ids: Iterable[int]) -> List[int]:
-        wanted = {int(step_id) for step_id in step_ids}
+        wanted = self.conversation_closure(step_ids)
         invalidated: List[int] = []
         for turn in self.turns:
             if turn.status != "active":
                 continue
-            if wanted.intersection(turn.step_ids):
-                turn.status = "invalidated"
-                invalidated.append(turn.turn_id)
+            touched = False
+            for span in turn.calls:
+                if span.status != "active":
+                    continue
+                if span.step_id is not None and span.step_id in wanted:
+                    span.status = "invalidated"
+                    touched = True
+            if touched:
+                turn.refresh_status()
+                if turn.status == "invalidated":
+                    invalidated.append(turn.turn_id)
         return invalidated
 
     def invalidate_stale_control(self) -> List[int]:
@@ -181,29 +425,33 @@ class ConversationLog:
             if turn.status != "active":
                 continue
             if turn.kind in {"control", "recovery"}:
+                for span in turn.calls:
+                    span.status = "invalidated"
                 turn.status = "invalidated"
                 invalidated.append(turn.turn_id)
         return invalidated
 
     def append_recovery(self, notice: str, mode: str = "causal") -> TurnRecord:
-        turn = self.append_turn(
-            [{"role": "user", "content": notice}],
-            step_ids=[],
-            tool_names=[],
+        turn = TurnRecord(
+            turn_id=self._next_turn_id(),
             kind="recovery",
+            messages=[{"role": "user", "content": notice}],
+            status="active",
         )
+        self.turns.append(turn)
         self.last_recovery_mode = mode
         return turn
 
     def rewind(self, step_ids: Sequence[int], notice: str, mode: str = "causal") -> dict:
-        """Drop turns whose effects were rolled back; keep independent later work."""
+        """Drop spans whose effects or copied results were rolled back."""
         if self.is_empty():
             return {
                 "rewound": False,
                 "invalidated_turn_ids": [],
                 "generation": self.generation,
             }
-        effect_ids = self.invalidate_steps(step_ids)
+        drop = self.conversation_closure(step_ids)
+        effect_ids = self.invalidate_steps(drop)
         control_ids = self.invalidate_stale_control()
         self.append_recovery(notice, mode=mode)
         self.generation += 1
@@ -213,6 +461,7 @@ class ConversationLog:
             "generation": self.generation,
             "mode": mode,
             "retained_step_ids": self.active_step_ids(),
+            "dropped_step_ids": sorted(drop),
         }
 
     def active_step_ids(self) -> List[int]:
@@ -220,11 +469,45 @@ class ConversationLog:
         for turn in self.turns:
             if turn.status != "active":
                 continue
-            step_ids.extend(turn.step_ids)
+            for span in turn.active_calls():
+                if span.step_id is not None:
+                    step_ids.append(span.step_id)
         return step_ids
 
     def active_turns(self) -> List[TurnRecord]:
         return [turn for turn in self.turns if turn.status == "active"]
+
+    def _messages_for_turn(self, turn: TurnRecord) -> List[dict]:
+        if turn.kind in {"recovery", "user"}:
+            return [dict(message) for message in turn.messages]
+        active_calls = turn.active_calls()
+        if not turn.calls:
+            return [dict(message) for message in turn.messages]
+        if not active_calls:
+            return []
+        assistant = dict(turn.assistant or _assistant_from_messages(turn.messages))
+        keep_ids = {call.call_id for call in active_calls}
+        original_calls = list(assistant.get("tool_calls") or [])
+        kept = [item for item in original_calls if item.get("id") in keep_ids]
+        assistant["tool_calls"] = kept or None
+        messages = [assistant]
+        results = {
+            str(message.get("tool_call_id") or ""): message
+            for message in turn.messages
+            if message.get("role") == "tool"
+        }
+        for call in active_calls:
+            if call.call_id in results:
+                messages.append(dict(results[call.call_id]))
+            else:
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.call_id,
+                        "content": call.result,
+                    }
+                )
+        return messages
 
     def active_messages(self) -> List[dict]:
         messages: List[dict] = []
@@ -233,7 +516,7 @@ class ConversationLog:
         if self.task:
             messages.append({"role": "user", "content": self.task})
         for turn in self.active_turns():
-            messages.extend(dict(message) for message in turn.messages)
+            messages.extend(self._messages_for_turn(turn))
         return messages
 
     def to_dict(self) -> dict:

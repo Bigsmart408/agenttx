@@ -50,7 +50,9 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
             pass
 
 
-def _load_conversation(session_dir: Path) -> ConversationLog:
+def _load_conversation(session_dir: Path, data: Optional[dict] = None) -> ConversationLog:
+    if data and data.get("conversation") is not None:
+        return ConversationLog.from_dict(data.get("conversation"))
     path = Path(session_dir) / "conversation.json"
     if not path.exists():
         return ConversationLog()
@@ -162,7 +164,7 @@ class AgentTX:
             trace_backend=str(data.get("trace_backend", "auto")),
             commit_policy=commit_policy,
             object_catalog=HardlinkCatalog.from_dict(data.get("object_catalog")),
-            conversation=_load_conversation(session_dir),
+            conversation=_load_conversation(session_dir, data),
         )
         tx.pool = SharedSemisolate(
             workspace=tx.workspace,
@@ -223,9 +225,9 @@ class AgentTX:
             },
             "ledger": self.ledger.to_dict(),
             "object_catalog": self.object_catalog.to_dict(),
+            "conversation": self.conversation.to_dict(),
         }
         _atomic_write_json(meta, payload)
-        self._persist_conversation()
         self._meta_path = meta
 
     def start(self) -> None:
@@ -357,15 +359,6 @@ class AgentTX:
         self.history.append(rec)
         self._persist()
         return rec
-
-    def _conversation_path(self) -> Path:
-        assert self.pool is not None
-        return self.pool.session_dir / "conversation.json"
-
-    def _persist_conversation(self) -> None:
-        if self.conversation.is_empty():
-            return
-        _atomic_write_json(self._conversation_path(), self.conversation.to_dict())
 
     def _rewind_conversation(self, targets: Sequence[int], mode: str) -> dict:
         notice = render_ledger_recovery_notice(self.ledger, targets, mode=mode)

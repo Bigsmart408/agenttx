@@ -369,6 +369,57 @@ class LLMToolAgent:
         )
         self.harness.tx._persist()
 
+    def _ensure_task(self, task) -> None:
+        conversation = self.harness.tx.conversation
+        text = "" if task is None else str(task)
+        if not conversation.has_seed():
+            conversation.seed(SYSTEM, text)
+            self.harness.tx._persist()
+            return
+        if not text.strip() or text == conversation.task:
+            return
+        if conversation.last_followup_text() == text:
+            return
+        conversation.append_followup(text)
+        self.harness.tx._persist()
+
+    def _run_call_batch(self, calls):
+        deferred_rollback = None
+        tool_messages = []
+        kept_calls = []
+        finished = False
+        summary = ""
+        want_commit = False
+        for tc in calls:
+            name = tc["function"]["name"]
+            try:
+                args = json.loads(tc["function"]["arguments"] or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            if name == "rollback_causal":
+                deferred_rollback = (tc, args)
+                continue
+            if finished:
+                continue
+            result = self._dispatch(name, args)
+            tool_messages.append(
+                {"role": "tool", "tool_call_id": tc["id"], "content": result}
+            )
+            kept_calls.append(tc)
+            if name == "finish":
+                finished = True
+                summary = args.get("summary", "")
+                if args.get("commit"):
+                    want_commit = True
+        return {
+            "deferred_rollback": deferred_rollback,
+            "tool_messages": tool_messages,
+            "kept_calls": kept_calls,
+            "finished": finished,
+            "summary": summary,
+            "want_commit": want_commit,
+        }
+
     def run(self, task, commit=False):
         if not self.api_key:
             raise RuntimeError(
@@ -378,9 +429,7 @@ class LLMToolAgent:
         self.control_events = []
         client = None if self.provider.name == "anthropic" else self._client()
         conversation = self.harness.tx.conversation
-        if not conversation.has_seed():
-            conversation.seed(SYSTEM, task)
-            self.harness.tx._persist()
+        self._ensure_task(task)
         messages = conversation.active_messages()
         tool_calls = 0
         finished = False
@@ -404,52 +453,39 @@ class LLMToolAgent:
                 messages = conversation.active_messages()
                 finished = True
                 break
-            deferred_rollback = None
-            tool_messages = []
+            batch = self._run_call_batch(calls)
+            tool_calls += len(batch["kept_calls"])
+            if batch["deferred_rollback"] is not None:
+                tool_calls += 1
+            stored_assistant = dict(assistant)
+            stored_assistant["tool_calls"] = batch["kept_calls"] or None
             step_ids = []
             tool_names = []
-            kept_calls = []
-            for tc in calls:
-                tool_calls += 1
-                name = tc["function"]["name"]
+            for message, tc in zip(batch["tool_messages"], batch["kept_calls"]):
+                tool_names.append(tc["function"]["name"])
                 try:
-                    args = json.loads(tc["function"]["arguments"] or "{}")
+                    payload = json.loads(message.get("content") or "")
                 except json.JSONDecodeError:
-                    args = {}
-                if name == "rollback_causal":
-                    deferred_rollback = (tc, args)
-                    continue
-                result = self._dispatch(name, args)
-                tool_messages.append(
-                    {"role": "tool", "tool_call_id": tc["id"], "content": result}
-                )
-                kept_calls.append(tc)
-                if name == "finish":
-                    finished = True
-                    summary = args.get("summary", "")
-                    if args.get("commit"):
-                        want_commit = True
-                    tool_names.append(name)
-                elif name == "inspect_ledger":
-                    tool_names.append(name)
-                else:
-                    try:
-                        payload = json.loads(result)
-                    except json.JSONDecodeError:
-                        payload = {}
-                    if "step_id" in payload:
-                        step_ids.append(int(payload["step_id"]))
-                    tool_names.append(name)
-            stored_assistant = dict(assistant)
-            stored_assistant["tool_calls"] = kept_calls or None
+                    payload = {}
+                if isinstance(payload, dict) and "step_id" in payload:
+                    step_ids.append(int(payload["step_id"]))
             kind = "effect" if step_ids else "control"
-            if kept_calls or (assistant.get("content") and not deferred_rollback):
+            if batch["kept_calls"] or (assistant.get("content") and batch["deferred_rollback"] is None):
                 self._record_turn(
-                    stored_assistant, tool_messages, step_ids, tool_names, kind=kind
+                    stored_assistant,
+                    batch["tool_messages"],
+                    step_ids,
+                    tool_names,
+                    kind=kind,
                 )
-            if deferred_rollback:
-                _tc, rb_args = deferred_rollback
+            if batch["deferred_rollback"] is not None:
+                _tc, rb_args = batch["deferred_rollback"]
                 self._dispatch("rollback_causal", rb_args)
+            if batch["finished"]:
+                finished = True
+                summary = batch["summary"]
+                if batch["want_commit"]:
+                    want_commit = True
             messages = conversation.active_messages()
             if finished:
                 break
