@@ -304,11 +304,17 @@ class LLMToolAgent:
                 if step.status != "rolled_back"
                 and step.step_id > self.harness.tx.ledger.committed_frontier
             ]
+            conversation = self.harness.tx.conversation
             event = {
                 "tool": name,
                 "step_id": step_id,
                 "targets": list(targets),
                 "active_step_ids": active,
+                "conversation": {
+                    "rewound": conversation.generation > 0 and not conversation.is_empty(),
+                    "generation": conversation.generation,
+                    "retained_step_ids": conversation.active_step_ids(),
+                },
             }
             self.control_events.append(event)
             return json.dumps({"ok": True, **event})
@@ -350,6 +356,19 @@ class LLMToolAgent:
             "completion_tokens": completion_tokens,
         }
 
+    def _record_turn(self, assistant, tool_messages, step_ids, tool_names, kind):
+        conversation = self.harness.tx.conversation
+        stored_assistant = dict(assistant)
+        if assistant.get("tool_calls") is None:
+            stored_assistant.pop("tool_calls", None)
+        conversation.append_turn(
+            [stored_assistant, *tool_messages],
+            step_ids=step_ids,
+            tool_names=tool_names,
+            kind=kind,
+        )
+        self.harness.tx._persist()
+
     def run(self, task, commit=False):
         if not self.api_key:
             raise RuntimeError(
@@ -358,7 +377,11 @@ class LLMToolAgent:
             )
         self.control_events = []
         client = None if self.provider.name == "anthropic" else self._client()
-        messages = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": task}]
+        conversation = self.harness.tx.conversation
+        if not conversation.has_seed():
+            conversation.seed(SYSTEM, task)
+            self.harness.tx._persist()
+        messages = conversation.active_messages()
         tool_calls = 0
         finished = False
         summary = ""
@@ -370,17 +393,22 @@ class LLMToolAgent:
             text, calls, usage = self._one_turn(client, messages)
             prompt_tokens += int(usage.get("prompt_tokens") or 0)
             completion_tokens += int(usage.get("completion_tokens") or 0)
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": text,
-                    "tool_calls": calls or None,
-                }
-            )
+            assistant = {
+                "role": "assistant",
+                "content": text,
+                "tool_calls": calls or None,
+            }
             if not calls:
                 summary = text
+                self._record_turn(assistant, [], [], [], kind="control")
+                messages = conversation.active_messages()
                 finished = True
                 break
+            deferred_rollback = None
+            tool_messages = []
+            step_ids = []
+            tool_names = []
+            kept_calls = []
             for tc in calls:
                 tool_calls += 1
                 name = tc["function"]["name"]
@@ -388,14 +416,41 @@ class LLMToolAgent:
                     args = json.loads(tc["function"]["arguments"] or "{}")
                 except json.JSONDecodeError:
                     args = {}
+                if name == "rollback_causal":
+                    deferred_rollback = (tc, args)
+                    continue
                 result = self._dispatch(name, args)
-                messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
+                tool_messages.append(
+                    {"role": "tool", "tool_call_id": tc["id"], "content": result}
+                )
+                kept_calls.append(tc)
                 if name == "finish":
                     finished = True
                     summary = args.get("summary", "")
                     if args.get("commit"):
                         want_commit = True
-                    break
+                    tool_names.append(name)
+                elif name == "inspect_ledger":
+                    tool_names.append(name)
+                else:
+                    try:
+                        payload = json.loads(result)
+                    except json.JSONDecodeError:
+                        payload = {}
+                    if "step_id" in payload:
+                        step_ids.append(int(payload["step_id"]))
+                    tool_names.append(name)
+            stored_assistant = dict(assistant)
+            stored_assistant["tool_calls"] = kept_calls or None
+            kind = "effect" if step_ids else "control"
+            if kept_calls or (assistant.get("content") and not deferred_rollback):
+                self._record_turn(
+                    stored_assistant, tool_messages, step_ids, tool_names, kind=kind
+                )
+            if deferred_rollback:
+                _tc, rb_args = deferred_rollback
+                self._dispatch("rollback_causal", rb_args)
+            messages = conversation.active_messages()
             if finished:
                 break
         total_tokens = prompt_tokens + completion_tokens

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence
 
 from .commit_wal import CommitWAL
+from .conversation import ConversationLog, render_ledger_recovery_notice
 from .effects import effects_from_paths
 from .ledger import Effect, EffectKind, Ledger
 from .object_identity import (
@@ -49,6 +50,13 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
             pass
 
 
+def _load_conversation(session_dir: Path) -> ConversationLog:
+    path = Path(session_dir) / "conversation.json"
+    if not path.exists():
+        return ConversationLog()
+    return ConversationLog.from_dict(json.loads(path.read_text(encoding="utf-8")))
+
+
 @dataclass
 class ToolCallRecord:
     step_id: int
@@ -83,6 +91,7 @@ class AgentTX:
     trace_backend: str = "auto"
     commit_policy: Optional[CommitPolicy] = None
     object_catalog: HardlinkCatalog = field(default_factory=HardlinkCatalog)
+    conversation: ConversationLog = field(default_factory=ConversationLog)
     _catalog_initialized: bool = False
     _meta_path: Optional[Path] = None
 
@@ -153,6 +162,7 @@ class AgentTX:
             trace_backend=str(data.get("trace_backend", "auto")),
             commit_policy=commit_policy,
             object_catalog=HardlinkCatalog.from_dict(data.get("object_catalog")),
+            conversation=_load_conversation(session_dir),
         )
         tx.pool = SharedSemisolate(
             workspace=tx.workspace,
@@ -215,6 +225,7 @@ class AgentTX:
             "object_catalog": self.object_catalog.to_dict(),
         }
         _atomic_write_json(meta, payload)
+        self._persist_conversation()
         self._meta_path = meta
 
     def start(self) -> None:
@@ -347,6 +358,19 @@ class AgentTX:
         self._persist()
         return rec
 
+    def _conversation_path(self) -> Path:
+        assert self.pool is not None
+        return self.pool.session_dir / "conversation.json"
+
+    def _persist_conversation(self) -> None:
+        if self.conversation.is_empty():
+            return
+        _atomic_write_json(self._conversation_path(), self.conversation.to_dict())
+
+    def _rewind_conversation(self, targets: Sequence[int], mode: str) -> dict:
+        notice = render_ledger_recovery_notice(self.ledger, targets, mode=mode)
+        return self.conversation.rewind(targets, notice, mode=mode)
+
     def rollback_from(self, step_id: Optional[int] = None) -> List[int]:
         if not self.ledger.steps:
             return []
@@ -363,6 +387,7 @@ class AgentTX:
         self.ledger.mark_rolled_back(targets)
         assert self.pool is not None
         self.pool.rollback_steps(targets)
+        self._rewind_conversation(targets, mode="temporal")
         self._persist()
         return targets
 
@@ -425,6 +450,7 @@ class AgentTX:
         assert self.pool is not None
         self.pool.rollback_causal(targets, sorted(target_paths))
         self.ledger.mark_rolled_back(targets)
+        self._rewind_conversation(targets, mode="causal")
         self._persist()
         return targets
 
