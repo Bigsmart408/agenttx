@@ -348,3 +348,64 @@ def test_run_appends_new_task_on_resume(tmp_path):
         assert agent.harness.tx.conversation.last_followup_text() == "second task"
     finally:
         agent.close(destroy=True)
+
+
+def test_write_then_read_rewind_uses_ledger_parents(tmp_path):
+    """Empty write stdout still parents a later read via the ledger edge."""
+    from agenttx.conversation import record_tool_record
+    from agenttx.harness import CodingAgentHarness
+
+    workdir = tmp_path / "ws"
+    session = tmp_path / "sess"
+    workdir.mkdir()
+    harness = CodingAgentHarness(workdir=workdir, session_dir=session)
+    try:
+        conv = harness.tx.conversation
+        conv.seed(SYSTEM, "edit files")
+        written = harness.call_tool(
+            "write_file",
+            {"path": "notes/keep.txt", "content": "hello-world-body"},
+        )
+        record_tool_record(
+            conv,
+            written,
+            args={"path": "notes/keep.txt", "content": "hello-world-body"},
+        )
+        read = harness.call_tool("read_file", {"path": "notes/keep.txt"})
+        record_tool_record(conv, read, args={"path": "notes/keep.txt"})
+        assert written.step_id in read.parents
+        assert written.step_id in conv.turns[1].calls[0].parents
+        result = conv.rewind([written.step_id], "notice")
+        assert written.step_id not in conv.active_step_ids()
+        assert read.step_id not in conv.active_step_ids()
+        blob = json.dumps(conv.active_messages())
+        assert "hello-world-body" not in blob
+        assert "[agenttx-injected]" not in blob
+        assert read.step_id in result["dropped_step_ids"]
+    finally:
+        harness.close(destroy=True)
+
+
+def test_stale_conversation_sidecar_is_ignored(tmp_path):
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    session = tmp_path / "session"
+    tx = AgentTX.begin(workdir=workdir, session_dir=session)
+    try:
+        tx.conversation.seed(SYSTEM, "build files")
+        tx._persist()
+        stale = ConversationLog()
+        stale.seed(SYSTEM, "stale task")
+        stale.append_turn(*_turn(99, "ghost.txt", "ghost-content-here"))
+        (session / "conversation.json").write_text(
+            json.dumps(stale.to_dict()), encoding="utf-8"
+        )
+        resumed = AgentTX.load(session)
+        blob = json.dumps(resumed.conversation.active_messages())
+        assert "ghost.txt" not in blob
+        assert "stale task" not in blob
+        assert resumed.conversation.task == "build files"
+        resumed.close(destroy=False)
+    finally:
+        tx.close(destroy=True)
+

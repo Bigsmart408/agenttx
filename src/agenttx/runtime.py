@@ -51,12 +51,14 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
 
 
 def _load_conversation(session_dir: Path, data: Optional[dict] = None) -> ConversationLog:
+    """Load the conversation embedded in ``agenttx.json``.
+
+    A leftover ``conversation.json`` sidecar is ignored.  Persist never writes
+    that file, so loading it would resurrect a stale log after rollback.
+    """
     if data and data.get("conversation") is not None:
         return ConversationLog.from_dict(data.get("conversation"))
-    path = Path(session_dir) / "conversation.json"
-    if not path.exists():
-        return ConversationLog()
-    return ConversationLog.from_dict(json.loads(path.read_text(encoding="utf-8")))
+    return ConversationLog()
 
 
 @dataclass

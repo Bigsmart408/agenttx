@@ -23,6 +23,7 @@ from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 from experiments.workloads.recovery_inject import (
     DocSpec,
     all_documents_valid,
+    all_midcrash_docs,
     dag_is_valid,
     inject_recovery_dag,
     recovery_prompt,
@@ -417,21 +418,9 @@ def fetch_instance(instance_id: str, cache_root: Path) -> dict:
     path = Path(cache_root) / "swe_bench" / f"{instance_id}.json"
     if path.exists():
         return json.loads(path.read_text(encoding="utf-8"))
-    found = None
-    for offset in range(0, 400, 100):
-        data = json.loads(_urlopen(HF_ROWS.format(offset=offset)).read())
-        for item in data.get("rows") or []:
-            row = item["row"]
-            if row["instance_id"] == instance_id:
-                found = row
-                break
-        if found is not None:
-            break
-    if found is None:
-        raise KeyError(f"SWE-Bench Lite instance not found: {instance_id}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(found, indent=2) + "\n", encoding="utf-8")
-    return found
+    raise FileNotFoundError(
+        f"local SWE instance json missing: {path} (refusing HuggingFace fetch)"
+    )
 
 
 def _git(args: Sequence[str], cwd: Optional[Path] = None) -> str:
@@ -446,39 +435,39 @@ def _git(args: Sequence[str], cwd: Optional[Path] = None) -> str:
     return result.stdout.strip()
 
 
+def _upstream_bare(cache_root: Path, repo: str) -> Path:
+    return Path(cache_root) / "swe_bench" / "upstream" / (repo.replace("/", "__") + ".git")
+
+
 def ensure_repo(task: SWETask, cache_root: Path) -> Tuple[Path, dict]:
+    """Use a pre-cloned instance tree. Never fetch GitHub during a run."""
     instance = fetch_instance(task.instance_id, cache_root)
     cache_root = Path(cache_root)
     repo_dir = cache_root / "swe_bench" / "repos" / task.instance_id
-    url = f"https://github.com/{instance['repo']}.git"
     commit = instance["base_commit"]
     if not (repo_dir / ".git").exists():
-        repo_dir.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(
-            ["git", "clone", url, str(repo_dir)],
-            check=True,
-            stdout=subprocess.DEVNULL,
-        )
-    head = _git(["rev-parse", "HEAD"], cwd=repo_dir)
-    if head != commit:
-        subprocess.run(
-            ["git", "fetch", "--depth", "1", "origin", commit],
-            cwd=str(repo_dir),
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        # Fall back to a full fetch if the shallow object is missing.
-        try:
-            _git(["checkout", "--detach", commit], cwd=repo_dir)
-        except subprocess.CalledProcessError:
+        upstream = _upstream_bare(cache_root, str(instance.get("repo") or ""))
+        if (upstream / "HEAD").exists():
+            repo_dir.parent.mkdir(parents=True, exist_ok=True)
             subprocess.run(
-                ["git", "fetch", "origin", commit],
-                cwd=str(repo_dir),
+                ["git", "clone", "--local", str(upstream), str(repo_dir)],
                 check=True,
                 stdout=subprocess.DEVNULL,
             )
             _git(["checkout", "--detach", commit], cwd=repo_dir)
+        else:
+            raise FileNotFoundError(
+                f"local SWE clone missing: {repo_dir} "
+                f"(refusing to git clone {instance.get('repo')})"
+            )
+    head = _git(["rev-parse", "HEAD"], cwd=repo_dir)
+    if head != commit:
+        try:
+            _git(["checkout", "--detach", commit], cwd=repo_dir)
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"local SWE clone {repo_dir} is at {head}, need {commit}; refusing git fetch"
+            ) from exc
     marker = repo_dir / ".agenttx_test_patch"
     if not marker.exists():
         patch = instance["test_patch"]
@@ -841,7 +830,7 @@ def verify(workdir: Path, task: SWETask, instance: dict, python: str) -> dict:
         tests = _verify_tests_docker(workdir, task, instance)
     else:
         tests = _verify_tests_host(workdir, task, instance, python)
-    docs_ok = all_documents_valid(workdir, task.docs())
+    docs_ok = all_documents_valid(workdir, all_midcrash_docs(task.docs()))
     derived_removed = not (Path(workdir) / "recovery_build" / "derived.txt").exists()
     tests["documents_valid"] = docs_ok
     tests["derived_removed"] = derived_removed

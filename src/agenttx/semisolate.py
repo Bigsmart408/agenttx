@@ -20,6 +20,7 @@ _BPF_MARKER_PREFIX = ".agenttx-bpf-marker-"
 _BPF_MARKER_HOLD = "hold"
 _BPF_MARKER_GO = "go"
 _CAPTURE_CAP_CHARS = 8_000_000
+_MAX_BPF_WORKER_ATTEMPTS = 3
 
 
 
@@ -473,7 +474,10 @@ class SharedSemisolate:
             reader.join(timeout=2)
 
     def _run_step_bpf_persistent(
-        self, command: Sequence[str], flags: Sequence[str]
+        self,
+        command: Sequence[str],
+        flags: Sequence[str],
+        _attempt: int = 1,
     ) -> Tuple[subprocess.CompletedProcess, List[Effect], float]:
         """Run one step while reusing a session-level bpftrace attachment.
 
@@ -511,14 +515,20 @@ class SharedSemisolate:
             }
             try:
                 self._dispatch_worker(request)
-            except Exception:
+            except Exception as exc:
                 self._worker_failure_count += 1
                 self._stop_persistent_bpf()
                 self._stop_worker()
                 self._repair_worker_sandbox()
+                if _attempt >= _MAX_BPF_WORKER_ATTEMPTS:
+                    raise RuntimeError(
+                        f"persistent bpf worker failed {_attempt} times"
+                    ) from exc
                 # Restart the persistent worker and tracer.  The former
                 # per-step attach fallback is intentionally gone.
-                return self._run_step_bpf_persistent(command, flags)
+                return self._run_step_bpf_persistent(
+                    command, flags, _attempt=_attempt + 1
+                )
             assert self._worker_process is not None
             seed = self._worker_process.pid
             self._start_persistent_bpf(seed)
@@ -798,8 +808,15 @@ class SharedSemisolate:
         body = json.dumps(request, separators=(",", ":")).encode("utf-8")
         if self._worker_crash_once:
             self._worker_crash_once = False
-            self._worker_process.kill()
-            self._worker_process.wait(timeout=2)
+            proc = self._worker_process
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                pass
             raise RuntimeError("injected persistent-worker crash")
         self._worker_process.stdin.write(struct.pack("!I", len(body)))
         self._worker_process.stdin.write(body)

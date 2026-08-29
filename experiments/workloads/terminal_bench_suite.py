@@ -24,6 +24,7 @@ except ImportError:  # pragma: no cover - the benchmark environment provides PyY
 from experiments.workloads.recovery_inject import (
     DocSpec,
     all_documents_valid,
+    all_midcrash_docs,
     inject_recovery_dag,
     recovery_prompt,
 )
@@ -224,12 +225,9 @@ def ensure_tb_repo(cache_root: Path) -> Path:
     dest = Path(cache_root) / "terminal_bench" / "terminal-bench-1"
     if (dest / ".git").exists() or (dest / "original-tasks").exists():
         return dest
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["git", "clone", "--depth", "1", TB_REPO, str(dest)],
-        check=True,
+    raise FileNotFoundError(
+        f"local terminal-bench missing: {dest} (refusing git clone)"
     )
-    return dest
 
 
 def task_source(cache_root: Path, task: TBTask) -> Path:
@@ -336,10 +334,26 @@ def task_prompt(
     )
 
 
-def apply_oracle(agent, task: TBTask, python: str = "python") -> None:
-    cmd = task.oracle_cmd
-    if cmd.startswith("python "):
-        cmd = python + cmd[len("python") :]
+def apply_oracle(agent, task: TBTask, python: str = "python", cache_root: Optional[Path] = None) -> None:
+    """Apply the gold solution. Official tasks keep solution.sh out of /app; run a rewritten copy."""
+    if task.official_full:
+        if cache_root is None:
+            raise ValueError("official Terminal-Bench oracle requires cache_root")
+        src = task_source(cache_root, task) / "solution.sh"
+        if not src.is_file():
+            raise FileNotFoundError(src)
+        workdir = Path(agent.harness.workdir).resolve()
+        rewritten = _rewrite_app_paths(src.read_text(encoding="utf-8"), workdir)
+        session_dir = Path(getattr(agent.harness.tx, "session_dir", "/tmp"))
+        session_dir.mkdir(parents=True, exist_ok=True)
+        script = session_dir / f"oracle_{task.task_id}.sh"
+        script.write_text(rewritten, encoding="utf-8")
+        script.chmod(0o755)
+        cmd = f"bash {script}"
+    else:
+        cmd = task.oracle_cmd
+        if cmd.startswith("python "):
+            cmd = python + cmd[len("python") :]
     step = agent.harness.call_tool("run_shell", {"cmd": cmd})
     code = getattr(step, "exit_code", 0)
     if int(code) != 0:
@@ -360,7 +374,7 @@ def verify(workdir: Path, task: TBTask, python: str) -> dict:
         timeout=900 if task.official_full else 180,
         check=False,
     )
-    docs_ok = all_documents_valid(workdir, task.docs())
+    docs_ok = all_documents_valid(workdir, all_midcrash_docs(task.docs()))
     derived_removed = not (Path(workdir) / "recovery_build" / "derived.txt").exists()
     return {
         "tests_rc": result.returncode,

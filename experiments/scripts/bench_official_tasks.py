@@ -112,6 +112,7 @@ from experiments.workloads import terminal_bench_suite as tb  # noqa: E402
 from experiments.workloads.recovery_inject import (  # noqa: E402
     RECOVERY_MANIFEST_PATH,
     build_recovery_manifest,
+    all_midcrash_docs,
     dag_is_valid,
     doc_replay_prompt,
     independent_work_discarded,
@@ -299,6 +300,7 @@ def run_once(
     trace_backend: str,
     python: str,
     oracle: bool,
+    replay_docs: bool = False,
     harness_backend: str = "deepseek_harness",
     harness_root: Optional[Path] = None,
     harness_command: Optional[str] = None,
@@ -397,7 +399,7 @@ def run_once(
             raise ValueError(suite)
 
         host_baseline = _snapshot(workdir, extra_watch)
-        if oracle:
+        if oracle and not replay_docs:
 
             class _OracleAgent:
                 def __init__(self) -> None:
@@ -411,6 +413,17 @@ def run_once(
                     self.harness.close(destroy=destroy)
 
             agent = _OracleAgent()
+        elif oracle and replay_docs:
+            from agenttx.agents.llm_agent import LLMToolAgent
+
+            agent = LLMToolAgent(
+                workdir=workdir,
+                session_dir=session_dir,
+                model=model,
+                provider=provider,
+                max_turns=turns,
+                trace_backend=trace_backend,
+            )
         elif harness_backend == "legacy":
             from agenttx.agents.llm_agent import LLMToolAgent
 
@@ -447,17 +460,18 @@ def run_once(
         targets = _apply_policy(agent, mode, injected["root_step"])
         # Official-task session is unchanged. Isolated replay runs only when
         # the policy discarded independent steps; those tokens are the savings.
+        crash_docs = list(all_midcrash_docs(task.docs()))
         if independent_work_discarded(injected, agent.harness.tx.ledger):
-            missing_docs = missing_independent_docs(workdir, list(task.docs()))
+            missing_docs = missing_independent_docs(workdir, crash_docs, agent=agent)
         else:
             missing_docs = []
         missing_doc_paths = [spec.path for spec in missing_docs]
         doc_replay_needed = bool(missing_docs)
-        if not oracle and missing_docs:
+        if missing_docs and (not oracle or replay_docs):
             replay_prompt = doc_replay_prompt(docs=missing_docs, task_name=task.name)
-            if harness_backend != "legacy":
+            if (not oracle) and harness_backend != "legacy":
                 replay_prompt = _externalize_prompt(replay_prompt)
-            if harness_backend == "legacy":
+            if oracle or harness_backend == "legacy":
                 replay_result = agent.run(replay_prompt, commit=False)
             else:
                 replay_result = agent.run(replay_prompt)
@@ -468,7 +482,7 @@ def run_once(
         # Build the handoff from the final workspace state that the official
         # agent will actually receive. Runtime verification reads happen before
         # recovery_first, so they are not charged as agent reopen behavior.
-        docs = list(task.docs())
+        docs = crash_docs
         document_contents = read_recovery_documents(agent, docs)
         state_paths = {
             str(injected.get("faulty_path") or "").lstrip("./"),
@@ -533,7 +547,7 @@ def run_once(
             if suite == "swe":
                 swe.apply_oracle(agent, instance)
             else:
-                tb.apply_oracle(agent, task, python)
+                tb.apply_oracle(agent, task, python, cache_root=cache_root)
             finished = True
             finish_called = True
             total_tokens = 0
@@ -1160,9 +1174,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--python", default=DEFAULT_PYTHON)
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--oracle", action="store_true", help="apply official gold/oracle after policy")
+    parser.add_argument(
+        "--replay-docs",
+        action="store_true",
+        help="replay missing independent documents with the live agent even when --oracle is set",
+    )
     args = parser.parse_args(argv)
     load_provider_env(ROOT)
     load_llm_env()
+    if args.oracle and args.replay_docs:
+        profile = resolve_provider(args.provider, ROOT)
+        if not profile.api_key:
+            print("missing provider API key for --replay-docs", file=sys.stderr)
+            return 2
     os.environ.setdefault("TRY_SKIP_MOUNTS", "/data")
 
     suites = ["swe", "tb"] if args.suite == "all" else [args.suite]
@@ -1348,6 +1372,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     trace_backend=args.trace_backend,
                     python=args.python,
                     oracle=args.oracle,
+                    replay_docs=args.replay_docs,
                     harness_backend=args.harness,
                     harness_root=args.harness_root,
                     harness_command=args.harness_command,

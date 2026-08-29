@@ -1,9 +1,12 @@
 """Shared inject–policy–repair DAG for application-workload recovery.
 
 Official SWE-Bench / Terminal-Bench instances provide the workspace and the
-utility predicate.  This module overlays one faulty producer, later independent
-documents, a derived artifact, and a failing verification command so causal vs
-coarse recovery can be compared on the same ledger.
+utility predicate.  This module overlays an *agent logical fault*, not an
+infrastructure SIGKILL: independent notes before the fault, one faulty
+producer, later independent notes that do not depend on the fault, a derived
+artifact, and a failing verification command.  Process crashes (WAL / worker /
+SIGKILL) are a different suite.  Causal, temporal, and whole-branch policies
+then diverge.
 """
 
 from __future__ import annotations
@@ -14,8 +17,43 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from agenttx.conversation import record_tool_record
+
 
 RECOVERY_MANIFEST_PATH = ".agenttx/recovery_manifest.json"
+
+INJECT_SYSTEM = (
+    "You are a coding agent in an AgentTX-protected workspace. Use tools for edits. "
+    "Call finish when done."
+)
+
+
+def bind_injected_step(agent, record, args: Optional[Mapping[str, object]] = None, *, task_name: str) -> None:
+    """Record one injected tool call so later rewind can drop invalidated spans."""
+    tx = getattr(getattr(agent, "harness", None), "tx", None)
+    if tx is None or record is None:
+        return
+    conversation = tx.conversation
+    if conversation.is_empty():
+        conversation.seed(
+            INJECT_SYSTEM,
+            (
+                f"You are mid-session on {task_name}. Independent notes, a producer, "
+                "and derived artifacts were written; recovery may follow."
+            ),
+        )
+    record_tool_record(conversation, record, args=args)
+    persist = getattr(tx, "_persist", None)
+    if callable(persist):
+        persist()
+
+
+def _call_tool(agent, name: str, args: dict, *, task_name: str, bind: bool):
+    record = agent.harness.call_tool(name, args)
+    if bind:
+        bind_injected_step(agent, record, args, task_name=task_name)
+    return record
+
 
 
 @dataclass(frozen=True)
@@ -34,6 +72,33 @@ def document_content(prefix: str, lines: int, task_name: str) -> str:
             f"{index:03d} records a repository decision."
         )
     return "\n".join(rows) + "\n"
+
+
+POST_CRASH_PATH = "recovery_notes/post_crash.md"
+POST_CRASH_PREFIX = "postcrash"
+
+
+def midcrash_docs(docs: Sequence[DocSpec]) -> Tuple[Tuple[DocSpec, ...], Tuple[DocSpec, ...]]:
+    """Split independent notes into a pre-crash prefix and a post-crash sibling.
+
+    Temporal rollback from the fault keeps the prefix and drops the suffix.
+    Causal keeps both. Whole-branch abort drops both.  A single-document task
+    gets an extra post-crash note so the three policies still diverge.
+    """
+    docs = tuple(docs)
+    extra_lines = docs[0].lines if docs else 16
+    extra = DocSpec(POST_CRASH_PATH, POST_CRASH_PREFIX, extra_lines)
+    if len(docs) >= 2:
+        n_before = max(1, len(docs) // 2)
+        return docs[:n_before], docs[n_before:]
+    if docs:
+        return docs, (extra,)
+    return (DocSpec("recovery_notes/design.md", "design", extra_lines),), (extra,)
+
+
+def all_midcrash_docs(docs: Sequence[DocSpec]) -> Tuple[DocSpec, ...]:
+    before, after = midcrash_docs(docs)
+    return before + after
 
 
 def document_valid(path: Path, prefix: str, lines: int) -> bool:
@@ -70,6 +135,17 @@ def _step_failed(step) -> bool:
     return int(code) != 0
 
 
+def _write_docs(agent, specs: Sequence[DocSpec], task_name: str, *, bind: bool) -> list:
+    steps = []
+    for spec in specs:
+        args = {
+            "path": spec.path,
+            "content": document_content(spec.prefix, spec.lines, task_name),
+        }
+        steps.append(_call_tool(agent, "write_file", args, task_name=task_name, bind=bind))
+    return steps
+
+
 def inject_recovery_dag(
     agent,
     *,
@@ -80,35 +156,55 @@ def inject_recovery_dag(
     faulty_content: str,
     derived_cmd: str,
     test_cmd: str,
+    bind_conversation: bool = True,
 ) -> dict:
-    """Write tests/context, a faulty producer, independent docs, derived state, then fail tests."""
+    """Inject a crash in the middle of independent work.
 
+    Order: optional prefix writes, pre-crash notes, faulty producer, post-crash
+    notes that do not feed derived state, derived artifact, failing tests.
+
+    ``bind_conversation`` records each injected tool call on the native
+    conversation log so rollback can rewind logical state with the overlay.
+    """
+    before_specs, after_specs = midcrash_docs(docs)
     prefix_steps = []
     for path, content in prefix_writes:
+        args = {"path": path, "content": content}
         prefix_steps.append(
-            agent.harness.call_tool("write_file", {"path": path, "content": content})
+            _call_tool(agent, "write_file", args, task_name=task_name, bind=bind_conversation)
         )
-    faulty = agent.harness.call_tool(
+    before_steps = _write_docs(agent, before_specs, task_name, bind=bind_conversation)
+    faulty = _call_tool(
+        agent,
         "write_file",
         {"path": faulty_path, "content": faulty_content},
+        task_name=task_name,
+        bind=bind_conversation,
     )
-    independent_steps = []
-    for spec in docs:
-        independent_steps.append(
-            agent.harness.call_tool(
-                "write_file",
-                {
-                    "path": spec.path,
-                    "content": document_content(spec.prefix, spec.lines, task_name),
-                },
-            )
-        )
-    derived = agent.harness.call_tool("run_shell", {"cmd": derived_cmd})
-    failing = agent.harness.call_tool("run_tests", {"cmd": test_cmd})
+    after_steps = _write_docs(agent, after_specs, task_name, bind=bind_conversation)
+    independent_steps = before_steps + after_steps
+    derived = _call_tool(
+        agent,
+        "run_shell",
+        {"cmd": derived_cmd},
+        task_name=task_name,
+        bind=bind_conversation,
+    )
+    failing = _call_tool(
+        agent,
+        "run_tests",
+        {"cmd": test_cmd},
+        task_name=task_name,
+        bind=bind_conversation,
+    )
     return {
         "prefix_steps": [step.step_id for step in prefix_steps],
         "root_step": faulty.step_id,
         "faulty_path": faulty_path,
+        "docs_before": [spec.path for spec in before_specs],
+        "docs_after": [spec.path for spec in after_specs],
+        "independent_before_steps": [step.step_id for step in before_steps],
+        "independent_after_steps": [step.step_id for step in after_steps],
         "independent_steps": [step.step_id for step in independent_steps],
         "derived_step": derived.step_id,
         "derived_paths": sorted(
@@ -138,11 +234,17 @@ def inject_recovery_dag(
 
 
 def dag_is_valid(injected: dict) -> bool:
+    before = list(injected.get("independent_before_steps") or ())
+    after = list(injected.get("independent_after_steps") or ())
+    root = injected.get("root_step")
+    if root is None or not before or not after:
+        return False
     return bool(
         injected.get("tests_failed")
         and injected.get("root_is_parent_of_derived")
         and injected.get("root_is_parent_of_tests")
         and not injected.get("independent_is_parent_of_derived")
+        and max(before) < int(root) < min(after)
     )
 
 
@@ -396,11 +498,29 @@ def retained_artifact_access(
     }
 
 
-def missing_independent_docs(workdir: Path, docs: Sequence[DocSpec]) -> List[DocSpec]:
-    """Return independent notes that are absent or invalid on the host workdir."""
+def missing_independent_docs(workdir: Path, docs: Sequence[DocSpec], agent=None) -> List[DocSpec]:
+    """Return independent notes absent from the live overlay, not the host lowerdir.
+
+    Host ``Path(workdir)`` does not see kept upperdir files after a partial
+    rollback. Token accounting must follow the session the agent actually sees.
+    """
     missing: List[DocSpec] = []
+    tx = getattr(getattr(agent, "harness", None), "tx", None)
     for spec in docs:
-        if not document_valid(Path(workdir) / spec.path, spec.prefix, spec.lines):
+        path = Path(workdir) / spec.path
+        if tx is not None:
+            exists = tx.path_exists(path)
+            if not exists:
+                missing.append(spec)
+                continue
+            record = agent.harness.call_tool("read_file", {"path": spec.path})
+            text = str(getattr(record, "stdout", "") or "")
+            if int(getattr(record, "returncode", 1)) != 0 or not document_text_valid(
+                text, spec.prefix, spec.lines
+            ):
+                missing.append(spec)
+            continue
+        if not document_valid(path, spec.prefix, spec.lines):
             missing.append(spec)
     return missing
 
@@ -476,20 +596,27 @@ def recovery_prompt(
             f"`{test_cmd}`. Do not inventory `recovery_notes/`."
         )
     elif mode == "temporal_checkpoint":
+        before_specs, after_specs = midcrash_docs(docs)
         policy = (
-            "The temporal checkpoint policy restored an earlier workspace snapshot, "
-            "so later independent recovery notes were lost."
+            "The temporal checkpoint policy restored the workspace to the crash "
+            "timestamp. Independent notes written before the crash remain; notes "
+            "written after it were lost."
         )
-        doc_lines = "\n".join(
+        kept = "\n".join(
+            f"- `{spec.path}` was written before the crash and is already complete. "
+            "Do not open, verify, or rewrite it."
+            for spec in before_specs
+        )
+        lost = "\n".join(
             f"- `{spec.path}` was lost. If it is absent, recreate a title followed by exactly {spec.lines} "
             f"ordered entries `{spec.prefix.upper()}-001:` through `{spec.prefix.upper()}-{spec.lines:03d}:`. "
             "Each line after the title must start with that label and must not use a `1. ` numbering prefix. "
             "If the file is already present, leave it untouched."
-            for spec in docs
+            for spec in after_specs
         )
+        doc_lines = "\n".join(part for part in (kept, lost) if part)
         note_step = (
-            "Recreate missing independent recovery notes with the required format. "
-            "If a listed note is already present, do not open, verify, or rewrite it.\n"
+            "Keep pre-crash notes. Recreate only the post-crash notes that are missing.\n"
             f"{doc_lines}"
         )
         work_step = (
@@ -498,8 +625,8 @@ def recovery_prompt(
         )
     elif mode == "whole_branch_abort":
         policy = (
-            "The whole-branch abort policy discarded the branch that contained the independent recovery notes, "
-            "so those notes were lost."
+            "The whole-branch abort policy discarded the uncommitted branch, "
+            "so both pre-crash and post-crash independent notes were lost."
         )
         doc_lines = "\n".join(
             f"- `{spec.path}` was lost. If it is absent, recreate a title followed by exactly {spec.lines} "

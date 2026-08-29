@@ -397,6 +397,8 @@ class LLMToolAgent:
             except json.JSONDecodeError:
                 args = {}
             if name == "rollback_causal":
+                if finished:
+                    continue
                 deferred_rollback = (tc, args)
                 continue
             if finished:

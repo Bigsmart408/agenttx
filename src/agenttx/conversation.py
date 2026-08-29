@@ -2,9 +2,11 @@
 
 Filesystem rollback without conversation rewind leaves the model believing
 rolled-back tool results still happened.  This module stores per-tool-call
-spans, infers copy-from-result dependencies that never appear as file-read
-edges, and rebuilds an OpenAI-format message list that matches the *active*
-spans after causal or temporal rollback.
+spans, unions ledger parents (path/object overlap) with copy-from-result
+token parents, and rebuilds an OpenAI-format message list that matches the
+*active* spans after causal or temporal rollback.  ``rewind`` is seeded with
+the ledger closure and then expanded along conversation edges, so a read of a
+rolled-back write is dropped even when the write produced empty stdout.
 
 This is not CRIU / process checkpointing, and it does not restore hidden
 provider chain-of-thought.  External black-box agents still use a retained-
@@ -17,7 +19,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Iterable, List, Optional, Sequence, Set
+from typing import Iterable, List, Mapping, Optional, Sequence, Set
 
 from .ledger import EffectKind, Ledger
 
@@ -274,19 +276,41 @@ def _spans_from_messages(
                 arguments=arguments,
                 result=result,
                 step_id=step_id,
+                parents=_parents_from_result(result),
             )
         )
     return spans
 
 
 def _step_id_from_result(result: str) -> Optional[int]:
+    payload = _result_payload(result)
+    if payload is not None and "step_id" in payload:
+        return int(payload["step_id"])
+    return None
+
+
+def _parents_from_result(result: str) -> List[int]:
+    payload = _result_payload(result)
+    if payload is None:
+        return []
+    parents = payload.get("parents") or []
+    out: List[int] = []
+    seen = set()
+    for item in parents:
+        value = int(item)
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _result_payload(result: str) -> Optional[dict]:
     try:
         payload = json.loads(result)
     except (TypeError, json.JSONDecodeError):
         return None
-    if isinstance(payload, dict) and "step_id" in payload:
-        return int(payload["step_id"])
-    return None
+    return payload if isinstance(payload, dict) else None
 
 
 @dataclass
@@ -362,7 +386,8 @@ class ConversationLog:
         spans = _spans_from_messages(stored, step_ids=step_ids, tool_names=tool_names)
         assigned: List[CallSpan] = []
         for span in spans:
-            span.parents = self.infer_parents(span.arguments, extra_spans=assigned)
+            copied = self.infer_parents(span.arguments, extra_spans=assigned)
+            span.parents = sorted(set(span.parents) | set(copied))
             assigned.append(span)
         if kind is None:
             if any(span.step_id is not None for span in spans):
@@ -422,12 +447,28 @@ class ConversationLog:
     def invalidate_stale_control(self) -> List[int]:
         invalidated: List[int] = []
         for turn in self.turns:
-            if turn.status != "active":
+            if turn.status != "active" or turn.kind == "user":
                 continue
-            if turn.kind in {"control", "recovery"}:
+            if turn.kind == "recovery":
                 for span in turn.calls:
                     span.status = "invalidated"
                 turn.status = "invalidated"
+                invalidated.append(turn.turn_id)
+                continue
+            for span in turn.calls:
+                if span.status != "active":
+                    continue
+                if span.step_id is None and span.tool_name in CONTROL_TOOLS:
+                    span.status = "invalidated"
+            if turn.kind == "control" or not turn.active_calls():
+                for span in turn.calls:
+                    span.status = "invalidated"
+                if turn.calls or turn.kind == "control":
+                    turn.status = "invalidated"
+                    invalidated.append(turn.turn_id)
+                    continue
+            turn.refresh_status()
+            if turn.status == "invalidated":
                 invalidated.append(turn.turn_id)
         return invalidated
 
@@ -443,14 +484,30 @@ class ConversationLog:
         return turn
 
     def rewind(self, step_ids: Sequence[int], notice: str, mode: str = "causal") -> dict:
-        """Drop spans whose effects or copied results were rolled back."""
+        """Drop spans whose effects or copied results were rolled back.
+
+        ``step_ids`` should be the ledger closure (causal dependents or the
+        temporal suffix).  Token-copy children that the ledger cannot see are
+        then added.  The two sets are unioned; neither graph is used alone.
+        """
+        ledger_set = {int(step_id) for step_id in step_ids}
+        recorded = {
+            span.step_id
+            for turn in self.turns
+            for span in turn.calls
+            if span.step_id is not None
+        }
         if self.is_empty():
             return {
                 "rewound": False,
                 "invalidated_turn_ids": [],
                 "generation": self.generation,
+                "conversation_closure_mismatch": len(ledger_set - recorded),
+                "ledger_steps_missing_from_conversation": sorted(ledger_set - recorded),
+                "copy_only_step_ids": [],
             }
-        drop = self.conversation_closure(step_ids)
+        token_expanded = self.conversation_closure(ledger_set)
+        drop = ledger_set | token_expanded
         effect_ids = self.invalidate_steps(drop)
         control_ids = self.invalidate_stale_control()
         self.append_recovery(notice, mode=mode)
@@ -462,6 +519,9 @@ class ConversationLog:
             "mode": mode,
             "retained_step_ids": self.active_step_ids(),
             "dropped_step_ids": sorted(drop),
+            "conversation_closure_mismatch": len(ledger_set - recorded),
+            "ledger_steps_missing_from_conversation": sorted(ledger_set - recorded),
+            "copy_only_step_ids": sorted(token_expanded - ledger_set),
         }
 
     def active_step_ids(self) -> List[int]:
@@ -541,3 +601,68 @@ class ConversationLog:
         )
         log.turns = [TurnRecord.from_dict(item) for item in data.get("turns") or []]
         return log
+
+def record_tool_record(
+    conversation: "ConversationLog",
+    record: object,
+    args: Optional[Mapping[str, object]] = None,
+    *,
+    max_result_chars: int = 4000,
+) -> "TurnRecord":
+    """Bind a harness ToolCallRecord to the native conversation log.
+
+    Injected crash trajectories currently go through ``harness.call_tool`` and
+    would otherwise be invisible to rewind.  After this bind, causal/temporal
+    rollback can drop invalidated spans so the model no longer believes rolled
+    back writes still succeeded.
+    """
+    step_id = int(getattr(record, "step_id"))
+    tool_name = str(getattr(record, "tool_name") or "unknown")
+    call_id = f"inject-{step_id}"
+    arguments = canonical_json(dict(args or {}))
+    stdout = str(getattr(record, "stdout", "") or "")
+    stderr = str(getattr(record, "stderr", "") or "")
+    if len(stdout) > max_result_chars:
+        stdout = stdout[:max_result_chars] + "\n…truncated…"
+    if len(stderr) > max_result_chars:
+        stderr = stderr[:max_result_chars] + "\n…truncated…"
+    parents = []
+    seen = set()
+    for item in getattr(record, "parents", None) or []:
+        value = int(item)
+        if value in seen:
+            continue
+        seen.add(value)
+        parents.append(value)
+    result = canonical_json(
+        {
+            "step_id": step_id,
+            "returncode": int(getattr(record, "returncode", 0) or 0),
+            "stdout": stdout,
+            "stderr": stderr,
+            "parents": parents,
+        }
+    )
+    assistant = {
+        "role": "assistant",
+        "content": f"[agenttx-injected] {tool_name} step {step_id}",
+        "tool_calls": [
+            {
+                "id": call_id,
+                "type": "function",
+                "function": {"name": tool_name, "arguments": arguments},
+            }
+        ],
+    }
+    tool = {
+        "role": "tool",
+        "tool_call_id": call_id,
+        "content": result,
+    }
+    return conversation.append_turn(
+        [assistant, tool],
+        step_ids=[step_id],
+        tool_names=[tool_name],
+        kind="effect",
+    )
+

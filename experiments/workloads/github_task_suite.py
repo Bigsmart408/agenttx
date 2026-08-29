@@ -15,6 +15,7 @@ from typing import Dict, Iterable, Tuple
 from experiments.workloads.recovery_inject import (
     DocSpec,
     all_documents_valid as _all_documents_valid,
+    all_midcrash_docs,
     inject_recovery_dag,
 )
 
@@ -338,4 +339,4 @@ def document_valid(path: Path, prefix: str, lines: int) -> bool:
 
 def all_documents_valid(workdir: Path, task: GitHubTask) -> bool:
     docs = tuple(DocSpec(path, prefix, task.doc_lines) for path, prefix in task.doc_specs)
-    return _all_documents_valid(workdir, docs)
+    return _all_documents_valid(workdir, all_midcrash_docs(docs))

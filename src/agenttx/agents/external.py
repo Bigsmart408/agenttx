@@ -487,7 +487,8 @@ class DeepSeekHarness(ExternalHarness):
             f"DSH_MODEL={shlex.quote(self.model)} "
             f"DSH_SNAPSHOT=1 AGENTTX_DSH_USAGE=1 {shlex.join(prefix + [task])}",
         ]
-        return self._with_proxy(shell)
+        # DeepSeek is reached natively. Clash is only for Codex/GPT.
+        return shell
 
     def preflight(self, workdir: Path) -> Dict[str, Any]:
         result = super().preflight(workdir)

@@ -40,3 +40,26 @@ def test_concurrent_agents_are_isolated() -> None:
     assert result["ok"] is True
     assert result["cross_contamination"] is False
     assert result["successful_agents"] == 2
+
+
+def test_bpf_persistent_restart_is_bounded(tmp_path: Path) -> None:
+    ws = tmp_path / "ws"
+    session = tmp_path / "session"
+    ws.mkdir()
+    tx = AgentTX.begin(workdir=ws, session_dir=session, trace_reads=False)
+    try:
+        assert tx.pool is not None
+
+        def boom(_request):
+            raise RuntimeError("worker down")
+
+        tx.pool._dispatch_worker = boom  # type: ignore[method-assign]
+        tx.pool._stop_persistent_bpf = lambda: None  # type: ignore[method-assign]
+        tx.pool._stop_worker = lambda: None  # type: ignore[method-assign]
+        tx.pool._repair_worker_sandbox = lambda: None  # type: ignore[method-assign]
+        with pytest.raises(RuntimeError, match="persistent bpf worker failed 3 times"):
+            tx.pool._run_step_bpf_persistent(["true"], [])
+        assert tx.pool.worker_failure_count == 3
+    finally:
+        tx.close(destroy=True)
+
