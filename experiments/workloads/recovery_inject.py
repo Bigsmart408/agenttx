@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
@@ -21,6 +22,13 @@ from agenttx.conversation import record_tool_record
 
 
 RECOVERY_MANIFEST_PATH = ".agenttx/recovery_manifest.json"
+
+
+def recovery_context_variant() -> str:
+    """Return the external-agent recovery handoff projection."""
+    value = os.environ.get("AGENTTX_RECOVERY_CONTEXT", "full").strip().lower()
+    return "compact" if value in {"1", "true", "yes", "on", "compact"} else "full"
+
 
 INJECT_SYSTEM = (
     "You are a coding agent in an AgentTX-protected workspace. Use tools for edits. "
@@ -444,6 +452,43 @@ def render_recovery_manifest_prompt(manifest: Mapping[str, object]) -> str:
             "The runtime could not verify a context/workspace-aligned recovery state. "
             "Report `AGENTTX_STATE_MISMATCH` and stop; do not repair recovery artifacts."
         )
+    if recovery_context_variant() == "compact":
+        retained_paths = [
+            f"- {item['path']} (complete-protected; verified in the control plane)"
+            for item in manifest.get("retained", [])
+        ]
+        recreate_paths = [
+            f"- {item['path']}: recreate only if absent; contract={item['contract']}"
+            for item in manifest.get("recreate_required", [])
+        ]
+        invalidated_paths = [
+            f"- {item['path']}: {item['reason']}"
+            for item in manifest.get("invalidated", [])
+        ]
+        return "\n".join(
+            [
+                "## AgentTX recovery handoff (compact; authoritative)",
+                f"State ID: {manifest.get('state_id', 'unknown')}",
+                f"Policy: {manifest.get('policy', 'unknown')}",
+                "",
+                "COMPLETE-PROTECTED (already verified; do not inspect):",
+                *(retained_paths or ["- none"]),
+                "",
+                "RECREATE-REQUIRED:",
+                *(recreate_paths or ["- none"]),
+                "",
+                "INVALIDATED BY RECOVERY:",
+                *(invalidated_paths or ["- none"]),
+                "",
+                "PENDING:",
+                *[f"- {item}" for item in manifest.get("pending", [])],
+                "",
+                "Use this verified handoff instead of inventorying the workspace. "
+                "Edit only invalidated task paths, recreate missing required artifacts, "
+                "run the named verifier once, and finish. If a protected path mismatches, "
+                "report AGENTTX_STATE_MISMATCH and stop.",
+            ]
+        )
     retained_lines = []
     for item in manifest.get("retained", []):
         retained_lines.append(
@@ -608,6 +653,11 @@ def recovery_prompt(
             "the certificate as authoritative: do not reopen, verify, or "
             "rewrite any retained path listed as complete-protected."
         )
+        if recovery_context_variant() == "compact":
+            policy = (
+                "AgentTX verified the recovery state in the control plane. "
+                "Use the compact handoff below; do not inspect retained paths."
+            )
         if recovery_manifest.get("policy") == "causal":
             policy += (
                 " This is the causal fast path: the retained work is already "

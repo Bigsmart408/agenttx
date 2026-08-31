@@ -320,3 +320,19 @@ def test_control_prompts_distinguish_clean_recovery_and_no_rollback():
     assert "intentionally performs no rollback" in no_rollback
     assert "Recovery protocol:" in clean
     assert "Recovery protocol:" in no_rollback
+
+
+def test_compact_manifest_handoff_omits_hashes(tmp_path, monkeypatch):
+    agent, injected = _inject(tmp_path / "ws", tmp_path / "sess")
+    try:
+        _apply_policy(agent, "causal", injected["root_step"])
+        manifest = _manifest_after_policy(agent, injected, "causal")
+        monkeypatch.setenv("AGENTTX_RECOVERY_CONTEXT", "compact")
+        prompt = render_recovery_manifest_prompt(manifest)
+        assert "compact; authoritative" in prompt
+        assert "sha256=" not in prompt
+        assert "complete-protected" in prompt
+        assert "recovery_build/derived.txt" in prompt
+        assert "run the named verifier once" in prompt
+    finally:
+        agent.harness.close(destroy=True)

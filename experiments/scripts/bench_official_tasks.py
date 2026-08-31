@@ -118,6 +118,7 @@ from experiments.workloads.recovery_inject import (  # noqa: E402
     missing_independent_docs,
     read_recovery_documents,
     recovery_manifest_json,
+    recovery_context_variant,
     retained_artifact_access,
 )
 
@@ -811,6 +812,9 @@ def run_once(
         "repo": repo,
         "commit": commit,
         "mode": mode,
+        "recovery_context_variant": (
+            recovery_context_variant() if mode in STRICT_MANIFEST_MODES else "none"
+        ),
         "fault_injected": mode in FAULT_MODES,
         "fault_origin": "harness_injected_crash" if mode in FAULT_MODES else "none",
         "repeat": repeat,
