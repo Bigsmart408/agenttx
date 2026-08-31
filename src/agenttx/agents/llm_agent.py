@@ -54,6 +54,12 @@ class AgentRunResult:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    context_chars: List[int] = field(default_factory=list)
+
+
+def _message_chars(messages: List[dict]) -> int:
+    """Return a cheap, provider-independent size signal for model context."""
+    return sum(len(str(message.get("content") or "")) for message in messages)
 
 
 def _httpx_client(timeout: float):
@@ -432,7 +438,8 @@ class LLMToolAgent:
         client = None if self.provider.name == "anthropic" else self._client()
         conversation = self.harness.tx.conversation
         self._ensure_task(task)
-        messages = conversation.active_messages()
+        messages = conversation.model_messages()
+        context_chars = [_message_chars(messages)]
         tool_calls = 0
         finished = False
         summary = ""
@@ -452,7 +459,8 @@ class LLMToolAgent:
             if not calls:
                 summary = text
                 self._record_turn(assistant, [], [], [], kind="control")
-                messages = conversation.active_messages()
+                messages = conversation.model_messages()
+                context_chars.append(_message_chars(messages))
                 finished = True
                 break
             batch = self._run_call_batch(calls)
@@ -488,7 +496,8 @@ class LLMToolAgent:
                 summary = batch["summary"]
                 if batch["want_commit"]:
                     want_commit = True
-            messages = conversation.active_messages()
+            messages = conversation.model_messages()
+            context_chars.append(_message_chars(messages))
             if finished:
                 break
         total_tokens = prompt_tokens + completion_tokens
@@ -515,4 +524,5 @@ class LLMToolAgent:
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
+            context_chars=context_chars,
         )

@@ -22,6 +22,8 @@ IGNORE_COMMIT_GLOBS = (
     "*/.fontconfig/*",
     "/tmp/build.log",
     "/tmp/*.log",
+    "/tmp/dsh-spill-*/*",
+    "/tmp/dsh-subprocess-*/*",
     "*/build.log",
 )
 

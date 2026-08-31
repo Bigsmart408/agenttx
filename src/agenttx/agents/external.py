@@ -474,8 +474,17 @@ class DeepSeekHarness(ExternalHarness):
             # the user's real home directory.
             f"cd {shlex.quote(str(workdir))} && "
             "mkdir -p .dsh .agents .sessions && "
+            # The profile's flat dependency tree is an implementation detail,
+            # not workspace input.  Copying it into the task root makes DSH's
+            # file/context inventory walk tens of thousands of package files
+            # and repeat that directory in every model turn.  Keep the small
+            # profile manifests local, but link the installed dependency tree
+            # after copying so it remains resolvable without being materialized
+            # in the overlay.
             "if [ -d /home/pengpeng/.dsh/profiles ] && [ ! -d .dsh/profiles ]; "
-            "then cp -a /home/pengpeng/.dsh/profiles .dsh/; fi && "
+            "then mkdir -p .dsh/profiles && "
+            "rsync -a --exclude=node_modules /home/pengpeng/.dsh/profiles/ .dsh/profiles/; "
+            "fi && "
             "if [ ! -e .dsh/profiles/node_modules ] && "
             "[ -d /home/pengpeng/.dsh/profiles/node_modules ]; "
             "then ln -s /home/pengpeng/.dsh/profiles/node_modules "
@@ -571,21 +580,31 @@ class CodexHarness(ExternalHarness):
         # Keep CODEX_HOME and package caches inside the protected workspace;
         # otherwise the transaction commit policy quite correctly rejects
         # ~/.codex/tmp or ~/.cache/pip as an external host write even though
-        # the agent was sandboxed.
+        # the agent was sandboxed.  Also redirect Python's user site: a direct
+        # benchmark prompt may legitimately run `pip install`, and that must
+        # remain inside the transaction workspace instead of ~/.local.
         codex_home = workdir / ".codex"
         cache_home = workdir / ".cache"
         pip_cache = cache_home / "pip"
         tmp_home = workdir / ".tmp"
+        userbase = workdir / ".userbase"
+        conda_bin = Path("/home/pengpeng/miniconda3/envs/agenttx/bin")
         shell = [
             "bash",
             "-lc",
             f"cd {shlex.quote(str(workdir))} && "
-            "mkdir -p .codex .cache/pip .cache/fontconfig .cache/matplotlib .cache/pyc .tmp && "
+            "mkdir -p .codex .cache/pip .cache/fontconfig .cache/matplotlib .cache/pyc .tmp .userbase/bin && "
+            f"if [ -d {shlex.quote(str(conda_bin))} ]; then export PATH={shlex.quote(str(conda_bin))}:$PATH; fi && "
             'if [ -x .venv/bin/python ]; then '
             'export VIRTUAL_ENV="$PWD/.venv"; '
             'export PATH="$PWD/.venv/bin:$PATH"; '
             "fi && "
-            "export PYTHONNOUSERSITE=1 PIP_USER=0 PYTHONDONTWRITEBYTECODE=1 && "
+            'export PATH="$PWD/.userbase/bin:$PATH" '
+            'PYTHONUSERBASE="$PWD/.userbase" '
+            f"TMPDIR={shlex.quote(str(tmp_home))} "
+            f"TEMP={shlex.quote(str(tmp_home))} "
+            f"TMP={shlex.quote(str(tmp_home))} "
+            "PYTHONNOUSERSITE=1 PIP_USER=0 PYTHONDONTWRITEBYTECODE=1 && "
             f"printf %s {shlex.quote(_fontconfig_xml(cache_home))} > {shlex.quote(str(cache_home / 'fonts.conf'))} && "
             # A ChatGPT OAuth login normally lives in ~/.codex/auth.json.
             # Read it through a workspace-local symlink so the CLI can use
@@ -611,6 +630,7 @@ class CodexHarness(ExternalHarness):
             f"PIP_CACHE_DIR={shlex.quote(str(pip_cache))} "
             f"MPLCONFIGDIR={shlex.quote(str(cache_home / 'matplotlib'))} "
             f"PYTHONPYCACHEPREFIX={shlex.quote(str(cache_home / 'pyc'))} "
+            f"PYTHONUSERBASE={shlex.quote(str(userbase))} "
             f"TMPDIR={shlex.quote(str(tmp_home))} "
             f"TEMP={shlex.quote(str(tmp_home))} "
             f"TMP={shlex.quote(str(tmp_home))} "

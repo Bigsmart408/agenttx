@@ -88,6 +88,28 @@ def test_causal_rewind_keeps_independent_later_turns():
     assert messages[1]["content"] == "do work"
 
 
+def test_model_messages_compacts_old_effect_turns_without_touching_audit_log():
+    log = ConversationLog()
+    log.seed("sys", "do work")
+    for step_id in range(8):
+        log.append_turn(
+            *_turn(
+                step_id,
+                f"file-{step_id}.txt",
+                "x" * 100,
+                stdout=f"result-{step_id}-" + "y" * 100,
+            )
+        )
+
+    full = json.dumps(log.active_messages())
+    bounded = json.dumps(log.model_messages(recent_turns=2, max_result_chars=20))
+    assert len(bounded) < len(full)
+    assert "step=0" in bounded
+    assert "file-7.txt" in bounded
+    assert len(log.turns) == 8
+    assert log.active_step_ids() == list(range(8))
+
+
 def test_temporal_rewind_drops_later_independent_turns():
     log = ConversationLog()
     log.seed("sys", "do work")

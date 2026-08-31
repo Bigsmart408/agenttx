@@ -110,7 +110,6 @@ from experiments.scripts.bench_robustness import percentile  # noqa: E402
 from experiments.workloads import swe_bench_suite as swe  # noqa: E402
 from experiments.workloads import terminal_bench_suite as tb  # noqa: E402
 from experiments.workloads.recovery_inject import (  # noqa: E402
-    RECOVERY_MANIFEST_PATH,
     build_recovery_manifest,
     all_midcrash_docs,
     dag_is_valid,
@@ -123,6 +122,25 @@ from experiments.workloads.recovery_inject import (  # noqa: E402
 )
 
 POLICY_MODES = ("causal", "temporal_checkpoint", "whole_branch_abort")
+NO_FAULT_MODE = "no_fault"
+CRASH_DIRECT_MODE = "crash_direct"
+CLEAN_RECOVERY_MODE = "clean_recovery"
+CRASH_NO_ROLLBACK_MODE = "crash_no_rollback"
+# Control arms make the injected-fault effect separable from the prompt and
+# rollback effects.  Keep the three actual recovery policies as the default
+# published set for backwards compatibility.
+EXPERIMENT_MODES = (
+    NO_FAULT_MODE,
+    CRASH_DIRECT_MODE,
+    CLEAN_RECOVERY_MODE,
+    CRASH_NO_ROLLBACK_MODE,
+    *POLICY_MODES,
+)
+DIRECT_MODES = {NO_FAULT_MODE, CRASH_DIRECT_MODE}
+FAULT_MODES = {CRASH_DIRECT_MODE, CRASH_NO_ROLLBACK_MODE, *POLICY_MODES}
+RECOVERY_PROMPT_MODES = {CLEAN_RECOVERY_MODE, CRASH_NO_ROLLBACK_MODE, *POLICY_MODES}
+MANIFEST_MODES = {CRASH_NO_ROLLBACK_MODE, *POLICY_MODES}
+STRICT_MANIFEST_MODES = set(POLICY_MODES)
 MODES = POLICY_MODES
 # The application path is intentionally limited to real black-box harnesses.
 # The historical in-process loop remains readable for old result files but is
@@ -149,6 +167,8 @@ def _apply_policy(agent, mode: str, root_step: int) -> List[int]:
         return agent.harness.tx.rollback(root_step)
     if mode == "whole_branch_abort":
         return agent.harness.tx.rollback(0)
+    if mode in EXPERIMENT_MODES:
+        return []
     raise ValueError(mode)
 
 
@@ -333,6 +353,7 @@ def run_once(
     finished = False
     finish_called = False
     host_leak = False
+    workspace_tmp_env: Dict[str, Optional[str]] = {}
     started = time.perf_counter()
     recovery_started = 0.0
     instance = None
@@ -382,7 +403,8 @@ def run_once(
             else:
                 swe_python = swe.ensure_venv(task, python, cache_root, instance)
             swe.copy_repo(cache, workdir)
-            swe.seed_task_workspace(workdir, task, instance)
+            if mode not in DIRECT_MODES | {CLEAN_RECOVERY_MODE}:
+                swe.seed_task_workspace(workdir, task, instance)
             extra_watch = [task.faulty_relpath]
             prompt_python = swe_python
             if not oracle:
@@ -392,11 +414,24 @@ def run_once(
         elif suite == "tb":
             task = (tb_tasks or tb.TASKS)[task_name]
             tb.materialize(task, workdir, cache_root)
-            tb.seed_task_workspace(workdir, task)
+            if mode not in DIRECT_MODES | {CLEAN_RECOVERY_MODE}:
+                tb.seed_task_workspace(workdir, task)
             extra_watch = [task.faulty_relpath]
             turns = max_turns or task.max_turns
         else:
             raise ValueError(suite)
+
+        # The synthetic injection trajectory runs verifier commands before
+        # the external Codex process starts.  Make those subprocesses use the
+        # same workspace-local temporary root; otherwise pytest's tmp_path
+        # writes are recorded as host leaks and the control arm cannot commit.
+        workspace_tmp = workdir / ".tmp"
+        workspace_tmp.mkdir(parents=True, exist_ok=True)
+        workspace_tmp_env = {
+            name: os.environ.get(name) for name in ("TMPDIR", "TEMP", "TMP")
+        }
+        for name in workspace_tmp_env:
+            os.environ[name] = str(workspace_tmp)
 
         host_baseline = _snapshot(workdir, extra_watch)
         if oracle and not replay_docs:
@@ -451,16 +486,25 @@ def run_once(
             )
         if getattr(agent.harness.tx, "pool", None) is not None:
             agent.harness.tx.pool.persistent_worker = False
-        if suite == "swe":
-            injected = swe.inject_task_trajectory(agent, task, instance, python)
+        if mode not in FAULT_MODES:
+            # Clean controls deliberately have no injected DAG or rollback.
+            injected = {}
+            targets = []
         else:
-            injected = tb.inject_task_trajectory(agent, task, python)
-        if not dag_is_valid(injected):
-            raise RuntimeError(f"invalid recovery DAG: {injected}")
-        targets = _apply_policy(agent, mode, injected["root_step"])
+            if suite == "swe":
+                injected = swe.inject_task_trajectory(agent, task, instance, python)
+            else:
+                injected = tb.inject_task_trajectory(agent, task, python)
+            if not dag_is_valid(injected):
+                raise RuntimeError(f"invalid recovery DAG: {injected}")
+            targets = _apply_policy(agent, mode, injected["root_step"])
         # Official-task session is unchanged. Isolated replay runs only when
         # the policy discarded independent steps; those tokens are the savings.
-        crash_docs = list(all_midcrash_docs(task.docs()))
+        crash_docs = (
+            list(all_midcrash_docs(task.docs()))
+            if mode in MANIFEST_MODES
+            else []
+        )
         if independent_work_discarded(injected, agent.harness.tx.ledger):
             missing_docs = missing_independent_docs(workdir, crash_docs, agent=agent)
         else:
@@ -492,45 +536,52 @@ def run_once(
         path_exists = {
             path: agent.harness.tx.path_exists(workdir / path) for path in state_paths
         }
-        recovery_manifest = build_recovery_manifest(
-            policy=mode,
-            ledger=agent.harness.tx.ledger,
-            injected=injected,
-            docs=docs,
-            document_contents=document_contents,
-            workdir=workdir,
-            rollback_targets=targets,
-            path_exists=path_exists,
+        control_manifest_path = (
+            agent.harness.tx.pool.session_dir / "recovery_manifest.json"
         )
-        recovery_manifest_authoritative = bool(recovery_manifest["authoritative"])
-        recovery_manifest_text = recovery_manifest_json(recovery_manifest)
-        manifest_record = agent.harness.call_tool(
-            "write_file",
-            {
-                "path": RECOVERY_MANIFEST_PATH,
-                "content": recovery_manifest_text.rstrip("\n"),
-            },
-        )
-        if int(getattr(manifest_record, "returncode", 1)) != 0:
-            raise RuntimeError("failed to write AgentTX recovery manifest")
-        if not oracle and not recovery_manifest_authoritative:
-            raise RuntimeError(
-                "AgentTX recovery state mismatch: refusing to start a fresh live session"
+        if mode in MANIFEST_MODES:
+            recovery_manifest = build_recovery_manifest(
+                policy=mode,
+                ledger=agent.harness.tx.ledger,
+                injected=injected,
+                docs=docs,
+                document_contents=document_contents,
+                workdir=workdir,
+                rollback_targets=targets,
+                path_exists=path_exists,
             )
-        if suite == "swe":
+            recovery_manifest_authoritative = bool(recovery_manifest["authoritative"])
+            recovery_manifest_text = recovery_manifest_json(recovery_manifest)
+            # The manifest is control-plane state, not task data. Keep the
+            # authoritative copy beside AgentTX session metadata so a black-box
+            # agent cannot delete it with repository cleanup commands.
+            control_manifest_path.write_text(recovery_manifest_text, encoding="utf-8")
+            if mode in STRICT_MANIFEST_MODES and not oracle and not recovery_manifest_authoritative:
+                raise RuntimeError(
+                    "AgentTX recovery state mismatch: refusing to start a fresh live session"
+                )
+        if mode in DIRECT_MODES and suite == "swe":
+            prompt = swe.direct_task_prompt(task, instance)
+        elif mode in DIRECT_MODES:
+            prompt = tb.direct_task_prompt(task)
+        elif suite == "swe":
             prompt = swe.task_prompt(
                 task,
                 instance,
                 prompt_python,
                 mode=mode,
-                recovery_manifest=recovery_manifest,
+                recovery_manifest=(
+                    recovery_manifest if mode in STRICT_MANIFEST_MODES else None
+                ),
             )
         else:
             prompt = tb.task_prompt(
                 task,
                 python,
                 mode=mode,
-                recovery_manifest=recovery_manifest,
+                recovery_manifest=(
+                    recovery_manifest if mode in STRICT_MANIFEST_MODES else None
+                ),
             )
         if not oracle and harness_backend != "legacy":
             prompt = _externalize_prompt(prompt)
@@ -597,19 +648,20 @@ def run_once(
         retained_paths_reopened = access["retained_paths_reopened"]
         retained_read_effects = int(access["retained_read_effects"])
         retained_paths_modified = access["retained_paths_modified"]
-        manifest_check = agent.harness.call_tool(
-            "read_file", {"path": RECOVERY_MANIFEST_PATH}
-        )
-        recovery_manifest_intact = bool(
-            int(getattr(manifest_check, "returncode", 1)) == 0
-            and str(getattr(manifest_check, "stdout", "")) == recovery_manifest_text
-        )
+        if mode not in MANIFEST_MODES:
+            recovery_manifest_intact = False
+        else:
+            try:
+                control_manifest = control_manifest_path.read_text(encoding="utf-8")
+            except OSError:
+                control_manifest = ""
+            recovery_manifest_intact = control_manifest == recovery_manifest_text
         if retained_paths_modified:
             error = (
                 "RecoveryProtectionError: retained artifacts modified by fresh session: "
                 + ", ".join(retained_paths_modified)
             )
-        elif not recovery_manifest_intact:
+        elif mode in STRICT_MANIFEST_MODES and not recovery_manifest_intact:
             error = "RecoveryProtectionError: recovery manifest was modified or removed"
         host_leak = _snapshot(workdir, extra_watch) != host_baseline
         active = [
@@ -619,18 +671,41 @@ def run_once(
             and step.step_id > agent.harness.tx.ledger.committed_frontier
         ]
         if active and not error:
-            agent.harness.tx.commit(max(active))
-            committed = True
+            if finished:
+                agent.harness.tx.commit(max(active))
+                committed = True
+            else:
+                error = (
+                    "RecoveryProtectionError: external session did not finish; "
+                    "refusing to commit its partial sandbox"
+                )
         if suite == "swe":
-            verdict = swe.verify(workdir, task, instance, python)
+            verdict = swe.verify(
+                workdir,
+                task,
+                instance,
+                python,
+                require_recovery_artifacts=mode in STRICT_MANIFEST_MODES,
+            )
         else:
-            verdict = tb.verify(workdir, task, python)
-        independent_unchanged = _retained_artifacts_unchanged(
-            workdir, recovery_manifest
+            verdict = tb.verify(
+                workdir,
+                task,
+                python,
+                require_recovery_artifacts=mode in STRICT_MANIFEST_MODES,
+            )
+        independent_unchanged = (
+            True
+            if mode in DIRECT_MODES | {CLEAN_RECOVERY_MODE}
+            else _retained_artifacts_unchanged(workdir, recovery_manifest)
         )
         docs_ok = bool(verdict["documents_valid"])
         derived_removed = bool(verdict["derived_removed"])
-        recovery_steps = recovery_user_end - recovery_first
+        recovery_steps = (
+            recovery_user_end - recovery_first
+            if mode in POLICY_MODES
+            else 0
+        )
         regenerated = _paths_touched_after(
             agent.harness.tx.ledger.steps, recovery_first, recovery_user_end
         )
@@ -640,10 +715,10 @@ def run_once(
             and committed
             and verdict["tests_ok"]
             and docs_ok
-            and derived_removed
+            and (derived_removed or mode in {CRASH_DIRECT_MODE, CRASH_NO_ROLLBACK_MODE})
             and independent_unchanged
-            and recovery_manifest_authoritative
-            and recovery_manifest_intact
+            and (mode not in STRICT_MANIFEST_MODES or recovery_manifest_authoritative)
+            and (mode not in STRICT_MANIFEST_MODES or recovery_manifest_intact)
             and not retained_paths_modified
             and not error
             and (oracle or harness_backend != "legacy" or total_tokens > 0)
@@ -685,6 +760,11 @@ def run_once(
         _cleanup(scratch)
         _cleanup(session_dir)
         _reap_orphan_sandboxes(keep=None)
+        for name, value in workspace_tmp_env.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
     if oracle:
         provider_name = "oracle"
@@ -731,6 +811,8 @@ def run_once(
         "repo": repo,
         "commit": commit,
         "mode": mode,
+        "fault_injected": mode in FAULT_MODES,
+        "fault_origin": "harness_injected_crash" if mode in FAULT_MODES else "none",
         "repeat": repeat,
         "oracle": oracle,
         "provider": provider_name,
@@ -1138,9 +1220,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument(
         "--modes",
         nargs="+",
-        choices=list(POLICY_MODES),
+        choices=list(EXPERIMENT_MODES),
         default=list(POLICY_MODES),
-        help="recovery policies (causal / temporal_checkpoint / whole_branch_abort).",
+        help=(
+            "control/recovery modes: no_fault, crash_direct, clean_recovery, "
+            "crash_no_rollback, causal, temporal_checkpoint, whole_branch_abort."
+        ),
     )
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--max-turns", type=int, default=None)
@@ -1179,7 +1264,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         action="store_true",
         help="replay missing independent documents with the live agent even when --oracle is set",
     )
+    parser.add_argument(
+        "--no-fault",
+        action="store_true",
+        help="run a clean official-task baseline without injecting or recovering a fault",
+    )
     args = parser.parse_args(argv)
+    if args.no_fault and (args.oracle or args.replay_docs):
+        raise SystemExit("--no-fault cannot be combined with --oracle or --replay-docs")
+    run_modes = (NO_FAULT_MODE,) if args.no_fault else tuple(args.modes)
     load_provider_env(ROOT)
     load_llm_env()
     if args.oracle and args.replay_docs:
@@ -1346,7 +1439,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 swe.prune_unused_eval_layers()
             prev_eval_group = eval_group
         for repeat in range(args.repeats):
-            for mode in args.modes:
+            for mode in run_modes:
                 key = (suite, name, mode, str(repeat), args.harness if not args.oracle else "oracle")
                 if key in done_keys:
                     print(

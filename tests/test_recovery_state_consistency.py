@@ -13,6 +13,14 @@ from pathlib import Path
 from agenttx.conversation import ConversationLog
 from agenttx.harness import CodingAgentHarness
 from experiments.scripts.bench_official_tasks import _apply_policy
+from experiments.workloads.swe_bench_suite import (
+    SHORT as SWE_SHORT,
+    direct_task_prompt as direct_swe_task_prompt,
+)
+from experiments.workloads.terminal_bench_suite import (
+    SHORT as TB_SHORT,
+    direct_task_prompt as direct_tb_task_prompt,
+)
 from experiments.workloads.recovery_inject import (
     DocSpec,
     all_midcrash_docs,
@@ -22,6 +30,7 @@ from experiments.workloads.recovery_inject import (
     missing_independent_docs,
     read_recovery_documents,
     render_recovery_manifest_prompt,
+    recovery_prompt,
 )
 
 
@@ -221,6 +230,25 @@ def test_causal_rem_matches_retained_overlay(tmp_path):
         agent.harness.close(destroy=True)
 
 
+def test_temporal_rem_allows_expected_discard_and_lists_recreate_path(tmp_path):
+    agent, injected = _inject(tmp_path / "ws", tmp_path / "sess")
+    try:
+        _apply_policy(agent, "temporal_checkpoint", injected["root_step"])
+        manifest = _manifest_after_policy(agent, injected, "temporal_checkpoint")
+        assert manifest["authoritative"] is True
+        assert [item["path"] for item in manifest["retained"]] == [
+            "recovery_notes/design.md"
+        ]
+        assert [item["path"] for item in manifest["recreate_required"]] == [
+            "recovery_notes/changelog.md"
+        ]
+        prompt = render_recovery_manifest_prompt(manifest)
+        assert "RECREATE-REQUIRED" in prompt
+        assert "recovery_notes/changelog.md" in prompt
+    finally:
+        agent.harness.close(destroy=True)
+
+
 def test_stale_conversation_disagrees_with_rolled_back_overlay(tmp_path):
     """The bug this experiment measures: FS recovered, chat still believes the crash."""
     agent, injected = _inject(tmp_path / "ws", tmp_path / "sess")
@@ -240,3 +268,55 @@ def test_stale_conversation_disagrees_with_rolled_back_overlay(tmp_path):
         assert not any(turn.kind == "recovery" for turn in conv.turns)
     finally:
         agent.harness.close(destroy=True)
+
+
+def test_no_fault_prompt_is_clean_baseline():
+    prompt = recovery_prompt(
+        title="clean-baseline",
+        context="Suite: test",
+        instruction="Implement the requested change.",
+        docs=DOCS,
+        test_cmd="pytest -q tests/test_example.py",
+        mode="no_fault",
+    )
+    assert "A previous attempt" not in prompt
+    assert "Recovery protocol" not in prompt
+    assert "recovery_notes" not in prompt
+    assert "recovery_build" not in prompt
+    assert "rollback" not in prompt.lower()
+    assert "Execution rules" in prompt
+
+
+def test_direct_baseline_prompt_is_only_the_benchmark_instruction():
+    assert direct_swe_task_prompt(
+        SWE_SHORT, {"problem_statement": "  Original SWE issue.\n"}
+    ) == "Original SWE issue."
+    assert direct_tb_task_prompt(TB_SHORT) == (
+        'Create a file called hello.txt. Write "Hello, world!" to it.'
+    )
+
+
+def test_control_prompts_distinguish_clean_recovery_and_no_rollback():
+    from experiments.workloads.recovery_inject import recovery_prompt
+
+    clean = recovery_prompt(
+        title="control",
+        context="control",
+        instruction="Do the task.",
+        docs=(),
+        test_cmd="pytest -q",
+        mode="clean_recovery",
+    )
+    no_rollback = recovery_prompt(
+        title="control",
+        context="control",
+        instruction="Do the task.",
+        docs=(),
+        test_cmd="pytest -q",
+        mode="crash_no_rollback",
+    )
+    assert "No crash was injected" in clean
+    assert "faulty producer" not in clean
+    assert "intentionally performs no rollback" in no_rollback
+    assert "Recovery protocol:" in clean
+    assert "Recovery protocol:" in no_rollback

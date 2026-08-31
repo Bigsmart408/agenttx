@@ -661,6 +661,16 @@ def task_prompt(
             "Do not write logs or build artifacts under /tmp; keep them inside the workspace. "
             "Independent recovery notes were retained; do not open or rewrite them."
         )
+    elif mode == "no_fault":
+        note_rule = (
+            "Keep changes limited to files required by the official task; do not create "
+            "auxiliary notes or build artifacts."
+        )
+    elif mode in {"clean_recovery", "crash_no_rollback"}:
+        note_rule = (
+            "Keep changes limited to files required by the official task; do not create "
+            "unrelated recovery notes or build artifacts."
+        )
     else:
         note_rule = (
             "Do not write logs or build artifacts under /tmp; keep them inside the workspace. "
@@ -679,11 +689,19 @@ def task_prompt(
         extra_rules=(
             "Do not apply a hidden gold patch file; implement the issue in the repository sources.",
             "Use only the interpreter in the verifier command for tests and pip installs. Do not pip-install into a host conda or system Python.",
+            "Run as one direct agent. Do not invoke, queue, or wait for research or delegated subagents; they are unavailable in this benchmark.",
+            "Use a bounded workflow: inspect only the issue-relevant implementation and FAIL_TO_PASS tests, make the smallest focused change, run the named verifier, and stop when it passes. Do not inventory the repository or repeat successful commands.",
+            "For repository inspection, use rg for one named symbol/path and sed -n for a bounded line range only. Do not use cat, find, ls -R, recursive directory listings, unscoped git diff/status, or a full test suite; run only the exact named verifier once.",
             note_rule,
         ),
         mode=mode,
         recovery_manifest=recovery_manifest,
     )
+
+
+def direct_task_prompt(task: SWETask, instance: dict) -> str:
+    """Return the original SWE-Bench task instruction without AgentTX policy text."""
+    return str(instance.get("problem_statement") or task.instance_id).strip()
 
 
 def apply_oracle(agent, instance: dict) -> None:
@@ -824,13 +842,24 @@ def _verify_tests_docker(workdir: Path, task: SWETask, instance: dict) -> dict:
         )
 
 
-def verify(workdir: Path, task: SWETask, instance: dict, python: str) -> dict:
+def verify(
+    workdir: Path,
+    task: SWETask,
+    instance: dict,
+    python: str,
+    *,
+    require_recovery_artifacts: bool = True,
+) -> dict:
     mode = (os.environ.get("AGENTTX_SWE_VERIFY") or "auto").strip().lower()
     if mode == "docker" or (mode == "auto" and docker_available()):
         tests = _verify_tests_docker(workdir, task, instance)
     else:
         tests = _verify_tests_host(workdir, task, instance, python)
-    docs_ok = all_documents_valid(workdir, all_midcrash_docs(task.docs()))
+    docs_ok = (
+        all_documents_valid(workdir, all_midcrash_docs(task.docs()))
+        if require_recovery_artifacts
+        else True
+    )
     derived_removed = not (Path(workdir) / "recovery_build" / "derived.txt").exists()
     tests["documents_valid"] = docs_ok
     tests["derived_removed"] = derived_removed

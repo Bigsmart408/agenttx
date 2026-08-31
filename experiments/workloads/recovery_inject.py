@@ -315,6 +315,8 @@ def build_recovery_manifest(
     """Build the machine-verifiable handoff state for a fresh agent session."""
     independent_steps = list(injected.get("independent_steps") or ())
     retained = []
+    recreate_required = []
+    manifest_mismatch = False
     for index, spec in enumerate(docs):
         original_step_id = int(independent_steps[index]) if index < len(independent_steps) else -1
         original_step = _step_by_id(ledger, original_step_id)
@@ -332,20 +334,38 @@ def build_recovery_manifest(
             origin = "unexplained_workspace_state"
         else:
             origin = "discarded"
-        retained.append(
-            {
-                "path": spec.path,
-                "state": "complete-protected" if valid else "state-mismatch",
-                "origin": origin,
-                "original_step": original_step_id,
-                "producer_step": producer_step,
-                "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest()
-                if content is not None
-                else None,
-                "contract": f"{spec.prefix.upper()}-001..{spec.prefix.upper()}-{spec.lines:03d}",
-                "contract_valid": bool(valid),
-            }
-        )
+        item = {
+            "path": spec.path,
+            "state": "complete-protected" if valid else "state-mismatch",
+            "origin": origin,
+            "original_step": original_step_id,
+            "producer_step": producer_step,
+            "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest()
+            if content is not None
+            else None,
+            "contract": f"{spec.prefix.upper()}-001..{spec.prefix.upper()}-{spec.lines:03d}",
+            "contract_valid": bool(valid),
+        }
+        if valid and origin in {
+            "retained_by_causal_recovery",
+            "regenerated_after_recovery",
+        }:
+            retained.append(item)
+        elif (
+            content is None
+            and not original_active
+            and policy in {"temporal_checkpoint", "whole_branch_abort"}
+        ):
+            # A coarse rollback is allowed to discard independent notes.  It
+            # is an authoritative state, not a mismatch; the fresh session
+            # may recreate only these explicitly listed paths.
+            item["state"] = "discarded"
+            item["recovery_action"] = "recreate_if_missing"
+            recreate_required.append(item)
+        else:
+            # A missing or invalid path under causal recovery, or an
+            # unexplained workspace file, must still fail closed.
+            manifest_mismatch = True
 
     invalidated = []
     faulty_path = str(injected.get("faulty_path") or "").lstrip("./")
@@ -368,7 +388,9 @@ def build_recovery_manifest(
             }
         )
 
-    retained_paths = {item["path"] for item in retained}
+    retained_paths = {
+        item["path"] for item in (*retained, *recreate_required)
+    }
     invalidated_paths = {item["path"] for item in invalidated}
     no_overlap = not bool(retained_paths & invalidated_paths)
     invalid_absent = all(
@@ -376,7 +398,8 @@ def build_recovery_manifest(
         for item in invalidated
     )
     authoritative = bool(
-        retained
+        (retained or recreate_required)
+        and not manifest_mismatch
         and all(
             item["contract_valid"]
             and item["sha256"]
@@ -397,6 +420,7 @@ def build_recovery_manifest(
             "rollback_targets": sorted(int(item) for item in rollback_targets),
         },
         "retained": retained,
+        "recreate_required": recreate_required,
         "invalidated": invalidated,
         "pending": ["implement the official task", "run the official verifier"],
     }
@@ -426,6 +450,12 @@ def render_recovery_manifest_prompt(manifest: Mapping[str, object]) -> str:
             f"- `{item['path']}`: origin={item['origin']}; "
             f"sha256={str(item['sha256'])[:16]}...; contract={item['contract']} passed"
         )
+    recreate_lines = []
+    for item in manifest.get("recreate_required", []):
+        recreate_lines.append(
+            f"- `{item['path']}`: intentionally discarded by recovery; "
+            f"contract={item['contract']}; recreate only if absent"
+        )
     invalidated_lines = []
     for item in manifest.get("invalidated", []):
         suffix = "; must stay absent" if item.get("must_stay_absent") else ""
@@ -441,6 +471,9 @@ def render_recovery_manifest_prompt(manifest: Mapping[str, object]) -> str:
             "COMPLETE-PROTECTED — already verified outside this LLM session:",
             *retained_lines,
             "",
+            "RECREATE-REQUIRED — intentionally discarded by recovery:",
+            *(recreate_lines or ["- none"]),
+            "",
             "INVALIDATED BY RECOVERY:",
             *(invalidated_lines or ["- none"]),
             "",
@@ -449,6 +482,7 @@ def render_recovery_manifest_prompt(manifest: Mapping[str, object]) -> str:
             "",
             "Do not read, validate, rewrite, or recreate COMPLETE-PROTECTED paths. ",
             "Their hashes and contracts were verified by AgentTX after recovery. ",
+            "Recreate only RECREATE-REQUIRED paths if they are absent. ",
             "If a tool reports a mismatch, do not repair these paths; report ",
             "`AGENTTX_STATE_MISMATCH` and stop touching them.",
         ]
@@ -570,12 +604,24 @@ def recovery_prompt(
     if recovery_manifest is not None:
         policy = (
             "AgentTX completed the selected recovery policy and generated a "
-            "context-aligned state certificate for this fresh session."
+            "context-aligned state certificate for this fresh session. Treat "
+            "the certificate as authoritative: do not reopen, verify, or "
+            "rewrite any retained path listed as complete-protected."
         )
+        if recovery_manifest.get("policy") == "causal":
+            policy += (
+                " This is the causal fast path: the retained work is already "
+                "complete, so spend the remaining context only on the pending "
+                "official fix."
+            )
         note_step = render_recovery_manifest_prompt(recovery_manifest)
         work_step = (
-            "Complete only the pending official task in repository sources and run the "
-            f"official verifier with `{test_cmd}`. Do not inventory recovery artifacts."
+            "Implement only the pending official task. Start at any invalidated source path "
+            "listed in the machine manifest and inspect only it plus the named verifier test. "
+            "The invalidated path may itself be the requested output file; in that case create "
+            "the correct output directly from the official instruction. Make the smallest focused edit, "
+            "run the exact verifier once, and finish immediately "
+            f"when it passes with `{test_cmd}`. Do not inventory recovery artifacts or unrelated paths."
         )
     elif mode == "causal":
         policy = (
@@ -644,19 +690,111 @@ def recovery_prompt(
             "After the notes exist, complete the official task in repository sources and run the official verifier with "
             f"`{test_cmd}`."
         )
+    elif mode == "clean_recovery":
+        policy = (
+            "This is a clean recovery-context control. No crash was injected and "
+            "no rollback was performed; the recovery-shaped prompt is present only "
+            "to measure prompt/context overhead."
+        )
+        note_step = (
+            "There are no retained, invalidated, or recreate-required recovery "
+            "artifacts. Do not create recovery notes or generated build artifacts."
+        )
+        work_step = (
+            "Complete the official task in repository sources and run the official verifier with "
+            f"`{test_cmd}`."
+        )
+    elif mode == "crash_no_rollback":
+        policy = (
+            "A synthetic crash was injected before this fresh session. This control "
+            "intentionally performs no rollback, so the injected workspace state is "
+            "still present and must be handled as actual task state."
+        )
+        note_step = (
+            "Do not create unrelated recovery notes or generated artifacts. Inspect "
+            "only task-relevant paths and preserve the injected state unless changing "
+            "it is necessary to complete the official task."
+        )
+        work_step = (
+            "Complete the official task in the current workspace and run the official verifier with "
+            f"`{test_cmd}`."
+        )
+    elif mode == "no_fault":
+        policy = (
+            "This is an ordinary clean official-task run. The workspace contains only "
+            "the task inputs and the files needed for the requested solution."
+        )
+        note_step = (
+            "Do not create auxiliary notes or generated build artifacts; keep changes "
+            "limited to files required by the official task."
+        )
+        work_step = (
+            "Complete the official task in repository sources and run the official verifier with "
+            f"`{test_cmd}`."
+        )
     else:
         raise ValueError(mode)
 
+    common_step = (
+        "Use the direct workspace tools provided by this session (especially the shell "
+        "and file-edit tools) yourself. The outer AgentTX runtime already supplies the "
+        "workspace isolation; do not delegate the task, ask for approval, or conclude "
+        "that tools are unavailable based on a delegated agent's report. If a direct "
+        "tool returns an error, use its actual output to diagnose and retry. If it returns "
+        "a successful result, do not repeat that command. After a verifier failure, inspect "
+        "the actual failure, make one focused edit, rerun the named verifier, and stop once "
+        "it passes. Keep every read bounded (targeted symbol/range only); never dump a whole "
+        "source file, dependency tree, virtualenv, or generated log into the context. "
+        "This is a single-agent benchmark: no research subagent, delegation, "
+        "background agent, or waiting for another agent is available or allowed; never "
+        "invoke, queue, or wait for one. The current "
+        "working directory is the official `/app` root: use relative paths such as "
+        "`task_file/...`, and never search `/`, `/tmp`, `/home`, `/usr`, or parent "
+        "directories."
+    )
+    if mode not in {"no_fault", "crash_direct"}:
+        common_step += (
+            " Do not inventory `.dsh`, `.agents`, `.sessions`, or `.agenttx`; those are "
+            "harness metadata, not task sources."
+        )
+    if mode == "no_fault":
+        steps = [common_step, work_step, *list(extra_rules)]
+        numbered = "\n".join(f"{index}. {step}" for index, step in enumerate(steps, start=1))
+        return f"""{policy}
+
+Task: {title}
+{context}
+
+Official instruction:
+{instruction.strip()}
+
+Execution rules:
+{numbered}
+
+Stay inside the workspace.
+"""
+    artifact_step = (
+        "Ensure `recovery_build/derived.txt` is absent before finishing."
+        if mode in {"clean_recovery", "causal", "temporal_checkpoint", "whole_branch_abort"}
+        else "Do not create unrelated build artifacts; this no-rollback control intentionally preserves the injected workspace state."
+    )
     steps = [
-        work_step,
+        common_step,
         note_step,
-        "Ensure `recovery_build/derived.txt` is absent before finishing.",
+        work_step,
+        artifact_step,
         *list(extra_rules),
         "Do not call any rollback tool: the comparison policy has already run.",
         "Call `finish` with `commit=false` and a one-sentence summary when the official verifier passes.",
     ]
     numbered = "\n".join(f"{index}. {step}" for index, step in enumerate(steps, start=1))
-    return f"""A previous attempt at this official benchmark task introduced a faulty producer in this protected coding session.  {policy}
+    if mode == "clean_recovery":
+        intro = "This is a clean recovery-context calibration session. No fault was injected."
+    elif mode == "crash_no_rollback":
+        intro = "A synthetic crash was injected before this fresh session; this control intentionally performs no rollback."
+    else:
+        intro = "A previous attempt at this official benchmark task introduced a faulty producer in this protected coding session."
+    return f"""{intro}  {policy}
 
 Task: {title}
 {context}

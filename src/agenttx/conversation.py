@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Iterable, List, Mapping, Optional, Sequence, Set
@@ -41,6 +42,14 @@ _SKIP_TOKENS = CONTROL_TOOLS | {
     "null",
 }
 _TOKEN_SPLIT = re.compile(r"[^\w.:/=+-]+")
+
+
+def _positive_env_int(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
 
 
 def canonical_json(payload: object) -> str:
@@ -579,6 +588,87 @@ class ConversationLog:
             messages.extend(self._messages_for_turn(turn))
         return messages
 
+    def model_messages(
+        self,
+        recent_turns: Optional[int] = None,
+        max_result_chars: Optional[int] = None,
+    ) -> List[dict]:
+        """Build a bounded model view while retaining the full audit log.
+
+        The ledger and turns remain lossless on disk. Only old active effect
+        turns are summarized for the next model call; recovery/user control
+        messages and the most recent effect turns stay verbatim.
+        Rewind recomputes this view from the post-rollback active spans, so a
+        summary can never preserve a rolled-back result.
+        """
+        recent = recent_turns or _positive_env_int(
+            "AGENTTX_CONTEXT_RECENT_TURNS", 6
+        )
+        result_limit = max_result_chars or _positive_env_int(
+            "AGENTTX_CONTEXT_RESULT_CHARS", 1200
+        )
+        active = self.active_turns()
+        effect_turns = [
+            turn
+            for turn in active
+            if turn.kind not in {"recovery", "user"} and turn.calls
+        ]
+        if len(effect_turns) <= recent:
+            return self.active_messages()
+
+        keep_ids = {turn.turn_id for turn in effect_turns[-recent:]}
+        old_turns = [turn for turn in effect_turns if turn.turn_id not in keep_ids]
+        summary_lines: List[str] = []
+        summary_budget = max(6000, result_limit * 6)
+        for turn in old_turns:
+            for call in turn.active_calls():
+                result = (call.result or "").strip()
+                if len(result) > result_limit:
+                    half = max(1, result_limit // 2)
+                    result = result[:half] + "\n...[compacted]...\n" + result[-half:]
+                parents = ",".join(str(parent) for parent in call.parents) or "-"
+                step = "?" if call.step_id is None else str(call.step_id)
+                line = (
+                    f"- step={step} tool={call.tool_name} "
+                    f"parents=[{parents}] result={result}"
+                )
+                if summary_lines and sum(len(item) + 1 for item in summary_lines) + len(line) > summary_budget:
+                    summary_lines.append("- ... older active results omitted; query the workspace or ledger as needed")
+                    break
+                summary_lines.append(line)
+            if summary_lines and summary_lines[-1].startswith("- ... older"):
+                break
+
+        messages: List[dict] = []
+        if self.system:
+            messages.append({"role": "system", "content": self.system})
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "## AgentTX compacted active history\n"
+                    "The full conversation and effect ledger remain durable. "
+                    "The following older active tool results are summarized only "
+                    "for context budgeting; their step ids and dependency parents "
+                    "remain authoritative. Do not infer rolled-back state from "
+                    "this summary.\n"
+                    + "\n".join(summary_lines)
+                ),
+            }
+        )
+        if self.task:
+            messages.append({"role": "user", "content": self.task})
+
+        control_turns = [
+            turn for turn in active if turn.kind in {"recovery", "user"}
+        ]
+        for turn in control_turns[-2:]:
+            messages.extend(self._messages_for_turn(turn))
+        for turn in effect_turns:
+            if turn.turn_id in keep_ids:
+                messages.extend(self._messages_for_turn(turn))
+        return messages
+
     def to_dict(self) -> dict:
         return {
             "schema": SCHEMA,
@@ -665,4 +755,3 @@ def record_tool_record(
         tool_names=[tool_name],
         kind="effect",
     )
-

@@ -313,7 +313,8 @@ def test_recovery_manifest_rejects_valid_but_unexplained_workspace_file(tmp_path
         rollback_targets=[],
         path_exists={},
     )
-    assert manifest["retained"][0]["origin"] == "unexplained_workspace_state"
+    assert manifest["retained"] == []
+    assert manifest["recreate_required"] == []
     assert manifest["authoritative"] is False
 
 
