@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Sequence
@@ -26,6 +27,9 @@ IGNORE_COMMIT_GLOBS = (
     "/tmp/dsh-subprocess-*/*",
     "*/build.log",
 )
+
+ALLOW_EXTERNAL_WRITES_ENV = "AGENTTX_ALLOW_EXTERNAL_WRITES"
+
 
 DEFAULT_DENY = (
     "/etc/*",
@@ -58,9 +62,18 @@ class CommitPolicy:
     workdir: Path
     allow_globs: Sequence[str] = field(default_factory=lambda: ["**/*"])
     deny_globs: Sequence[str] = field(default_factory=lambda: list(DEFAULT_DENY))
+    # External paths are rejected by default because materializing them would
+    # escape the transaction workspace.  Benchmark harnesses may opt in via
+    # AGENTTX_ALLOW_EXTERNAL_WRITES=1 (or an explicit True value).
+    allow_external_writes: bool | None = None
 
     def __post_init__(self) -> None:
         self.workdir = Path(self.workdir).resolve()
+        if self.allow_external_writes is None:
+            value = os.environ.get(ALLOW_EXTERNAL_WRITES_ENV, "")
+            self.allow_external_writes = value.strip().lower() in {
+                "1", "true", "yes", "on"
+            }
 
     def is_ignored(self, path: str) -> bool:
         """Ephemeral tooling artifacts are recorded but never materialized."""
@@ -82,6 +95,8 @@ class CommitPolicy:
     def check_path(self, path: str) -> PolicyDecision:
         if self._match(path, self.deny_globs):
             return PolicyDecision(False, "denied by deny_globs", path)
+        if self.allow_external_writes:
+            return PolicyDecision(True, "external writes explicitly enabled", path)
         if any(g in ("**/*", "*", "/**") for g in self.allow_globs):
             try:
                 Path(path).resolve().relative_to(self.workdir)

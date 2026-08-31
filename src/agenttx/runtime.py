@@ -157,6 +157,7 @@ class AgentTX:
                 workdir=Path(data["workspace"]),
                 allow_globs=list(policy_data.get("allow_globs", ["**/*"])),
                 deny_globs=list(policy_data.get("deny_globs", [])),
+                allow_external_writes=policy_data.get("allow_external_writes"),
             )
         tx = cls(
             workspace=Path(data["workspace"]),
@@ -224,6 +225,7 @@ class AgentTX:
             "commit_policy": {
                 "allow_globs": list(self.commit_policy.allow_globs),
                 "deny_globs": list(self.commit_policy.deny_globs),
+                "allow_external_writes": bool(self.commit_policy.allow_external_writes),
             },
             "ledger": self.ledger.to_dict(),
             "object_catalog": self.object_catalog.to_dict(),

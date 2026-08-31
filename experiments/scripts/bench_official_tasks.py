@@ -1254,6 +1254,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     parser.add_argument("--harness-timeout", type=float, default=1800.0)
     parser.add_argument(
+        "--allow-external-writes",
+        action="store_true",
+        help=(
+            "allow the harness to commit writes outside its workspace (except "
+            "the hard deny list); equivalent to AGENTTX_ALLOW_EXTERNAL_WRITES=1"
+        ),
+    )
+    parser.add_argument(
         "--result-subdir",
         default=None,
         help="write under experiments/results/<name> instead of the harness folder",
@@ -1274,6 +1282,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="run a clean official-task baseline without injecting or recovering a fault",
     )
     args = parser.parse_args(argv)
+    if args.allow_external_writes:
+        os.environ["AGENTTX_ALLOW_EXTERNAL_WRITES"] = "1"
     if args.no_fault and (args.oracle or args.replay_docs):
         raise SystemExit("--no-fault cannot be combined with --oracle or --replay-docs")
     run_modes = (NO_FAULT_MODE,) if args.no_fault else tuple(args.modes)

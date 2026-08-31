@@ -47,6 +47,23 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 
+def test_external_writes_are_opt_in_and_keep_hard_denies(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.delenv("AGENTTX_ALLOW_EXTERNAL_WRITES", raising=False)
+    closed = CommitPolicy(workdir=tmp_path)
+    assert not closed.check_path("/tmp/grid.py").allowed
+
+    monkeypatch.setenv("AGENTTX_ALLOW_EXTERNAL_WRITES", "1")
+    opened = CommitPolicy(workdir=tmp_path)
+    external = opened.check_path("/tmp/grid.py")
+    assert external.allowed, external
+    assert "external writes" in external.reason
+    denied = opened.check_path("/etc/passwd")
+    assert not denied.allowed, denied
+
+
+
 def test_fontconfig_cache_writes_are_ignored(tmp_path: Path) -> None:
     pol = CommitPolicy(workdir=tmp_path)
     path = "/home/pengpeng/miniconda3/envs/agenttx/var/cache/fontconfig/foo.cache-12"

@@ -26,6 +26,20 @@ duplicates the check in `run_trajectory`. This leaves one authoritative commit
 invariant while retaining the existing policy object for preview and explicit
 agent-side validation.
 
+### External helper files
+
+Some black-box agents create helper scripts in `/tmp` or another directory outside
+the protected workspace. These writes are still observed in the effect ledger, but
+they are not a Linux permission failure. The default policy rejects them at
+commit time so an untrusted command cannot publish arbitrary host paths. For a
+controlled benchmark or deployment that intentionally grants the agent this
+capability, set `AGENTTX_ALLOW_EXTERNAL_WRITES=1` or pass
+`--allow-external-writes` to `bench_official_tasks.py`. This explicitly permits
+external writes except paths in `DEFAULT_DENY` (system directories, credentials,
+and key material); the hard deny list always wins. The setting is persisted in
+`agenttx.json` so a resumed session keeps the same decision.
+
+
 ## Validation
 
 New integration coverage verifies that:

@@ -70,6 +70,13 @@ command is launched as `agentTX-clash run -- ...` so the benchmark uses the
 same proxy path as the live agent.  Override it with `AGENTTX_CLASH_COMMAND`
 when running elsewhere.
 
+External harnesses sometimes create helper scripts outside the transaction
+workspace (for example, under `/tmp`). Such paths are rejected by the default
+commit policy. For a benchmark that intentionally allows those writes, export
+`AGENTTX_ALLOW_EXTERNAL_WRITES=1` or add `--allow-external-writes` to
+`bench_official_tasks.py`; system and credential paths in the hard deny list
+remain blocked.
+
 At this interface stage each external harness is recorded as one opaque task
 boundary inside AgentTX.  The harness still owns its own turns, tools, and
 retries; any machine-readable usage events are normalized into prompt,
