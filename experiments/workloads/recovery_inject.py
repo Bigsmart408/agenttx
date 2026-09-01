@@ -454,11 +454,11 @@ def render_recovery_manifest_prompt(manifest: Mapping[str, object]) -> str:
         )
     if recovery_context_variant() == "compact":
         retained_paths = [
-            f"- {item['path']} (complete-protected; verified in the control plane)"
+            f"- {item['path']} (complete-protected; verified; do not inspect or rewrite)"
             for item in manifest.get("retained", [])
         ]
         recreate_paths = [
-            f"- {item['path']}: recreate only if absent; contract={item['contract']}"
+            f"- {item['path']}: recreate only when absent; contract={item['contract']}"
             for item in manifest.get("recreate_required", [])
         ]
         invalidated_paths = [
@@ -470,23 +470,24 @@ def render_recovery_manifest_prompt(manifest: Mapping[str, object]) -> str:
                 "## AgentTX recovery handoff (compact; authoritative)",
                 f"State ID: {manifest.get('state_id', 'unknown')}",
                 f"Policy: {manifest.get('policy', 'unknown')}",
+                "Runtime verified this causal state; the certificate is authoritative.",
                 "",
-                "COMPLETE-PROTECTED (already verified; do not inspect):",
+                "COMPLETE-PROTECTED (do not inspect):",
                 *(retained_paths or ["- none"]),
                 "",
-                "RECREATE-REQUIRED:",
+                "RECREATE-REQUIRED (only if absent):",
                 *(recreate_paths or ["- none"]),
                 "",
-                "INVALIDATED BY RECOVERY:",
+                "INVALIDATED (the only task paths to inspect or edit):",
                 *(invalidated_paths or ["- none"]),
                 "",
                 "PENDING:",
                 *[f"- {item}" for item in manifest.get("pending", [])],
                 "",
-                "Use this verified handoff instead of inventorying the workspace. "
-                "Edit only invalidated task paths, recreate missing required artifacts, "
-                "run the named verifier once, and finish. If a protected path mismatches, "
-                "report AGENTTX_STATE_MISMATCH and stop.",
+                "Three-step fast path: inspect only the invalidated source and named verifier; "
+                "make one focused edit; run the named verifier once and stop at the first pass. "
+                "Do not inventory, diagnose, rerun successful commands, or touch protected paths. "
+                "On a protected-path mismatch, report AGENTTX_STATE_MISMATCH and stop.",
             ]
         )
     retained_lines = []
@@ -666,12 +667,10 @@ def recovery_prompt(
             )
         note_step = render_recovery_manifest_prompt(recovery_manifest)
         work_step = (
-            "Implement only the pending official task. Start at any invalidated source path "
-            "listed in the machine manifest and inspect only it plus the named verifier test. "
-            "The invalidated path may itself be the requested output file; in that case create "
-            "the correct output directly from the official instruction. Make the smallest focused edit, "
-            "run the exact verifier once, and finish immediately "
-            f"when it passes with `{test_cmd}`. Do not inventory recovery artifacts or unrelated paths."
+            "Implement the pending official task using one focused edit. Inspect only the "
+            "invalidated source path and the named verifier; if the invalidated path is the "
+            "requested output, create it directly from the official instruction. Run the exact "
+            f"verifier once with `{test_cmd}` and stop immediately when it passes."
         )
     elif mode == "causal":
         policy = (
@@ -806,6 +805,14 @@ def recovery_prompt(
         common_step += (
             " Do not inventory `.dsh`, `.agents`, `.sessions`, or `.agenttx`; those are "
             "harness metadata, not task sources."
+        )
+    if recovery_context_variant() == "compact" and recovery_manifest is not None:
+        common_step = (
+            "Use direct workspace tools. The compact recovery certificate is authoritative: "
+            "never inspect or modify protected recovery artifacts. Use one bounded inspection "
+            "of the invalidated task source, one focused edit, and one run of the named verifier; "
+            "stop at the first pass. Do not inventory files, run diagnostics, repeat successful "
+            "commands, or delegate."
         )
     if mode == "no_fault":
         steps = [common_step, work_step, *list(extra_rules)]
