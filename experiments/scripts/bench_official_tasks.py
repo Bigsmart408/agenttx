@@ -281,18 +281,51 @@ def prefetch(
     python: str,
     swe_tasks=None,
     tb_tasks=None,
+    skip_environment_errors: bool = False,
 ) -> None:
     cache_root = Path(cache_root)
     swe_catalog = swe_tasks or swe.TASKS
     tb_catalog = tb_tasks or tb.TASKS
     if "swe" in suites:
         for task in swe_catalog.values():
-            repo, instance = swe.ensure_repo(task, cache_root)
+            try:
+                repo, instance = swe.ensure_repo(task, cache_root)
+            except Exception as exc:
+                if not skip_environment_errors:
+                    raise
+                print(
+                    f"skip environment error during prefetch suite=swe task="
+                    f"{getattr(task, 'name', getattr(task, 'instance_id', '?'))}: "
+                    f"{type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+                continue
             print(f"swe {task.instance_id}: {repo} ftp={swe.fail_to_pass(instance)}")
     if "tb" in suites:
-        repo = tb.ensure_tb_repo(cache_root)
+        try:
+            repo = tb.ensure_tb_repo(cache_root)
+        except Exception as exc:
+            if not skip_environment_errors:
+                raise
+            print(
+                f"skip environment error during prefetch suite=tb: "
+                f"{type(exc).__name__}: {exc}",
+                flush=True,
+            )
+            return
         for task in tb_catalog.values():
-            src = tb.task_source(cache_root, task)
+            try:
+                src = tb.task_source(cache_root, task)
+            except Exception as exc:
+                if not skip_environment_errors:
+                    raise
+                print(
+                    f"skip environment error during prefetch suite=tb task="
+                    f"{getattr(task, 'name', getattr(task, 'task_id', '?'))}: "
+                    f"{type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+                continue
             print(f"tb {task.task_id}: {src}")
         print(f"tb repo: {repo}")
         proc = subprocess.run(
@@ -350,6 +383,8 @@ def run_once(
     targets: List[int] = []
     result = None
     adapter = None
+    agent_started = False
+    environment_error = False
     committed = False
     finished = False
     finish_called = False
@@ -595,6 +630,7 @@ def run_once(
                 agent.harness.tx.pool.trace_reads = False
         recovery_first = len(agent.harness.tx.ledger.steps)
         recovery_started = time.perf_counter()
+        agent_started = True
         if oracle:
             if suite == "swe":
                 swe.apply_oracle(agent, instance)
@@ -638,6 +674,13 @@ def run_once(
                 harness_returncode = int(result.returncode)
                 harness_stdout = str(result.stdout)[-2000:]
                 harness_stderr = str(result.stderr)[-2000:]
+                if (
+                    not result.finished
+                    and harness_returncode != 0
+                    and total_tokens == 0
+                    and model_calls == 0
+                ):
+                    environment_error = True
         recovery_user_end = len(agent.harness.tx.ledger.steps)
         access = retained_artifact_access(
             agent.harness.tx.ledger.steps,
@@ -726,6 +769,7 @@ def run_once(
         )
     except Exception as exc:  # keep failed repeats in the raw output
         error = f"{type(exc).__name__}: {exc}"[:800]
+        environment_error = not agent_started and not oracle
         independent_unchanged = False
         docs_ok = False
         derived_removed = False
@@ -865,6 +909,7 @@ def run_once(
         "finish_called": finish_called,
         "committed": committed,
         "success": success,
+        "environment_error": environment_error,
         "injected": injected,
         "error": error,
         "verifier_stdout": verdict.get("verifier_stdout", ""),
@@ -1281,6 +1326,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         action="store_true",
         help="run a clean official-task baseline without injecting or recovering a fault",
     )
+    parser.add_argument(
+        "--skip-environment-errors",
+        action="store_true",
+        help="skip cases that fail before the live agent starts or whose harness is unavailable",
+    )
     args = parser.parse_args(argv)
     if args.allow_external_writes:
         os.environ["AGENTTX_ALLOW_EXTERNAL_WRITES"] = "1"
@@ -1316,7 +1366,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if name in requested or f"tb:{name}" in requested
         }
     if args.preflight_only:
-        prefetch(args.cache_dir, suites, args.python, swe_catalog, tb_catalog)
+        prefetch(
+            args.cache_dir,
+            suites,
+            args.python,
+            swe_catalog,
+            tb_catalog,
+            skip_environment_errors=args.skip_environment_errors,
+        )
         if args.oracle:
             return 0
         if args.harness == "legacy":
@@ -1376,6 +1433,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         args.python,
         swe_catalog,
         tb_catalog,
+        skip_environment_errors=args.skip_environment_errors,
     )
     out_dir_early = _result_dir(args.provider, args.oracle, args.harness, args.result_subdir)
     out_path_early = out_dir_early / "official_tasks_raw.csv"
@@ -1487,6 +1545,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     swe_tasks=swe_catalog,
                     tb_tasks=tb_catalog,
                 )
+                if args.skip_environment_errors and row.get("environment_error"):
+                    print(
+                        f"skipping environment error suite={suite} task={name} "
+                        f"mode={mode} repeat={repeat}: {row.get('error', '')}",
+                        flush=True,
+                    )
+                    continue
                 rows.append(row)
                 done_keys.add(key)
                 summary_partial = summarize(rows)
