@@ -20,6 +20,7 @@ from experiments.workloads.swe_bench_suite import (
 from experiments.workloads.terminal_bench_suite import (
     SHORT as TB_SHORT,
     direct_task_prompt as direct_tb_task_prompt,
+    test_command as tb_test_command,
 )
 from experiments.workloads.recovery_inject import (
     DocSpec,
@@ -30,6 +31,7 @@ from experiments.workloads.recovery_inject import (
     missing_independent_docs,
     read_recovery_documents,
     render_recovery_manifest_prompt,
+    recovery_context_variant,
     recovery_prompt,
 )
 
@@ -40,14 +42,21 @@ DOCS = (
 )
 
 
-def _inject(workdir: Path, session: Path, *, bind: bool = True):
+def _inject(
+    workdir: Path,
+    session: Path,
+    *,
+    bind: bool = True,
+    docs=DOCS,
+    fault_after_docs=None,
+):
     workdir.mkdir(parents=True, exist_ok=True)
     session.mkdir(parents=True, exist_ok=True)
     harness = CodingAgentHarness(workdir=workdir, session_dir=session)
     agent = type("A", (), {"harness": harness})()
     injected = inject_recovery_dag(
         agent,
-        docs=DOCS,
+        docs=docs,
         task_name="state-consistency",
         prefix_writes=(),
         faulty_path="pkg/fault.py",
@@ -55,8 +64,29 @@ def _inject(workdir: Path, session: Path, *, bind: bool = True):
         derived_cmd="mkdir -p recovery_build && cat pkg/fault.py > recovery_build/derived.txt",
         test_cmd="python -c \"print(open('pkg/fault.py').read()); raise SystemExit(1)\"",
         bind_conversation=bind,
+        fault_after_docs=fault_after_docs,
     )
     return agent, injected
+
+
+def test_inject_places_fault_at_requested_independent_step(tmp_path):
+    docs = tuple(
+        DocSpec(f"recovery_notes/random-{index}.md", f"random{index}", 2)
+        for index in range(5)
+    )
+    agent, injected = _inject(
+        tmp_path / "ws",
+        tmp_path / "sess",
+        docs=docs,
+        fault_after_docs=3,
+    )
+    try:
+        assert dag_is_valid(injected)
+        assert injected["root_step"] == 3
+        assert len(injected["independent_before_steps"]) == 3
+        assert len(injected["independent_after_steps"]) == 2
+    finally:
+        agent.harness.close(destroy=True)
 
 
 def _manifest_after_policy(agent, injected, mode: str):
@@ -296,6 +326,15 @@ def test_direct_baseline_prompt_is_only_the_benchmark_instruction():
     )
 
 
+def test_terminal_verifier_uses_selected_python_runtime_libraries():
+    command = tb_test_command("/opt/conda/envs/agenttx/bin/python", TB_SHORT)
+    assert "PATH=/opt/conda/envs/agenttx/bin:$PATH" in command
+    assert (
+        "LD_LIBRARY_PATH=/opt/conda/envs/agenttx/lib"
+        "${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" in command
+    )
+
+
 def test_control_prompts_distinguish_clean_recovery_and_no_rollback():
     from experiments.workloads.recovery_inject import recovery_prompt
 
@@ -305,6 +344,7 @@ def test_control_prompts_distinguish_clean_recovery_and_no_rollback():
         instruction="Do the task.",
         docs=(),
         test_cmd="pytest -q",
+        focus_path="pkg/core.py",
         mode="clean_recovery",
     )
     no_rollback = recovery_prompt(
@@ -313,13 +353,23 @@ def test_control_prompts_distinguish_clean_recovery_and_no_rollback():
         instruction="Do the task.",
         docs=(),
         test_cmd="pytest -q",
+        focus_path="pkg/core.py",
         mode="crash_no_rollback",
     )
     assert "No crash was injected" in clean
     assert "faulty producer" not in clean
     assert "intentionally performs no rollback" in no_rollback
+    assert "remove invalid fault-dependent artifacts" in no_rollback
+    assert "Ensure `recovery_build/derived.txt` is absent" in no_rollback
+    assert "preserves the injected workspace state" not in no_rollback
     assert "Recovery protocol:" in clean
     assert "Recovery protocol:" in no_rollback
+    assert "known task source `pkg/core.py`" in clean
+    assert "known faulty producer path `pkg/core.py`" in no_rollback
+    assert "named verifier" in clean
+    assert "named verifier" in no_rollback
+    assert "`pytest -q`" in clean
+    assert "`pytest -q`" in no_rollback
 
 
 def test_compact_manifest_handoff_omits_hashes(tmp_path, monkeypatch):
@@ -333,6 +383,42 @@ def test_compact_manifest_handoff_omits_hashes(tmp_path, monkeypatch):
         assert "sha256=" not in prompt
         assert "complete-protected" in prompt
         assert "recovery_build/derived.txt" in prompt
-        assert "run the named verifier once" in prompt
+        assert "each rerun follows a concrete issue-relevant edit" in prompt
+        assert "environment failure before test execution does not count" in prompt
+        assert "rerun that verifier once" not in prompt
+        assert "one additional focused edit" not in prompt
+        assert "only task paths to inspect or edit" not in prompt
+        assert "follow only issue-relevant symbols or tests" in prompt
     finally:
         agent.harness.close(destroy=True)
+
+
+def test_compact_manifest_handoff_is_causal_only(tmp_path, monkeypatch):
+    agent, injected = _inject(tmp_path / "ws", tmp_path / "sess")
+    try:
+        _apply_policy(agent, "temporal_checkpoint", injected["root_step"])
+        manifest = _manifest_after_policy(agent, injected, "temporal_checkpoint")
+        monkeypatch.setenv("AGENTTX_RECOVERY_CONTEXT", "compact")
+        prompt = render_recovery_manifest_prompt(manifest)
+        assert "compact; authoritative" not in prompt
+        assert "sha256=" in prompt
+        assert "INVALIDATED BY RECOVERY" in prompt
+    finally:
+        agent.harness.close(destroy=True)
+
+
+def test_clean_recovery_can_use_compact_execution_constraints(monkeypatch):
+    monkeypatch.setenv("AGENTTX_RECOVERY_CONTEXT", "compact")
+    prompt = recovery_prompt(
+        title="control",
+        context="control",
+        instruction="Do the task.",
+        docs=(),
+        test_cmd="pytest -q",
+        focus_path="pkg/core.py",
+        mode="clean_recovery",
+    )
+    assert recovery_context_variant("clean_recovery") == "compact"
+    assert "clean compact control has no recovery certificate" in prompt
+    assert "compact recovery certificate is authoritative" not in prompt
+    assert "This is a clean recovery-context control" in prompt

@@ -163,6 +163,40 @@ class Ledger:
                     changed = True
         return sorted(dependents)
 
+    def causal_dependents_many(self, failed_step_ids: Iterable[int]) -> List[int]:
+        """Return the union of the causal cones rooted at ``failed_step_ids``."""
+        roots = {int(step_id) for step_id in failed_step_ids}
+        if not roots:
+            return []
+        for step_id in roots:
+            if step_id < 0 or step_id >= len(self.steps):
+                raise ValueError(f"invalid step id {step_id}")
+        dependents = set(roots)
+        changed = True
+        while changed:
+            changed = False
+            for step in self.steps:
+                if step.step_id in dependents or step.status == "rolled_back":
+                    continue
+                if step.parents & dependents:
+                    dependents.add(step.step_id)
+                    changed = True
+        return sorted(dependents)
+
+    def ancestors(self, step_id: int) -> List[int]:
+        """Return every transitive dependency of ``step_id`` in step order."""
+        if step_id < 0 or step_id >= len(self.steps):
+            raise ValueError(f"invalid step id {step_id}")
+        ancestors: Set[int] = set()
+        frontier = list(self.steps[step_id].parents)
+        while frontier:
+            parent = frontier.pop()
+            if parent in ancestors:
+                continue
+            ancestors.add(parent)
+            frontier.extend(self.steps[parent].parents)
+        return sorted(ancestors)
+
     def cascade_rollback_targets(self, failed_step_id: int) -> List[int]:
         """Temporal rollback: failed step and all later uncommitted steps."""
         if failed_step_id <= self.committed_frontier:

@@ -13,7 +13,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from agenttx.ledger import EffectKind
+from agenttx.ledger import Effect, EffectKind
+from agenttx.policy import CommitPolicy
 from agenttx.runtime import AgentTX
 
 
@@ -56,6 +57,52 @@ def test_direct_runtime_commit_enforces_default_policy(tmp_path: Path) -> None:
         assert tx.ledger.committed_frontier == -1
         assert tx.ledger.steps[record.step_id].status == "speculative"
         assert not (ws / "private.pem").exists()
+    finally:
+        tx.close(destroy=True)
+
+
+def test_commit_ignores_workspace_dependency_environment(tmp_path: Path) -> None:
+    ws, tx = _begin(tmp_path, "dependency-environment")
+    try:
+        record = tx.run_tool(
+            "build-with-dependency",
+            [
+                "bash",
+                "-c",
+                "mkdir -p .eggs/certifi.egg/certifi; "
+                "echo public-ca > .eggs/certifi.egg/certifi/cacert.pem; "
+                "echo result > result.txt",
+            ],
+        )
+        assert record.returncode == 0
+
+        tx.commit(record.step_id)
+
+        assert (ws / "result.txt").read_text(encoding="utf-8") == "result\n"
+        assert not (ws / ".eggs").exists()
+    finally:
+        tx.close(destroy=True)
+
+
+def test_commit_discards_external_private_tmp_but_materializes_workspace(
+    tmp_path: Path,
+) -> None:
+    ws, tx = _begin(tmp_path, "private-tmp")
+    external = tmp_path / "astropy-test-venv" / "bin" / "python"
+    try:
+        record = tx.run_tool(
+            "mixed-temp",
+            [
+                "bash",
+                "-c",
+                f"mkdir -p {external.parent}; echo temp > {external}; echo result > result.txt",
+            ],
+        )
+        assert record.returncode == 0
+        assert any(effect.path == str(external) for effect in record.effects)
+        tx.commit(record.step_id)
+        assert (ws / "result.txt").read_text(encoding="utf-8") == "result\n"
+        assert not external.exists()
     finally:
         tx.close(destroy=True)
 
@@ -183,6 +230,44 @@ def test_causal_rollback_preserves_independent_later_step(tmp_path: Path) -> Non
         assert tx.commit(independent.step_id) == independent.step_id
         assert not (ws / "a.txt").exists()
         assert (ws / "b.txt").read_text(encoding="utf-8") == "two\n"
+    finally:
+        tx.close(destroy=True)
+
+
+def test_causal_rollback_ignores_explicit_ephemeral_root_conflicts(
+    tmp_path: Path,
+) -> None:
+    ws = tmp_path / "ephemeral-causal"
+    ws.mkdir()
+    ephemeral = ws / ".tmp"
+    ephemeral.mkdir()
+    tx = AgentTX.begin(
+        workdir=ws,
+        session_dir=tmp_path / "ephemeral-causal-session",
+        trace_backend="strace",
+        commit_policy=CommitPolicy(
+            workdir=ws,
+            ephemeral_roots=(ephemeral,),
+        ),
+    )
+    try:
+        producer = tx.run_tool("producer", ["bash", "-c", "echo bad > source.txt"])
+        independent = tx.run_tool("independent", ["bash", "-c", "echo keep > keep.txt"])
+        consumer = tx.run_tool(
+            "consumer",
+            ["bash", "-c", "cat source.txt >/dev/null; mkdir -p .tmp/pytest/run"],
+        )
+        tx.ledger.steps[independent.step_id].effects.append(
+            Effect(str(ephemeral), EffectKind.WRITE)
+        )
+
+        assert tx.rollback_causal(producer.step_id) == [
+            producer.step_id,
+            consumer.step_id,
+        ]
+        tx.commit(independent.step_id)
+        assert (ws / "keep.txt").read_text(encoding="utf-8") == "keep\n"
+        assert not (ws / "source.txt").exists()
     finally:
         tx.close(destroy=True)
 

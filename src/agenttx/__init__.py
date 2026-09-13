@@ -3,8 +3,16 @@
 __version__ = "0.0.16"
 
 from .conversation import ConversationLog
+from .faults import (
+    FailureKind,
+    FailureObservation,
+    FaultCandidate,
+    RecoveryAttempt,
+    RecoveryPlan,
+)
 from .harness import CodingAgentHarness, TrajectoryStep
 from .ledger import Effect, EffectKind, Ledger, Step
+from .localizer import FaultLocalizer
 from .policy import CommitPolicy
 from .runtime import AgentTX, AgentTXRuntime
 from .semisolate import SharedSemisolate
@@ -17,7 +25,13 @@ __all__ = [
     "ConversationLog",
     "Effect",
     "EffectKind",
+    "FailureKind",
+    "FailureObservation",
+    "FaultCandidate",
+    "FaultLocalizer",
     "Ledger",
+    "RecoveryAttempt",
+    "RecoveryPlan",
     "SharedSemisolate",
     "Step",
     "TrajectoryStep",

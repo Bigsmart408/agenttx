@@ -35,6 +35,47 @@ def test_worker_crash_falls_back_and_restarts(tmp_path: Path) -> None:
         tx.close(destroy=True)
 
 
+def test_worker_response_failure_does_not_replay_command(tmp_path: Path) -> None:
+    ws = tmp_path / "ws"
+    session = tmp_path / "session"
+    ws.mkdir()
+    tx = AgentTX.begin(workdir=ws, session_dir=session, trace_reads=False)
+    try:
+        assert tx.pool is not None
+        original_collect = tx.pool._collect_worker_response
+
+        def fail_after_collect(argv):
+            original_collect(argv)
+            raise RuntimeError("response lost")
+
+        tx.pool._collect_worker_response = fail_after_collect  # type: ignore[method-assign]
+        with pytest.raises(RuntimeError, match="refusing automatic replay"):
+            tx.run_tool("once", ["bash", "-c", "echo run >> count.txt"])
+
+        upper_count = session / "upperdir" / ws.relative_to("/") / "count.txt"
+        assert upper_count.read_text(encoding="utf-8") == "run\n"
+        assert tx.pool.worker_failure_count == 1
+    finally:
+        tx.close(destroy=True)
+
+
+def test_normal_worker_shutdown_preserves_commit_scaffolding(tmp_path: Path) -> None:
+    ws = tmp_path / "ws"
+    session = tmp_path / "session"
+    ws.mkdir()
+    tx = AgentTX.begin(workdir=ws, session_dir=session, trace_reads=False)
+    try:
+        result = tx.run_tool("write", ["bash", "-c", "echo committed > result.txt"])
+        assert result.returncode == 0
+        assert tx.pool is not None and tx.pool._worker_process is not None
+
+        tx.commit()
+
+        assert (ws / "result.txt").read_text(encoding="utf-8") == "committed\n"
+    finally:
+        tx.close(destroy=True)
+
+
 def test_concurrent_agents_are_isolated() -> None:
     result = run_concurrent_agents(agents=2, steps=2)
     assert result["ok"] is True
@@ -62,4 +103,3 @@ def test_bpf_persistent_restart_is_bounded(tmp_path: Path) -> None:
         assert tx.pool.worker_failure_count == 3
     finally:
         tx.close(destroy=True)
-

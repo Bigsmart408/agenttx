@@ -21,6 +21,17 @@ _BPF_MARKER_HOLD = "hold"
 _BPF_MARKER_GO = "go"
 _CAPTURE_CAP_CHARS = 8_000_000
 _MAX_BPF_WORKER_ATTEMPTS = 3
+_WORKER_SHUTDOWN_TIMEOUT_S = 30
+_TRY_PROBE_CACHE: Dict[Tuple[str, int], Tuple[bool, str]] = {}
+_TRY_PROBE_LOCK = threading.Lock()
+
+
+class _WorkerNotDispatched(RuntimeError):
+    """Known pre-dispatch worker failure for which one-shot retry is safe."""
+
+
+class _WorkerCommandUncertain(RuntimeError):
+    """Worker failed after dispatch may have executed the command."""
 
 
 
@@ -143,22 +154,41 @@ def _default_try_bin() -> Path:
 
 def _probe_try_backend(try_bin: Path, workspace: Path) -> tuple[bool, str]:
     """Return whether try can execute one no-op in this host namespace."""
-    probe = Path(tempfile.mkdtemp(prefix="agenttx-try-probe-", dir="/tmp"))
-    sandbox = probe / "sandbox"
-    sandbox.mkdir()
-    try:
-        env = {**os.environ, "PWD": str(workspace)}
-        result = subprocess.run(
-            [str(try_bin), "-N", str(sandbox), "--", "/bin/true"],
-            cwd=str(workspace), env=env, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True, timeout=30, check=False,
-        )
-        detail = (result.stderr or result.stdout or "").strip().splitlines()
-        return result.returncode == 0, detail[-1] if detail else f"rc={result.returncode}"
-    except (OSError, subprocess.SubprocessError) as exc:
-        return False, f"{type(exc).__name__}: {exc}"
-    finally:
-        shutil.rmtree(probe, ignore_errors=True)
+    if os.environ.get("AGENTTX_ASSUME_TRY_AVAILABLE") == "1":
+        return True, "validated by parent supervisor"
+    key = (str(try_bin.resolve()), os.geteuid())
+    with _TRY_PROBE_LOCK:
+        cached = _TRY_PROBE_CACHE.get(key)
+        if cached is not None:
+            return cached
+        probe = Path(tempfile.mkdtemp(prefix="agenttx-try-probe-", dir="/tmp"))
+        sandbox = probe / "sandbox"
+        sandbox.mkdir()
+        try:
+            env = {**os.environ, "PWD": str(workspace)}
+            probe_timeout = float(os.environ.get("AGENTTX_TRY_PROBE_TIMEOUT_S", "90"))
+            result = subprocess.run(
+                [str(try_bin), "-N", str(sandbox), "--", "/bin/true"],
+                cwd=str(workspace), env=env, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True,
+                timeout=probe_timeout, check=False,
+            )
+            detail_lines = (result.stderr or result.stdout or "").strip().splitlines()
+            detail = detail_lines[-1] if detail_lines else f"rc={result.returncode}"
+            outcome = (result.returncode == 0, detail)
+            if outcome[0]:
+                _TRY_PROBE_CACHE[key] = outcome
+            return outcome
+        except (OSError, subprocess.SubprocessError) as exc:
+            return False, f"{type(exc).__name__}: {exc}"
+        finally:
+            try:
+                _remove_overlay_tree(probe)
+            except OSError:
+                # A just-exited try process can briefly retain entries under
+                # its temporary root. Probe cleanup must not replace a valid
+                # execution result with an unrelated teardown exception.
+                shutil.rmtree(probe, ignore_errors=True)
 
 def _descendant_pids(root: int) -> set:
     """Return `root` and every live descendant pid, walked from /proc.
@@ -795,11 +825,30 @@ class SharedSemisolate:
         return value
 
     def _run_worker(
-        self, command: Sequence[str], cwd: Path
+        self,
+        command: Sequence[str],
+        cwd: Path,
+        timeout_s: Optional[float] = None,
     ) -> subprocess.CompletedProcess:
-        request = {"argv": list(command), "cwd": str(cwd)}
-        self._dispatch_worker(request)
-        return self._collect_worker_response(list(command))
+        request = {
+            "argv": list(command),
+            "cwd": str(cwd),
+            "timeout_s": timeout_s,
+        }
+        try:
+            self._dispatch_worker(request)
+        except _WorkerNotDispatched:
+            raise
+        except Exception as exc:
+            raise _WorkerCommandUncertain(
+                "try worker failed during dispatch; refusing automatic replay"
+            ) from exc
+        try:
+            return self._collect_worker_response(list(command))
+        except Exception as exc:
+            raise _WorkerCommandUncertain(
+                "try worker failed after dispatch; refusing automatic replay"
+            ) from exc
 
     def _dispatch_worker(self, request: dict) -> None:
         self._ensure_worker()
@@ -817,7 +866,7 @@ class SharedSemisolate:
                 proc.wait(timeout=2)
             except subprocess.TimeoutExpired:
                 pass
-            raise RuntimeError("injected persistent-worker crash")
+            raise _WorkerNotDispatched("injected persistent-worker crash")
         self._worker_process.stdin.write(struct.pack("!I", len(body)))
         self._worker_process.stdin.write(body)
         self._worker_process.stdin.flush()
@@ -854,6 +903,7 @@ class SharedSemisolate:
         self._worker_script = None
         if process is None:
             return
+        repair_sandbox = process.poll() is not None
         try:
             if process.poll() is None and process.stdin is not None:
                 request = json.dumps({"op": "shutdown"}, separators=(",", ":")).encode("utf-8")
@@ -862,14 +912,17 @@ class SharedSemisolate:
                 process.stdin.flush()
                 if process.stdout is not None:
                     self._read_worker_frame(process.stdout)
-            process.wait(timeout=2)
+            process.wait(timeout=_WORKER_SHUTDOWN_TIMEOUT_S)
         except Exception:
+            repair_sandbox = True
             process.terminate()
             try:
-                process.wait(timeout=2)
+                process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 process.kill()
-                process.wait(timeout=2)
+                process.wait(timeout=5)
+        if repair_sandbox:
+            self._repair_worker_sandbox()
 
     def _repair_worker_sandbox(self) -> None:
         """Remove stale try mount scaffolding after a worker process loss."""
@@ -890,6 +943,7 @@ class SharedSemisolate:
             "exclude",
             "mount.log",
             "error.log",
+            ".agenttx_cleanup",
         ):
             path = self.sandbox_dir / name
             if path.exists() or os.path.lexists(path):
@@ -963,14 +1017,19 @@ class SharedSemisolate:
             t0 = time.perf_counter()
             if self.persistent_worker:
                 try:
-                    cp = self._run_worker(command, self.workspace)
-                except Exception:
+                    cp = self._run_worker(command, self.workspace, timeout_s)
+                except _WorkerNotDispatched:
                     # A worker failure must not change correctness. Restarting
-                    # the worker is deferred; this step uses the original try path.
+                    # is safe only for the explicit pre-dispatch failure hook.
                     self._worker_failure_count += 1
                     self._stop_worker()
                     self._repair_worker_sandbox()
                     cp = self._run_try([*flags, "--", *command], cwd=self.workspace, timeout_s=timeout_s)
+                except _WorkerCommandUncertain:
+                    self._worker_failure_count += 1
+                    self._stop_worker()
+                    self._repair_worker_sandbox()
+                    raise
             else:
                 cp = self._run_try([*flags, "--", *command], cwd=self.workspace, timeout_s=timeout_s)
             duration = time.perf_counter() - t0
@@ -1474,7 +1533,7 @@ class SharedSemisolate:
         upper = self.sandbox_dir / "upperdir"
         if upper.exists():
             _grant_upper_commit_access(upper, upper_modes)
-        if ordinary_paths:
+        if ordinary_paths is None or ordinary_paths:
             try:
                 cp = subprocess.run(
                     cmd,
@@ -1535,6 +1594,24 @@ class SharedSemisolate:
         if not step_ids:
             return
         self.layers.restore_paths(min(step_ids), self.sandbox_dir / "upperdir", list(paths))
+        self.layers.drop_from(step_ids)
+        self._cached_summary = {}
+        self._cached_digests = self.upperdir_digests()
+        self._pending_snapshot_changes = None
+
+    def rollback_causal_groups(
+        self,
+        step_ids: List[int],
+        path_groups: Sequence[tuple[int, Sequence[str]]],
+    ) -> None:
+        """Restore path groups from their respective pre-step snapshots."""
+        self._stop_worker()
+        assert self.sandbox_dir is not None and self.layers is not None
+        if not step_ids:
+            return
+        upper = self.sandbox_dir / "upperdir"
+        for before_step_id, paths in path_groups:
+            self.layers.restore_paths(before_step_id, upper, list(paths))
         self.layers.drop_from(step_ids)
         self._cached_summary = {}
         self._cached_digests = self.upperdir_digests()

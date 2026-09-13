@@ -12,6 +12,10 @@ from .ledger import Effect, EffectKind, Ledger
 
 
 IGNORE_COMMIT_GLOBS = (
+    "*/.venv",
+    "*/.venv/*",
+    "*/.eggs",
+    "*/.eggs/*",
     "*/__pycache__/*",
     "*.pyc",
     "*.pyo",
@@ -29,6 +33,7 @@ IGNORE_COMMIT_GLOBS = (
 )
 
 ALLOW_EXTERNAL_WRITES_ENV = "AGENTTX_ALLOW_EXTERNAL_WRITES"
+EXTERNAL_EPHEMERAL_ROOTS = (Path("/tmp"), Path("/run"))
 
 
 DEFAULT_DENY = (
@@ -62,6 +67,7 @@ class CommitPolicy:
     workdir: Path
     allow_globs: Sequence[str] = field(default_factory=lambda: ["**/*"])
     deny_globs: Sequence[str] = field(default_factory=lambda: list(DEFAULT_DENY))
+    ephemeral_roots: Sequence[Path] = field(default_factory=tuple)
     # External paths are rejected by default because materializing them would
     # escape the transaction workspace.  Benchmark harnesses may opt in via
     # AGENTTX_ALLOW_EXTERNAL_WRITES=1 (or an explicit True value).
@@ -69,6 +75,7 @@ class CommitPolicy:
 
     def __post_init__(self) -> None:
         self.workdir = Path(self.workdir).resolve()
+        self.ephemeral_roots = tuple(Path(path).resolve() for path in self.ephemeral_roots)
         if self.allow_external_writes is None:
             value = os.environ.get(ALLOW_EXTERNAL_WRITES_ENV, "")
             self.allow_external_writes = value.strip().lower() in {
@@ -77,7 +84,25 @@ class CommitPolicy:
 
     def is_ignored(self, path: str) -> bool:
         """Ephemeral tooling artifacts are recorded but never materialized."""
-        return self._match(path, IGNORE_COMMIT_GLOBS)
+        if self._match(path, IGNORE_COMMIT_GLOBS):
+            return True
+        candidate = Path(os.path.abspath(path))
+        if any(
+            candidate == root or root in candidate.parents
+            for root in self.ephemeral_roots
+        ):
+            return True
+        # try gives commands private /tmp and /run mounts. Their contents are
+        # disposable execution state, but benchmark workspaces themselves also
+        # live below /tmp, so only ignore paths lexically outside workdir.
+        try:
+            candidate.relative_to(self.workdir)
+            return False
+        except ValueError:
+            return any(
+                candidate == root or root in candidate.parents
+                for root in EXTERNAL_EPHEMERAL_ROOTS
+            )
 
     def _match(self, path: str, patterns: Iterable[str]) -> bool:
         p = path

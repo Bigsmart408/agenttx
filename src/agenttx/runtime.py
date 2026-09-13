@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 import tempfile
 from dataclasses import asdict, dataclass, field
@@ -157,6 +158,7 @@ class AgentTX:
                 workdir=Path(data["workspace"]),
                 allow_globs=list(policy_data.get("allow_globs", ["**/*"])),
                 deny_globs=list(policy_data.get("deny_globs", [])),
+                ephemeral_roots=list(policy_data.get("ephemeral_roots", [])),
                 allow_external_writes=policy_data.get("allow_external_writes"),
             )
         tx = cls(
@@ -225,6 +227,9 @@ class AgentTX:
             "commit_policy": {
                 "allow_globs": list(self.commit_policy.allow_globs),
                 "deny_globs": list(self.commit_policy.deny_globs),
+                "ephemeral_roots": [
+                    str(path) for path in self.commit_policy.ephemeral_roots
+                ],
                 "allow_external_writes": bool(self.commit_policy.allow_external_writes),
             },
             "ledger": self.ledger.to_dict(),
@@ -364,6 +369,59 @@ class AgentTX:
         self._persist()
         return rec
 
+    def run_verifier(
+        self,
+        argv: Sequence[str],
+        *,
+        name: str = "default",
+        read_paths: Optional[Sequence[str]] = None,
+        timeout_s: Optional[float] = None,
+        trace_reads: Optional[bool] = None,
+    ) -> ToolCallRecord:
+        """Run a trusted verifier and record its dependencies in the ledger."""
+        return self.run_tool(
+            f"verifier:{name}",
+            argv,
+            extra_reads=read_paths,
+            trace_reads=trace_reads,
+            timeout_s=timeout_s,
+        )
+
+    def fork(self, session_dir: Optional[Path] = None) -> "AgentTX":
+        """Clone the speculative transaction into an isolated temporary branch."""
+        self.start()
+        assert self.pool is not None and self.pool.layers is not None
+        self.pool._stop_worker()
+        self._persist()
+        destination = (
+            Path(session_dir)
+            if session_dir is not None
+            else Path(tempfile.mkdtemp(prefix="agenttx-fork-", dir="/tmp"))
+        )
+        created = session_dir is None
+        try:
+            if destination.exists() and any(destination.iterdir()):
+                raise ValueError(f"fork destination is not empty: {destination}")
+            destination.mkdir(parents=True, exist_ok=True)
+            self.pool.layers.copy_tree(
+                self.pool.session_dir / "upperdir", destination / "upperdir"
+            )
+            self.pool.layers.copy_tree(
+                self.pool.session_dir / "layers", destination / "layers"
+            )
+            shutil.copy2(
+                self.pool.session_dir / "agenttx.json",
+                destination / "agenttx.json",
+            )
+            branch = AgentTX.load(destination)
+            assert branch.pool is not None
+            branch.pool._owns_sandbox = True
+            return branch
+        except Exception:
+            if created:
+                shutil.rmtree(destination, ignore_errors=True)
+            raise
+
     def _rewind_conversation(self, targets: Sequence[int], mode: str) -> dict:
         notice = render_ledger_recovery_notice(self.ledger, targets, mode=mode)
         return self.conversation.rewind(targets, notice, mode=mode)
@@ -405,10 +463,24 @@ class AgentTX:
             return []
         if step_id is None:
             step_id = max(active)
-        if step_id <= self.ledger.committed_frontier:
-            raise ValueError("cannot roll back a committed step")
+        return self.rollback_causal_many([step_id])
 
-        targets = self.ledger.causal_dependents(step_id)
+    def rollback_causal_many(self, step_ids: Sequence[int]) -> List[int]:
+        """Roll back the union of multiple causal cones without losing retained paths."""
+        roots = sorted({int(step_id) for step_id in step_ids})
+        if not roots:
+            return []
+        if any(step_id <= self.ledger.committed_frontier for step_id in roots):
+            raise ValueError("cannot roll back a committed step")
+        if any(
+            step_id < 0
+            or step_id >= len(self.ledger.steps)
+            or self.ledger.steps[step_id].status == "rolled_back"
+            for step_id in roots
+        ):
+            raise ValueError("cannot roll back an invalid or inactive step")
+
+        targets = self.ledger.causal_dependents_many(roots)
         if any(
             target <= self.ledger.committed_frontier for target in targets
         ):
@@ -420,6 +492,10 @@ class AgentTX:
             if step.step_id in target_set
             for effect in step.effects
             if effect.kind in (EffectKind.WRITE, EffectKind.DELETE)
+            and (
+                self.commit_policy is None
+                or not self.commit_policy.is_ignored(effect.path)
+            )
         }
         retained_effects = [
             effect
@@ -428,6 +504,8 @@ class AgentTX:
             and step.status != "rolled_back"
             and step.step_id not in target_set
             for effect in step.effects
+            if self.commit_policy is None
+            or not self.commit_policy.is_ignored(effect.path)
         ]
         conflicts = sorted(
             (target_path, effect.path)
@@ -444,8 +522,31 @@ class AgentTX:
                 f"cannot reconstruct safely: {details}"
             )
 
+        path_groups: List[tuple[int, List[str]]] = []
+        remaining = set(target_paths)
+        while remaining:
+            seed = remaining.pop()
+            component = {seed}
+            changed = True
+            while changed:
+                changed = False
+                for path in list(remaining):
+                    if any(self._paths_overlap(path, member) for member in component):
+                        remaining.remove(path)
+                        component.add(path)
+                        changed = True
+            before_step = min(
+                step.step_id
+                for step in self.ledger.steps
+                if step.step_id in target_set
+                for effect in step.effects
+                if effect.kind in (EffectKind.WRITE, EffectKind.DELETE)
+                and any(self._paths_overlap(effect.path, path) for path in component)
+            )
+            path_groups.append((before_step, sorted(component)))
+
         assert self.pool is not None
-        self.pool.rollback_causal(targets, sorted(target_paths))
+        self.pool.rollback_causal_groups(targets, sorted(path_groups))
         self.ledger.mark_rolled_back(targets)
         self._rewind_conversation(targets, mode="causal")
         self._persist()
@@ -453,6 +554,204 @@ class AgentTX:
 
     def rollback_causal(self, step_id: Optional[int] = None) -> List[int]:
         return self.rollback_causal_from(step_id)
+
+    def plan_recovery(
+        self,
+        failed_verifier: ToolCallRecord,
+        *,
+        last_passing_step: Optional[int] = None,
+        max_candidates: int = 8,
+        max_probes: int = 12,
+        allow_multi_root: bool = True,
+        allow_fallback: bool = True,
+        verifier_timeout_s: Optional[float] = None,
+    ):
+        """Find the smallest counterfactually verified rollback plan."""
+        from .faults import FailureObservation, RecoveryAttempt, RecoveryPlan
+        from .localizer import FaultLocalizer, candidate_root_sets
+
+        if not failed_verifier.tool_name.startswith("verifier:"):
+            raise ValueError(
+                "fault localization requires a record produced by run_verifier()"
+            )
+        verifier_id = failed_verifier.step_id
+        if (
+            verifier_id < 0
+            or verifier_id >= len(self.ledger.steps)
+            or self.ledger.steps[verifier_id].tool_name
+            != failed_verifier.tool_name
+            or self.ledger.steps[verifier_id].status == "rolled_back"
+        ):
+            raise ValueError("verifier record is not active in this transaction")
+        if not failed_verifier.argv:
+            raise ValueError("verifier command cannot be empty")
+        if last_passing_step is not None and not (
+            self.ledger.committed_frontier
+            <= last_passing_step
+            < verifier_id
+        ):
+            raise ValueError("last_passing_step must precede the failed verifier")
+        observation = FailureObservation.from_record(
+            failed_verifier, last_passing_step=last_passing_step
+        )
+        if observation.returncode == 0:
+            return RecoveryPlan(
+                mode="none",
+                root_step_ids=(),
+                rollback_targets=(),
+                validation="not_needed",
+                confidence="verified",
+                reason="verifier passed",
+            )
+        if max_probes <= 0:
+            raise ValueError("max_probes must be positive")
+
+        localizer = FaultLocalizer(max_candidates=max_candidates)
+        candidates = localizer.candidates(self.ledger, observation)
+        roots_to_try = list(
+            candidate_root_sets(candidates, include_pairs=allow_multi_root)
+        )[:max_probes]
+        attempts: List[RecoveryAttempt] = []
+        valid = []
+        read_paths = [
+            effect.path
+            for effect in observation.effects
+            if effect.kind in (EffectKind.READ, EffectKind.NEGATIVE)
+        ]
+
+        for roots in roots_to_try:
+            candidate = localizer.combined_candidate(self.ledger, roots)
+            try:
+                with self.fork() as branch:
+                    branch.rollback_causal_many(roots)
+                    checked = branch.run_verifier(
+                        observation.command,
+                        name="counterfactual",
+                        read_paths=read_paths,
+                        timeout_s=verifier_timeout_s,
+                    )
+                validation = "passed" if checked.returncode == 0 else "failed"
+                attempt = RecoveryAttempt(
+                    root_step_ids=roots,
+                    rollback_targets=candidate.rollback_targets,
+                    validation=validation,
+                    mode="causal",
+                    verifier_returncode=checked.returncode,
+                )
+            except Exception as exc:
+                attempt = RecoveryAttempt(
+                    root_step_ids=roots,
+                    rollback_targets=candidate.rollback_targets,
+                    validation="inconclusive",
+                    mode="causal",
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+            attempts.append(attempt)
+            if attempt.validation == "passed":
+                valid.append((candidate, attempt))
+
+        if valid:
+            candidate, _attempt = min(
+                valid,
+                key=lambda item: (
+                    item[0].discarded_steps,
+                    len(item[0].root_step_ids),
+                    -item[0].suspicion_score,
+                ),
+            )
+            return RecoveryPlan(
+                mode="causal",
+                root_step_ids=candidate.root_step_ids,
+                rollback_targets=candidate.rollback_targets,
+                validation="passed",
+                confidence="verified",
+                attempts=attempts,
+                reason="smallest causal plan that made the verifier pass",
+            )
+
+        if allow_fallback:
+            active = [
+                step.step_id
+                for step in self.ledger.steps
+                if step.step_id > self.ledger.committed_frontier
+                and step.status != "rolled_back"
+            ]
+            if active:
+                fallback_modes = []
+                if last_passing_step is not None:
+                    temporal_root = next(
+                        step_id
+                        for step_id in active
+                        if step_id > last_passing_step
+                    )
+                    fallback_modes.append(("temporal", temporal_root))
+                if not fallback_modes or fallback_modes[0][1] != active[0]:
+                    fallback_modes.append(("whole_branch_abort", active[0]))
+                for mode, root in fallback_modes:
+                    targets = tuple(
+                        step_id for step_id in active if step_id >= root
+                    )
+                    try:
+                        with self.fork() as branch:
+                            branch.rollback(root)
+                            checked = branch.run_verifier(
+                                observation.command,
+                                name="counterfactual-fallback",
+                                read_paths=read_paths,
+                                timeout_s=verifier_timeout_s,
+                            )
+                        validation = "passed" if checked.returncode == 0 else "failed"
+                        error = ""
+                    except Exception as exc:
+                        checked = None
+                        validation = "inconclusive"
+                        error = f"{type(exc).__name__}: {exc}"
+                    attempts.append(
+                        RecoveryAttempt(
+                            root_step_ids=(root,),
+                            rollback_targets=targets,
+                            validation=validation,
+                            mode=mode,
+                            verifier_returncode=(
+                                None if checked is None else checked.returncode
+                            ),
+                            error=error,
+                        )
+                    )
+                    if validation == "passed":
+                        return RecoveryPlan(
+                            mode=mode,
+                            root_step_ids=(root,),
+                            rollback_targets=targets,
+                            validation="passed",
+                            confidence="verified",
+                            attempts=attempts,
+                            reason=f"{mode} fallback made the verifier pass",
+                        )
+
+        return RecoveryPlan(
+            mode="none",
+            root_step_ids=(),
+            rollback_targets=(),
+            validation="inconclusive",
+            confidence="inconclusive",
+            attempts=attempts,
+            reason="no tested rollback plan made the verifier pass",
+        )
+
+    def apply_recovery_plan(self, plan) -> List[int]:
+        """Apply a verified plan to the live transaction."""
+        if not getattr(plan, "verified", False):
+            raise ValueError("refusing to apply an unverified recovery plan")
+        if plan.mode == "none":
+            return []
+        if plan.mode == "causal":
+            return self.rollback_causal_many(plan.root_step_ids)
+        if plan.mode in {"temporal", "whole_branch_abort"}:
+            if not plan.root_step_ids:
+                raise ValueError("rollback plan has no root step")
+            return self.rollback(plan.root_step_ids[0])
+        raise ValueError(f"unsupported recovery mode: {plan.mode}")
 
     @staticmethod
     def _paths_overlap(left: str, right: str) -> bool:

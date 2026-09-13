@@ -40,9 +40,13 @@ class CodingAgentHarness:
         auto_commit: bool = False,
         trace_reads: bool = True,
         trace_backend: str = "auto",
+        ephemeral_roots: Sequence[Path] = (),
     ) -> None:
         self.workdir = Path(workdir).resolve()
-        self.policy = policy or CommitPolicy(workdir=self.workdir)
+        self.policy = policy or CommitPolicy(
+            workdir=self.workdir,
+            ephemeral_roots=ephemeral_roots,
+        )
         self.auto_commit = auto_commit
         self.trace_reads = trace_reads
         self.trace_backend = trace_backend
