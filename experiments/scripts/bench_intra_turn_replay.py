@@ -443,6 +443,7 @@ def main() -> int:
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--num-shards", type=int, default=1)
     parser.add_argument("--model", default=None)
+    parser.add_argument("--reasoning-effort", default=None)
     parser.add_argument("--timeout", type=float, default=900)
     parser.add_argument(
         "--sweagent-config",
@@ -488,6 +489,7 @@ def main() -> int:
             args.codex_config,
             args.codex_auth,
             model_override=args.model,
+            reasoning_effort_override=args.reasoning_effort,
         )
         model = profile.model
         sweagent_harness = SWEAgentNativeWorkloadHarness(

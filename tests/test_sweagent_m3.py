@@ -42,6 +42,23 @@ def test_codex_profile_matches_user_model_without_exposing_key(tmp_path: Path) -
     assert "test-secret" not in json.dumps(profile.public_dict())
 
 
+def test_codex_profile_accepts_documented_experiment_overrides(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    auth_path = tmp_path / "auth.json"
+    _write_codex_profile(tmp_path)
+
+    profile = load_codex_gpt_profile(
+        config_path,
+        auth_path,
+        model_override="gpt-5.6-luna",
+        reasoning_effort_override="max",
+    )
+
+    assert profile.model == "gpt-5.6-luna"
+    assert profile.litellm_model == "openai/gpt-5.6-luna"
+    assert profile.reasoning_effort == "max"
+
+
 def test_load_agent_config_uses_codex_gpt_profile_and_absolute_bundles(
     tmp_path: Path,
 ) -> None:

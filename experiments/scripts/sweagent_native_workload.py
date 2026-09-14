@@ -72,6 +72,7 @@ def load_codex_gpt_profile(
     auth_path: Path = DEFAULT_CODEX_AUTH,
     *,
     model_override: Optional[str] = None,
+    reasoning_effort_override: Optional[str] = None,
 ) -> CodexGPTProfile:
     """Load the GPT endpoint exactly once without logging or hashing its key."""
     with config_path.open("rb") as handle:
@@ -102,7 +103,10 @@ def load_codex_gpt_profile(
     return CodexGPTProfile(
         model=model,
         api_base=_openai_api_base(base_url),
-        reasoning_effort=str(config.get("model_reasoning_effort") or "high"),
+        reasoning_effort=(
+            reasoning_effort_override
+            or str(config.get("model_reasoning_effort") or "high")
+        ),
         provider=provider_name,
         wire_api=str(provider_data.get("wire_api") or "responses"),
         disable_response_storage=bool(config.get("disable_response_storage", False)),

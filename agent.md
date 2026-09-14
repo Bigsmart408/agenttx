@@ -591,6 +591,9 @@ SWEAgent M3 必须复用上述完全相同的 plan、policy、manifest、pairing
 Codex 黑盒任务流程。结果必须写入独立目录，且每行包含
 `harness_backend=sweagent_native`、SWEAgent model/config hash、真实 model usage 和
 `native_adapter=SWEAgentNativeAdapter`。
+SWEAgent workload 必须显式使用本文件第 3 节规定的 Codex 实验配置：
+`gpt-5.6-luna`、reasoning effort `max`；不得从当前用户 Codex 配置隐式继承其他模型或
+reasoning 值。API endpoint、Responses 协议和鉴权仍复用该用户的 Codex provider 配置。
 
 模型配置必须与本用户当前 Codex 配置一致：runner 从
 `/home/bfq/.codex/config.toml` 和 `/home/bfq/.codex/auth.json` 读取 model、provider、

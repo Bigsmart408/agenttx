@@ -17,4 +17,7 @@ exec bwrap \
   --setenv CONDA_PREFIX /home/bfq/miniconda3/envs/agenttx \
   --setenv PYTHONPATH "$ROOT_DIR/src:$ROOT_DIR" \
   "$PYTHON_BIN" -u "$ROOT_DIR/experiments/scripts/bench_intra_turn_replay.py" \
-  --harness sweagent "$@"
+  --harness sweagent \
+  --model gpt-5.6-luna \
+  --reasoning-effort max \
+  "$@"
