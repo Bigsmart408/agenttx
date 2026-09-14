@@ -5,6 +5,7 @@ import yaml
 
 from experiments.scripts.sweagent_native_workload import (
     _initialize_workspace_repo,
+    _workload_suffix,
     load_codex_gpt_profile,
     load_agent_config,
 )
@@ -154,3 +155,13 @@ def test_crash_no_rollback_manifest_discloses_no_repair_or_fault_location() -> N
     assert all(step.relative_path not in prompt for step in plan.steps)
     assert "No fault location, repair targets, or expected contents are provided" in prompt
     assert "Inspect the workspace" in prompt
+
+
+def test_sweagent_workload_suffix_allows_only_self_diagnosis_to_inspect() -> None:
+    diagnosis = _workload_suffix(True)
+    replay = _workload_suffix(False)
+
+    assert "Inspect the workspace" in diagnosis
+    assert "no repair hint or fault location" in diagnosis
+    assert "Do not inspect retained" not in diagnosis
+    assert "Do not inspect retained" in replay

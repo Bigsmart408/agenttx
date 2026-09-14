@@ -234,7 +234,10 @@ def run_cell(
         result = harness.run(
             make_prompt(payload),
             workspace,
-            env={"AGENTTX_CELL_ID": cell_id},
+            env={
+                "AGENTTX_CELL_ID": cell_id,
+                "AGENTTX_DIAGNOSIS_REQUIRED": "1" if diagnosis_required else "0",
+            },
         )
         passed, errors = verify(plan, workspace)
         useful = rollback_targets(plan, policy) & set(plan.valid_ids)

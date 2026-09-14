@@ -193,6 +193,19 @@ def _initialize_workspace_repo(workspace: Path) -> None:
     )
 
 
+def _workload_suffix(diagnosis_required: bool) -> str:
+    if diagnosis_required:
+        return (
+            "\n\nUse the shell tools provided by SWEAgent. Inspect the workspace as "
+            "needed to diagnose the crash; no repair hint or fault location is available. "
+            "When all corruption is fixed, call the submit tool and stop."
+        )
+    return (
+        "\n\nUse the shell tools provided by SWEAgent. Do not inspect retained "
+        "files. After applying the manifest, call the submit tool and stop."
+    )
+
+
 @dataclass(frozen=True)
 class SWEAgentHarnessResult(ExternalHarnessResult):
     metadata: dict = field(default_factory=dict)
@@ -252,6 +265,7 @@ class SWEAgentNativeWorkloadHarness:
         workdir = Path(workdir).resolve()
         run_env = env or {}
         cell_id = run_env.get("AGENTTX_CELL_ID", workdir.parent.name)
+        diagnosis_required = run_env.get("AGENTTX_DIAGNOSIS_REQUIRED") == "1"
         cell_output = (
             self.output_dir
             / "trajectories"
@@ -266,10 +280,7 @@ class SWEAgentNativeWorkloadHarness:
         _cleanup_sweagent_runtime()
         try:
             _initialize_workspace_repo(workdir)
-            prompt = task + (
-                "\n\nUse the shell tools provided by SWEAgent. Do not inspect retained "
-                "files. After applying the manifest, call the submit tool and stop."
-            )
+            prompt = task + _workload_suffix(diagnosis_required)
             problem = TextProblemStatement(text=prompt, id=cell_id)
             agent = get_agent_from_config(self.config.model_copy(deep=True))
             swe_env = SWEEnv(
