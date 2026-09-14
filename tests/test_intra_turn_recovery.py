@@ -75,7 +75,7 @@ def test_clean_recovery_has_no_fault_or_missing_artifacts(tmp_path):
     assert manifest["repair"] == []
 
 
-def test_crash_without_rollback_retains_faulty_artifacts_for_agent_repair(tmp_path):
+def test_crash_without_rollback_retains_faults_without_oracle_repair_hint(tmp_path):
     plan = build_extreme_plan()
     assert rollback_targets(plan, "crash_no_rollback") == set()
     assert prepare(plan, "crash_no_rollback", tmp_path) == []
@@ -84,7 +84,9 @@ def test_crash_without_rollback_retains_faulty_artifacts_for_agent_repair(tmp_pa
     manifest = make_manifest(
         plan,
         [],
-        repair=list(plan.oracle_closure),
+        diagnosis_required=True,
     )
     assert manifest["missing"] == []
-    assert len(manifest["repair"]) == len(plan.oracle_closure)
+    assert manifest["repair"] == []
+    assert manifest["fault_step_id"] is None
+    assert manifest["diagnosis_required"] is True

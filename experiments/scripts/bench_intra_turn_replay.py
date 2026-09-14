@@ -132,20 +132,24 @@ def make_manifest(
     missing: list[int],
     *,
     fault_injected: bool = True,
-    repair: list[int] | None = None,
+    diagnosis_required: bool = False,
 ) -> dict:
     payload = {
         "schema": "agenttx.motivation.replay/v1",
-        "trace_id": plan.trace_id,
-        "fault_step_id": plan.fault_step_id if fault_injected else None,
+        # Do not expose the internal trace id: it encodes fault position and
+        # closure ratio in controlled M3 plans.
+        "case_id": hashlib.sha256(plan.trace_id.encode("utf-8")).hexdigest()[:16],
+        "fault_step_id": (
+            plan.fault_step_id
+            if fault_injected and not diagnosis_required
+            else None
+        ),
+        "diagnosis_required": diagnosis_required,
         "missing": [
             {"path": plan.steps[index].relative_path, "content": desired(index)}
             for index in missing
         ],
-        "repair": [
-            {"path": plan.steps[index].relative_path, "content": desired(index)}
-            for index in (repair or [])
-        ],
+        "repair": [],
         "retained_count": len(plan.steps) - len(missing),
     }
     payload["manifest_hash"] = hashlib.sha256(
@@ -155,6 +159,15 @@ def make_manifest(
 
 
 def make_prompt(payload: dict) -> str:
+    if payload.get("diagnosis_required"):
+        return (
+            "A crash was detected in this deterministic artifact workspace. "
+            "No fault location, repair targets, or expected contents are provided. "
+            "Inspect the workspace, diagnose every corrupted artifact from workspace evidence, "
+            "infer the intended format from intact sibling artifacts, and repair all corruption. "
+            "Do not modify intact artifacts. Use tools as needed, then stop.\n\n"
+            + json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        )
     return (
         "Recover this deterministic workspace from the authoritative JSON manifest. "
         "Create every `missing` path and replace every `repair` path with exactly its listed content. "
@@ -210,14 +223,12 @@ def run_cell(
     try:
         missing = prepare(plan, policy, workspace)
         fault_injected = policy != "clean_recovery"
-        repair = (
-            list(plan.oracle_closure) if policy == "crash_no_rollback" else []
-        )
+        diagnosis_required = policy == "crash_no_rollback"
         payload = make_manifest(
             plan,
             missing,
             fault_injected=fault_injected,
-            repair=repair,
+            diagnosis_required=diagnosis_required,
         )
         cell_id = f"{plan.trace_id}__{policy}__r{repeat}"
         result = harness.run(
@@ -244,7 +255,12 @@ def run_cell(
             "shape": plan.shape,
             "interleaving": plan.interleaving,
             "missing_artifacts": len(missing),
-            "repair_artifacts": len(repair),
+            "repair_artifacts": 0,
+            "diagnosis_required": diagnosis_required,
+            "fault_location_disclosed": bool(
+                fault_injected and not diagnosis_required
+            ),
+            "repair_hint_provided": False,
             "attributed_lost_steps": len(useful),
             "attributed_lost_tokens": sum(weights[index] for index in useful),
             "prompt_tokens": result.prompt_tokens,

@@ -8,6 +8,8 @@ from experiments.scripts.sweagent_native_workload import (
     load_codex_gpt_profile,
     load_agent_config,
 )
+from experiments.scripts.bench_intra_turn_replay import make_manifest, make_prompt
+from experiments.workloads.intra_turn_recovery_dag import build_intra_turn_plan
 
 
 def _write_codex_profile(tmp_path: Path):
@@ -124,3 +126,31 @@ def test_initialize_workspace_repo_allows_empty_recovery_view(tmp_path: Path) ->
     _initialize_workspace_repo(workspace)
 
     assert (workspace / ".git").is_dir()
+
+
+def test_crash_no_rollback_manifest_discloses_no_repair_or_fault_location() -> None:
+    plan = build_intra_turn_plan(
+        16,
+        fault_position=0.5,
+        closure_ratio=0.25,
+        shape="layered",
+        interleaving="alternating",
+        seed=0,
+    )
+
+    payload = make_manifest(
+        plan,
+        [],
+        fault_injected=True,
+        diagnosis_required=True,
+    )
+    prompt = make_prompt(payload)
+
+    assert payload["missing"] == []
+    assert payload["repair"] == []
+    assert payload["fault_step_id"] is None
+    assert payload["diagnosis_required"] is True
+    assert plan.trace_id not in prompt
+    assert all(step.relative_path not in prompt for step in plan.steps)
+    assert "No fault location, repair targets, or expected contents are provided" in prompt
+    assert "Inspect the workspace" in prompt

@@ -559,8 +559,11 @@ artifact 并修复 invalid closure。模型、reasoning、上下文投影、time
 必须额外运行同一 `(trace, repeat)` 的 `clean_recovery compact` 对照：不注入故障、
 不回滚、所有 artifact 已正确保留，使用相同 compact manifest schema 且 `missing=[]`。
 同时运行 `crash_no_rollback compact`：注入相同故障但不回滚，污染 artifact 保留在
-workspace 中，由 agent 按同一 manifest 的 `repair` 列表直接修复。所有 M3 策略必须
-使用同一 compact schema，未使用的 `missing` / `repair` 字段保留为空数组。
+workspace 中，由 agent 自行检查 workspace、定位污染并推断修复。该策略的 manifest
+必须保持 `missing=[]`、`repair=[]`、`fault_step_id=null`，不得暴露 oracle closure、
+污染路径、目标内容或编码 fault position/closure ratio 的内部 trace id。所有 M3 策略
+使用同一 compact schema；只有该自诊断对照允许检查现有 workspace，其他策略仍不得
+检查 retained artifact。
 真实恢复额外开销定义为
 `recovery_overhead(p) = actual_replay_tokens(p) - actual_replay_tokens(clean_recovery)`。
 causal 相对粗粒度策略的节约比例必须以该 paired recovery overhead 为分母；不能直接
@@ -577,13 +580,16 @@ causal 相对粗粒度策略的节约比例必须以该 paired recovery overhead
 `whole_branch` 的绝对节约 token、百分比和 paired bootstrap CI。正文只使用
 `actual_replay_tokens`，attributed 指标用于解释方差。
 
-已完成的 **Codex workload** paired-clean M3 位于
+旧版 **Codex workload** paired-clean M3 位于
 `experiments/results/paper_motivation_intra_turn_causalcompact_20260913/m3_clean_crash_paired_v2/`。
 共保留 917 次原始调用（7 次初始 verifier 失败及其成功重试），最终 7 个策略各
 130/130 cells 成功，全部为 compact。AgentTX causal 的平均 recovery overhead 为
 15449.0 token；相对 `crash_no_rollback`、`turn_checkpoint_proxy`、`temporal_step`、
 `whole_branch` 分别节约 57.93%、17.52%、13.82%、17.99%。这些百分比均使用配对
 clean 后的 baseline recovery overhead 作分母，不是 gross token。
+该旧版向 `crash_no_rollback` 暴露了 oracle `repair` 列表，因此其
+`crash_no_rollback` 数字及所有以它为对照的节约比例属于废弃语义，不得用于论文结论；
+其他策略之间的结果不受该字段影响。
 
 SWEAgent M3 必须复用上述完全相同的 plan、policy、manifest、pairing、verifier 和
 统计代码；统一 runner 只把每个 cell 的 workload backend 从 `CodexHarness` 替换成原生
