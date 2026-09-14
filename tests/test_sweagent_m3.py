@@ -98,3 +98,12 @@ def test_initialize_workspace_repo_creates_submit_compatible_baseline(tmp_path: 
     _initialize_workspace_repo(workspace)
 
     assert (workspace / ".git").is_dir()
+
+
+def test_initialize_workspace_repo_allows_empty_recovery_view(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    _initialize_workspace_repo(workspace)
+
+    assert (workspace / ".git").is_dir()

@@ -180,6 +180,7 @@ def _initialize_workspace_repo(workspace: Path) -> None:
             "user.email=agenttx@example.invalid",
             "commit",
             "--quiet",
+            "--allow-empty",
             "-m",
             "M3 recovery baseline",
         ],
