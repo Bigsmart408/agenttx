@@ -9,7 +9,13 @@ from experiments.scripts.sweagent_native_workload import (
     load_codex_gpt_profile,
     load_agent_config,
 )
-from experiments.scripts.bench_intra_turn_replay import make_manifest, make_prompt
+from experiments.scripts.bench_intra_turn_replay import (
+    FAULT_NOTICE,
+    config_compat_value,
+    make_manifest,
+    make_prompt,
+    render_unrewound_history,
+)
 from experiments.workloads.intra_turn_recovery_dag import build_intra_turn_plan
 
 
@@ -60,6 +66,14 @@ def test_codex_profile_accepts_documented_experiment_overrides(tmp_path: Path) -
     assert profile.model == "gpt-5.6-luna"
     assert profile.litellm_model == "openai/gpt-5.6-luna"
     assert profile.reasoning_effort == "max"
+
+
+def test_resume_reads_sweagent_reasoning_effort_from_nested_profile() -> None:
+    codex_config = {"reasoning_effort": "max"}
+    sweagent_config = {"codex_gpt_profile": {"reasoning_effort": "max"}}
+
+    assert config_compat_value(codex_config, "reasoning_effort") == "max"
+    assert config_compat_value(sweagent_config, "reasoning_effort") == "max"
 
 
 def test_load_agent_config_uses_codex_gpt_profile_and_absolute_bundles(
@@ -145,23 +159,107 @@ def test_crash_no_rollback_manifest_discloses_no_repair_or_fault_location() -> N
         fault_injected=True,
         diagnosis_required=True,
     )
-    prompt = make_prompt(payload)
+    history = render_unrewound_history(plan)
+    prompt = make_prompt(
+        payload,
+        policy="crash_no_rollback",
+        active_history=history,
+    )
 
     assert payload["missing"] == []
     assert payload["repair"] == []
     assert payload["fault_step_id"] is None
     assert payload["diagnosis_required"] is True
     assert plan.trace_id not in prompt
-    assert all(step.relative_path not in prompt for step in plan.steps)
-    assert "No fault location, repair targets, or expected contents are provided" in prompt
-    assert "Inspect the workspace" in prompt
+    assert all(step.relative_path in history for step in plan.steps)
+    assert "FAULTY" not in prompt
+    assert FAULT_NOTICE in prompt
+    assert "no repair plan is provided" in prompt
+    assert "Active pre-crash tool history" in prompt
+    assert "active_unrewound" in prompt
+    assert "individually or in batches" in prompt
+    assert "at most one step_*.txt artifact" not in prompt
+
+
+def test_recovery_prompt_uses_compact_state_without_fault_location_or_history() -> None:
+    plan = build_intra_turn_plan(
+        16,
+        fault_position=0.5,
+        closure_ratio=0.25,
+        shape="layered",
+        interleaving="alternating",
+        seed=0,
+    )
+    payload = make_manifest(plan, [], fault_injected=True, diagnosis_required=True)
+
+    prompt = make_prompt(payload, policy="agenttx_causal")
+
+    assert FAULT_NOTICE in prompt
+    assert "current compact state" in prompt
+    assert "no repair plan is provided" in prompt
+    assert "Active pre-crash tool history" not in prompt
+    assert payload["fault_step_id"] is None
+    assert payload["missing"] == []
+
+
+def test_unrewound_history_contains_all_calls_but_no_oracle_fault_labels() -> None:
+    plan = build_intra_turn_plan(
+        16,
+        fault_position=0.5,
+        closure_ratio=0.25,
+        shape="layered",
+        interleaving="alternating",
+        seed=0,
+    )
+
+    history = render_unrewound_history(plan)
+    parsed = json.loads(history)
+
+    assert len(parsed["turns"]) == len(plan.steps)
+    assert parsed["status"] == "active_unrewound"
+    assert parsed["schema"] == "agenttx.active_tool_history"
+    assert all(turn["tool_result"]["exit_code"] == 0 for turn in parsed["turns"])
+    assert all(
+        "completed successfully" in turn["assistant_message"]
+        for turn in parsed["turns"]
+    )
+    assert "fault_step_id" not in history
+    assert "oracle_closure" not in history
+    assert "FAULTY" not in history
+    assert "intended_content_sha256" not in history
+
+
+def test_every_fault_policy_uses_the_same_opaque_diagnosis_contract() -> None:
+    plan = build_intra_turn_plan(
+        16,
+        fault_position=0.5,
+        closure_ratio=0.25,
+        shape="layered",
+        interleaving="alternating",
+        seed=0,
+    )
+    serialized = []
+    for policy_missing in ([], [1], [1, 2, 3], list(range(16))):
+        payload = make_manifest(
+            plan,
+            policy_missing,
+            fault_injected=True,
+            diagnosis_required=True,
+        )
+        assert payload["fault_step_id"] is None
+        assert payload["missing"] == []
+        assert payload["repair"] == []
+        assert "retained_count" not in payload
+        serialized.append(json.dumps(payload, sort_keys=True))
+
+    assert len(set(serialized)) == 1
 
 
 def test_sweagent_workload_suffix_allows_only_self_diagnosis_to_inspect() -> None:
     diagnosis = _workload_suffix(True)
     replay = _workload_suffix(False)
 
-    assert "Inspect the workspace" in diagnosis
-    assert "no repair hint or fault location" in diagnosis
+    assert "continue the original task" in diagnosis
+    assert "No fault location or path-specific action" in diagnosis
     assert "Do not inspect retained" not in diagnosis
-    assert "Do not inspect retained" in replay
+    assert "validate the generic artifact contract" in replay

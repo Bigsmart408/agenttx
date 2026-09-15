@@ -551,28 +551,47 @@ tool calls、commit 后 host 和 verifier 四者一致。任何一项不一致�
 ### 11.7 M3：从丢失工作换算成真实 Replay Token
 
 在 M1 的代表配置和 M2 极端 case 上进行固定协议的模型 replay。每个策略恢复后，给
-同一模型一份由系统自动生成的 retained/missing manifest，只要求重新生成缺失的有效
-artifact 并修复 invalid closure。模型、reasoning、上下文投影、timeout 和 seed 固定；
-每个 cell 10 repeats。不得让 coarse policy 获得额外解题提示，也不得让 causal policy
-跳过所有策略都必须完成的 faulty closure 修复。
+同一模型一份只描述通用 artifact contract 的 opaque manifest。模型、reasoning、
+timeout 和 seed 固定；每个 cell 5 repeats。不得让 coarse policy 获得额外解题提示，
+也不得让 causal policy 跳过所有策略都必须完成的 faulty closure 修复。
 
 必须额外运行同一 `(trace, repeat)` 的 `clean_recovery compact` 对照：不注入故障、
-不回滚、所有 artifact 已正确保留，使用相同 compact manifest schema 且 `missing=[]`。
-同时运行 `crash_no_rollback compact`：注入相同故障但不回滚，污染 artifact 保留在
-workspace 中，由 agent 自行检查 workspace、定位污染并推断修复。该策略的 manifest
-必须保持 `missing=[]`、`repair=[]`、`fault_step_id=null`，不得暴露 oracle closure、
-污染路径、目标内容或编码 fault position/closure ratio 的内部 trace id。所有 M3 策略
-使用同一 compact schema；只有该自诊断对照允许检查现有 workspace，其他策略仍不得
-检查 retained artifact。
+不回滚、所有 artifact 已正确保留，使用相同 compact manifest schema。
+所有故障策略必须从完全相同的未知位置条件开始：manifest 只给通用 artifact contract，
+必须保持 `missing=[]`、`repair=[]`、`fault_step_id=null`，且不得包含 retained count、
+oracle closure、污染路径、目标内容或编码 fault position/closure ratio 的内部 trace id。
+通用 contract 必须明确索引范围为 `[0, count)`。每个 artifact 对应一个原始 tool call；
+`replay_units_required` 按逻辑 artifact 数量统计，但不限制 agent 的实际执行方式。agent
+可以使用 loop、批量命令或 multi-file patch；所有策略必须使用相同权限。结果同时记录
+逻辑 replay units、写事件数、批量写事件数和单事件最大覆盖路径数。最终成功由 harness
+正常退出、token usage 有效和完整 workspace verifier 共同决定，不能因采用批量写而失败。
+恢复控制器也不得直接读取 `fault_step_id` 或 `oracle_closure` 来选择回滚目标：它先为
+所有策略运行相同的通用 contract 扫描并记录 `localized_fault_steps`，再把该定位结果交给
+不同粒度的 rollback 策略。随后 agent 必须检查策略产生的 workspace，自行发现缺失或
+污染 artifact 并按通用 contract 恢复。所有 fault arm 的 crash 通知必须逐字相同，且
+都不知道 fault step/path。恢复策略使用删掉 invalid history 的 compact post-rollback
+上下文；`crash_no_rollback` 则必须保留污染 workspace 和仍活动的完整 pre-crash tool
+history，只要求继续原任务，不得额外提供“扫描并修复全部异常”的 repair plan。这里的
+上下文差异是策略本身的结果，不是 fault-location 提示差异。外部黑盒 agent 无法恢复
+注入的原生 session 时，允许投影完整 tool arguments/result，但投影不得包含 fault id、
+oracle closure 或 evaluator 的污染标记。故障真值只用于注入和最终 verifier，以及事后计算
+`localization_matches_injected_faults`，不得作为恢复定位或 agent prompt 的输入。
 真实恢复额外开销定义为
 `recovery_overhead(p) = actual_replay_tokens(p) - actual_replay_tokens(clean_recovery)`。
 causal 相对粗粒度策略的节约比例必须以该 paired recovery overhead 为分母；不能直接
 用包含 clean 基础调用成本的整体 token 作为分母。原始整体 token 仍需保留供审计。
 
-同时记录两类成本：
+同时记录成本和效果：
 
 1. `attributed_lost_tokens`：原轨迹中被错误撤销的有效 call 对应 token，确定性指标；
 2. `actual_replay_tokens`：恢复后真实额外模型调用的 prompt + completion token。
+3. `success_rate`、所有 attempt 的 observed token 总和/均值，以及
+   `observed_tokens_per_success = sum(tokens across all attempts) / successful cells`。
+
+成功样本的 P50/P95/P99 仍需报告，但不得只用成功样本均值评价 no-rollback；否则超时或
+失败会被从成本中删除，反而奖励更不可靠的策略。`no rollback 最差` 的可检验含义是固定
+预算下的总体恢复效用最低（成功率更低和/或每次成功的总成本更高），不是要求它在每个
+成功样本的 token 上都高于会重放整个 loop 的 turn/whole 策略。
 
 从 M1 选择 12 个代表 cell：三种 loop width（16/64/128）乘两种 fault position
 （5%/50%）乘两种 closure ratio（3%/25%），固定 layered + alternating；再加入 M2。
@@ -580,16 +599,14 @@ causal 相对粗粒度策略的节约比例必须以该 paired recovery overhead
 `whole_branch` 的绝对节约 token、百分比和 paired bootstrap CI。正文只使用
 `actual_replay_tokens`，attributed 指标用于解释方差。
 
-旧版 **Codex workload** paired-clean M3 位于
-`experiments/results/paper_motivation_intra_turn_causalcompact_20260913/m3_clean_crash_paired_v2/`。
-共保留 917 次原始调用（7 次初始 verifier 失败及其成功重试），最终 7 个策略各
-130/130 cells 成功，全部为 compact。AgentTX causal 的平均 recovery overhead 为
-15449.0 token；相对 `crash_no_rollback`、`turn_checkpoint_proxy`、`temporal_step`、
-`whole_branch` 分别节约 57.93%、17.52%、13.82%、17.99%。这些百分比均使用配对
-clean 后的 baseline recovery overhead 作分母，不是 gross token。
-该旧版向 `crash_no_rollback` 暴露了 oracle `repair` 列表，因此其
-`crash_no_rollback` 数字及所有以它为对照的节约比例属于废弃语义，不得用于论文结论；
-其他策略之间的结果不受该字段影响。
+当前正式 M3 只维护一套协议。所有策略使用相同 opaque artifact contract 和相同未知故障
+条件；故障位置、影响路径、retained count 与 path-specific repair 均不进入 prompt。
+`crash_no_rollback` 保留无标签 stale artifact、完整 active history 和 agent 已接受成功
+observation 的上下文；其余恢复策略删除 invalid history 并使用 compact context。agent
+可以自由使用单文件或批量工具，最终成功由 harness 状态、有效 usage 和完整 workspace
+verifier 判断。写事件审计只记录 batching 行为，不限制工具粒度。协议字段使用稳定名称，
+不在 schema 或目录中递增实现版本；语义变更由 Git commit 追踪。此前产生的试验目录仅作
+历史审计，不得与当前正式结果混合。
 
 SWEAgent M3 必须复用上述完全相同的 plan、policy、manifest、pairing、verifier 和
 统计代码；统一 runner 只把每个 cell 的 workload backend 从 `CodexHarness` 替换成原生
@@ -601,19 +618,20 @@ SWEAgent workload 必须显式使用本文件第 3 节规定的 Codex 实验配�
 `gpt-5.6-luna`、reasoning effort `max`；不得从当前用户 Codex 配置隐式继承其他模型或
 reasoning 值。API endpoint、Responses 协议和鉴权仍复用该用户的 Codex provider 配置。
 
-模型配置必须与本用户当前 Codex 配置一致：runner 从
-`/home/bfq/.codex/config.toml` 和 `/home/bfq/.codex/auth.json` 读取 model、provider、
-base URL、reasoning effort、response storage 开关和凭据；正式结果必须记录非敏感
-配置快照。当前口径是 `gpt-5.6-sol`、`reasoning_effort=high`、
-`disable_response_storage=true`。SWEAgent/LiteLLM 对 GPT-5 的协议兼容映射为
+模型配置必须与本文件第 3 节的 Codex 实验口径一致。runner 从
+`/home/bfq/.codex/config.toml` 和 `/home/bfq/.codex/auth.json` 读取 provider、base URL、
+response storage 开关和凭据，但正式运行显式覆盖为 `gpt-5.6-luna`、
+`reasoning_effort=max`，并在结果中记录非敏感配置快照。SWEAgent/LiteLLM 对 GPT-5 的协议兼容映射为
 `temperature=1` 且不传 `top_p`，这不是改变模型口径。凭据不得写入日志、hash 或结果。
 运行入口为：
 
 ```bash
 experiments/scripts/run_sweagent_m3_bwrap.sh \
-  --output-dir experiments/results/paper_motivation_intra_turn_causalcompact_20260913/m3_sweagent_native_gpt56sol_v1 \
+  --output-dir experiments/results/motivation_sweagent_full_20260915 \
   --sweagent-config /home/bfq/SWE-agent/config/bash_only.yaml \
-  --repeats 10
+  --model gpt-5.6-luna \
+  --reasoning-effort max \
+  --repeats 5
 ```
 
 正式启动前先用 `--max-plans 1 --repeats 1 --policies temporal_step` 做一个真实模型

@@ -196,13 +196,15 @@ def _initialize_workspace_repo(workspace: Path) -> None:
 def _workload_suffix(diagnosis_required: bool) -> str:
     if diagnosis_required:
         return (
-            "\n\nUse the shell tools provided by SWEAgent. Inspect the workspace as "
-            "needed to diagnose the crash; no repair hint or fault location is available. "
-            "When all corruption is fixed, call the submit tool and stop."
+            "\n\nUse the shell tools provided by SWEAgent and continue the original "
+            "task from the current workspace. No fault location or path-specific action "
+            "is provided. When the artifact contract is satisfied, call the submit tool "
+            "and stop."
         )
     return (
-        "\n\nUse the shell tools provided by SWEAgent. Do not inspect retained "
-        "files. After applying the manifest, call the submit tool and stop."
+        "\n\nUse the shell tools provided by SWEAgent. Inspect only as needed to "
+        "validate the generic artifact contract. Do not modify correct artifacts. "
+        "When the contract is satisfied, call the submit tool and stop."
     )
 
 
@@ -308,6 +310,32 @@ class SWEAgentNativeWorkloadHarness:
                 commit=True,
             )
             submitted = str(result.summary).startswith("submitted")
+            events = []
+            for index, step in enumerate(getattr(agent, "trajectory", []) or []):
+                if not isinstance(step, dict):
+                    continue
+                action = step.get("action")
+                if isinstance(action, dict):
+                    command = str(
+                        action.get("command")
+                        or action.get("action")
+                        or action.get("code")
+                        or ""
+                    )
+                else:
+                    command = str(action or "")
+                if not command:
+                    continue
+                events.append(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "id": f"sweagent-step-{index}",
+                            "type": "command_execution",
+                            "command": command,
+                        },
+                    }
+                )
             return SWEAgentHarnessResult(
                 harness=self.name,
                 model=self.model,
@@ -319,6 +347,7 @@ class SWEAgentNativeWorkloadHarness:
                 total_tokens=result.total_tokens,
                 tool_calls=result.tool_calls,
                 usage_source=result.usage_source,
+                events=events,
                 metadata={
                     "harness_backend": self.name,
                     "sweagent_model": self.model,
