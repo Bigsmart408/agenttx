@@ -68,7 +68,10 @@ def test_replay_manifest_does_not_disclose_recovery_policy():
     assert manifest["artifact_contract"]["count"] == 128
     assert manifest["artifact_contract"]["index_start"] == 0
     assert manifest["artifact_contract"]["index_end_exclusive"] == 128
-    assert "tool invocations may batch" in manifest["artifact_contract"]["replay_unit"]
+    assert manifest["schema"] == "agenttx.motivation.replay/v3"
+    assert manifest["artifact_contract"]["replay_unit"] == (
+        "one artifact per write-producing tool invocation"
+    )
 
 
 def test_replay_incremental_bootstrap_accepts_no_complete_pairs():
@@ -107,12 +110,10 @@ def test_replay_write_audit_covers_separate_completed_write_events():
 
     assert audit["followed"] is True
     assert audit["write_events"] == 2
-    assert audit["multi_path_write_events"] == 0
-    assert audit["max_paths_per_write"] == 1
     assert audit["covered_paths"] == ["step_001.txt", "step_002.txt"]
 
 
-def test_replay_write_audit_records_and_accepts_one_multi_artifact_write_event():
+def test_replay_write_audit_rejects_one_multi_artifact_write_event():
     events = [
         {
             "type": "item.completed",
@@ -126,11 +127,11 @@ def test_replay_write_audit_records_and_accepts_one_multi_artifact_write_event()
 
     audit = audit_replay_write_events(events, {"step_001.txt", "step_002.txt"})
 
-    assert audit["followed"] is True
+    assert audit["followed"] is False
     assert audit["write_events"] == 1
-    assert audit["multi_path_write_events"] == 1
-    assert audit["max_paths_per_write"] == 2
-    assert audit["violations"] == []
+    assert audit["violations"] == [
+        {"item_id": "bulk", "paths": ["step_001.txt", "step_002.txt"]}
+    ]
 
 
 def test_replay_write_audit_is_unavailable_without_native_events():

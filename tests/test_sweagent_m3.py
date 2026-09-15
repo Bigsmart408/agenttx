@@ -177,8 +177,8 @@ def test_crash_no_rollback_manifest_discloses_no_repair_or_fault_location() -> N
     assert "no repair plan is provided" in prompt
     assert "Active pre-crash tool history" in prompt
     assert "active_unrewound" in prompt
-    assert "individually or in batches" in prompt
-    assert "at most one step_*.txt artifact" not in prompt
+    assert "at most one step_*.txt artifact" in prompt
+    assert "Do not use loops" in prompt
 
 
 def test_recovery_prompt_uses_compact_state_without_fault_location_or_history() -> None:
@@ -217,7 +217,7 @@ def test_unrewound_history_contains_all_calls_but_no_oracle_fault_labels() -> No
 
     assert len(parsed["turns"]) == len(plan.steps)
     assert parsed["status"] == "active_unrewound"
-    assert parsed["schema"] == "agenttx.active_tool_history"
+    assert parsed["schema"] == "agenttx.active_tool_history/v2"
     assert all(turn["tool_result"]["exit_code"] == 0 for turn in parsed["turns"])
     assert all(
         "completed successfully" in turn["assistant_message"]

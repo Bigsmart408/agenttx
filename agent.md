@@ -561,10 +561,10 @@ timeout 和 seed 固定；每个 cell 5 repeats。不得让 coarse policy 获得
 必须保持 `missing=[]`、`repair=[]`、`fault_step_id=null`，且不得包含 retained count、
 oracle closure、污染路径、目标内容或编码 fault position/closure ratio 的内部 trace id。
 通用 contract 必须明确索引范围为 `[0, count)`。每个 artifact 对应一个原始 tool call；
-`replay_units_required` 按逻辑 artifact 数量统计，但不限制 agent 的实际执行方式。agent
-可以使用 loop、批量命令或 multi-file patch；所有策略必须使用相同权限。结果同时记录
-逻辑 replay units、写事件数、批量写事件数和单事件最大覆盖路径数。最终成功由 harness
-正常退出、token usage 有效和完整 workspace verifier 共同决定，不能因采用批量写而失败。
+v8 固定采用 one-artifact-per-completed-write-event 协议，不允许用 loop、批量命令、生成
+脚本或 multi-file patch 在一个写事件中恢复多个 artifact。所有策略使用相同权限和审计。
+最终成功由 harness 正常退出、token usage 有效、写事件协议和完整 workspace verifier
+共同决定。
 恢复控制器也不得直接读取 `fault_step_id` 或 `oracle_closure` 来选择回滚目标：它先为
 所有策略运行相同的通用 contract 扫描并记录 `localized_fault_steps`，再把该定位结果交给
 不同粒度的 rollback 策略。随后 agent 必须检查策略产生的 workspace，自行发现缺失或
@@ -599,14 +599,13 @@ causal 相对粗粒度策略的节约比例必须以该 paired recovery overhead
 `whole_branch` 的绝对节约 token、百分比和 paired bootstrap CI。正文只使用
 `actual_replay_tokens`，attributed 指标用于解释方差。
 
-当前正式 M3 只维护一套协议。所有策略使用相同 opaque artifact contract 和相同未知故障
+当前正式 M3 固定采用 v8 协议。所有策略使用相同 opaque artifact contract 和相同未知故障
 条件；故障位置、影响路径、retained count 与 path-specific repair 均不进入 prompt。
 `crash_no_rollback` 保留无标签 stale artifact、完整 active history 和 agent 已接受成功
-observation 的上下文；其余恢复策略删除 invalid history 并使用 compact context。agent
-可以自由使用单文件或批量工具，最终成功由 harness 状态、有效 usage 和完整 workspace
-verifier 判断。写事件审计只记录 batching 行为，不限制工具粒度。协议字段使用稳定名称，
-不在 schema 或目录中递增实现版本；语义变更由 Git commit 追踪。此前产生的试验目录仅作
-历史审计，不得与当前正式结果混合。
+observation 的上下文；其余恢复策略删除 invalid history 并使用 compact context。每个完成
+的写事件最多恢复一个 artifact，最终成功由 harness 状态、有效 usage、严格写事件审计和
+完整 workspace verifier 判断。当前代码语义由 Git commit 追踪，并与已有 v8 数据目录的
+schema、prompt 和 CSV 字段保持兼容；其他实验目录不得与 v8 正式结果混合。
 
 SWEAgent M3 必须复用上述完全相同的 plan、policy、manifest、pairing、verifier 和
 统计代码；统一 runner 只把每个 cell 的 workload backend 从 `CodexHarness` 替换成原生

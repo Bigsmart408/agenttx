@@ -213,7 +213,7 @@ def make_manifest(
     diagnosis_required: bool = False,
 ) -> dict:
     payload = {
-        "schema": "agenttx.motivation.replay",
+        "schema": "agenttx.motivation.replay/v3",
         # Do not expose the internal trace id: it encodes fault position and
         # closure ratio in controlled M3 plans.
         "case_id": hashlib.sha256(plan.trace_id.encode("utf-8")).hexdigest()[:16],
@@ -228,7 +228,7 @@ def make_manifest(
             "index_end_exclusive": len(plan.steps),
             "path_template": "step_{index:03d}.txt",
             "content_template": "artifact-{index:03d}-valid\\n",
-            "replay_unit": "one logical artifact; tool invocations may batch artifacts",
+            "replay_unit": "one artifact per write-producing tool invocation",
         },
         "missing": [],
         "repair": [],
@@ -269,7 +269,7 @@ def render_unrewound_history(plan: IntraTurnPlan) -> str:
         )
     return json.dumps(
         {
-            "schema": "agenttx.active_tool_history",
+            "schema": "agenttx.active_tool_history/v2",
             "status": "active_unrewound",
             "turns": turns,
         },
@@ -285,9 +285,11 @@ def make_prompt(
     active_history: str = "",
 ) -> str:
     replay_rule = (
-        "Each artifact represents one independent original tool call. You may use normal "
-        "shell or edit operations to repair artifacts individually or in batches. Do not "
-        "modify artifacts that already satisfy the contract. "
+        "Each artifact represents one independent original tool call. Create or modify at "
+        "most one step_*.txt artifact per write-producing shell or edit invocation. Do not "
+        "use loops, brace or glob expansion, xargs, generated scripts, or a multi-file patch "
+        "to repair multiple artifacts at once. Read-only inspection may cover multiple "
+        "artifacts. "
     )
     contract = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     original_task = (
@@ -325,12 +327,11 @@ def make_prompt(
 def audit_replay_write_events(
     events: list[dict], required_paths: set[str]
 ) -> dict:
-    """Describe statically attributable writes without constraining batch size."""
+    """Enforce the v8 one-artifact-per-completed-write-event protocol."""
     covered: set[str] = set()
-    multi_path_write_events = 0
-    max_paths_per_write = 0
     write_events = 0
     completed_tool_events = 0
+    violations: list[dict] = []
     for event in events:
         if str(event.get("type", "")).lower() != "item.completed":
             continue
@@ -362,21 +363,20 @@ def audit_replay_write_events(
             continue
         write_events += 1
         if len(touched) > 1:
-            multi_path_write_events += 1
-        max_paths_per_write = max(max_paths_per_write, len(touched))
+            violations.append(
+                {"item_id": item.get("id"), "paths": sorted(touched)}
+            )
         covered.update(touched)
     missing = required_paths - covered
     available = bool(events) or not required_paths
     return {
         "available": available,
-        "followed": bool(available and not missing),
+        "followed": bool(available and not missing and not violations),
         "write_events": write_events,
-        "multi_path_write_events": multi_path_write_events,
-        "max_paths_per_write": max_paths_per_write,
         "completed_tool_events": completed_tool_events,
         "covered_paths": sorted(covered),
         "missing_paths": sorted(missing),
-        "violations": [],
+        "violations": violations,
     }
 
 
@@ -459,9 +459,7 @@ def run_cell(
         write_audit = audit_replay_write_events(
             list(getattr(result, "events", []) or []), replay_paths
         )
-        replay_protocol_followed = bool(
-            result.returncode == 0 and passed and result.total_tokens > 0
-        )
+        replay_protocol_followed = write_audit["followed"]
         row = {
             "trace_id": plan.trace_id,
             "fault_injected": fault_injected,
@@ -490,9 +488,9 @@ def run_cell(
             "diagnosis_required": diagnosis_required,
             "fault_location_disclosed": False,
             "repair_hint_provided": False,
-            "fault_payload_encoding": "opaque_stale_artifact",
+            "fault_payload_encoding": "opaque_stale_artifact_v1",
             "active_history_projection": (
-                "accepted_tool_success"
+                "accepted_tool_success_v2"
                 if policy == "crash_no_rollback"
                 else "compact_invalid_history_removed"
             ),
@@ -505,11 +503,6 @@ def run_cell(
             "replay_protocol_followed": replay_protocol_followed,
             "replay_write_audit_available": write_audit["available"],
             "replay_write_events": write_audit["write_events"],
-            "replay_multi_path_write_events": write_audit[
-                "multi_path_write_events"
-            ],
-            "replay_max_paths_per_write": write_audit["max_paths_per_write"],
-            "replay_write_coverage_complete": write_audit["followed"],
             "replay_write_covered_paths": json.dumps(write_audit["covered_paths"]),
             "replay_write_missing_paths": json.dumps(write_audit["missing_paths"]),
             "replay_write_violations": json.dumps(write_audit["violations"]),
@@ -527,6 +520,7 @@ def run_cell(
                 result.returncode == 0
                 and passed
                 and result.total_tokens > 0
+                and replay_protocol_followed
             ),
             "wall_s": round(result.duration_s, 6),
             "stderr": result.stderr[-2000:],
@@ -728,7 +722,7 @@ def summarize(raw_path: Path, output_dir: Path) -> None:
         "",
         "Rows are deduplicated by `(trace_id, policy, repeat)` using the latest attempt. "
         "Failed attempts remain in the raw CSV for audit.",
-        "All replays use one opaque artifact contract: fault location, affected paths, retained count, and path-specific repairs are hidden from every fault policy. The zero-based index range is explicit. Agents may repair artifacts individually or in batches; the final workspace verifier determines correctness. Recovery policies use compact post-rollback context; `crash_no_rollback` retains the full active pre-crash tool history and receives no repair plan.",
+        "All replays use the opaque v3 artifact contract: fault location, affected paths, retained count, and path-specific repairs are hidden from every fault policy. The zero-based index range is explicit and each write-producing tool invocation may recover at most one artifact. Recovery policies use compact post-rollback context; `crash_no_rollback` retains the full active pre-crash tool history and receives no repair plan.",
         "Before policy application, every fault arm uses the same artifact-contract scan; injected fault truth is used only for post-hoc localization evaluation.",
         "",
         "| policy | cells | attempts | failed cells | failed attempts | success | all-attempt mean | tokens/success | successful mean | P50 | P95 | P99 | mean wall s | mean overhead vs clean |",
@@ -893,17 +887,17 @@ def main() -> int:
     config_path = args.output_dir / "motivation_replay_config.json"
     raw_path = args.output_dir / "motivation_replay_raw.csv"
     config_payload = {
-        "schema": "agenttx.motivation.replay_config",
+        "schema": "agenttx.motivation.replay_config/v8",
         "model": model,
         "repeats": args.repeats,
         "policies": args.policies,
         "max_plans": args.max_plans,
         "plan_index": args.plan_index,
-        "prompt_projection": "opaque_contract_with_contaminated_active_context",
-        "fault_payload_encoding": "opaque_stale_artifact",
+        "prompt_projection": "opaque_contract_v3_with_contaminated_active_context_v2",
+        "fault_payload_encoding": "opaque_stale_artifact_v1",
         "fault_location_input": "hidden_for_all_fault_policies",
         "recovery_localization": "shared_artifact_contract_scan",
-        "replay_protocol": "batching_allowed_final_contract_verifier",
+        "replay_protocol": "one_artifact_per_completed_write_event_strict_audit",
         "write_event_audit": "codex_jsonl_or_sweagent_native_trajectory",
         "crash_no_rollback_context": (
             "full_active_precrash_tool_history_with_accepted_success_beliefs"
