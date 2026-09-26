@@ -4,7 +4,7 @@
 
 Coding agents are evolving from single-turn code generators into long-running systems
 programs.  One task may inspect a repository, edit several modules, run compilers and
-tests, revise a failed approach, and publish only the verified result.  The user regards
+tests, and revise a failed approach. The user regards
 these actions as one adaptive trajectory, but the operating system exposes them as
 ordinary processes whose intermediate filesystem effects are immediately visible unless
 an external isolation layer intervenes.
@@ -27,14 +27,14 @@ targets without claiming that all prior systems have identical implementations.
 
 - **P1: safety versus recovery utility.** Bare execution is fast but exposes every
   intermediate mutation.  Coarse recovery keeps the host clean but discards valid work.
-  In the 64-call controlled DAG, temporal recovery retained 41% of independent work and
-  whole-session recovery retained none.  **Severity: high.**
+  Across 400 paired manifests, turn-checkpoint and temporal-step recovery discarded
+  54.02% and 56.90% of valid work.  **Severity: high.**
 - **P2: causal correctness across opaque tools.** Command text does not reveal transitive
   reads, negative lookups, or aliases.  Removing dependency capture caused the 64-call
   ablation to remove only 4% of invalid descendants.  **Severity: high.**
 - **P3: practical trajectory isolation.** Rebuilding isolation around every call breaks
-  continuous speculative state and costs 260.7 ms/step on the 64-call workload.  The
-  optimized AgentTX path costs 148.5 ms/step; unsafe bare execution costs 49.7 ms/step.
+  continuous speculative state and costs 1684.9 ms/step on the 64-call workload.  The
+  full AgentTX path costs 90.9 ms/step; unsafe bare execution costs 8.4 ms/step.
   **Severity: high, performance remains open.**
 
 ### Systems challenges and causal test
@@ -67,13 +67,13 @@ P3.  Residual tracing and OverlayFS costs are implementation limits, not new roo
 
 ## 5. Key Idea
 
-Treat the whole agent trajectory as an **Agent Effect Transaction (AET)**: execute all tool
-calls in one shared speculative view, convert observed filesystem effects into a causal
-DAG, reconstruct only the failed causal closure, and publish approved effects through a
-durable commit frontier.
+Treat the whole agent trajectory as an **Agent Effect Transaction (AET)**. Execute all
+tool calls in one shared speculative view, derive dependencies among observed effects,
+and reconstruct the workspace and agent-visible context without the affected subgraph.
 
-**Thesis.** Causal effect transactions are a better recovery unit than temporal snapshots
-for long-running coding agents whose valid and invalid work interleave.
+**Thesis.** The trajectory should be the speculation unit, while a dependency-defined
+effect subgraph should be the recovery unit.  AET encodes this separation; AgentTX is its
+Linux realization.
 
 **Judgment: PASS.**  The idea directly changes the recovery unit from time to causality and
 is distinct from the AgentTX prototype that realizes it.
@@ -81,19 +81,21 @@ is distinct from the AgentTX prototype that realizes it.
 ## 6. Design Points
 
 - **DP1 (core): effect capture and causal ledger.** Capture READ, NEGATIVE, WRITE, and
-  DELETE effects at tool boundaries; normalize hierarchy and supported aliases; derive
-  cross-step dependencies.  This addresses P2 and C1, and partially addresses C2.
-- **DP2 (core): shared speculation and selective reconstruction.** Reuse one semisolate,
+  DELETE effects together with agent-visible result flow; normalize hierarchy and
+  supported aliases; derive cross-step dependencies. This addresses P2 and C1, and
+  partially addresses C2.
+- **DP2 (core): shared speculation and selective workspace reconstruction.** Reuse one semisolate,
   retain versioned per-step upperdir state, compute the transitive causal closure, and
   restore only affected paths.  Fail closed on retained-effect overlap.  This addresses
   P1, P3, and C3.
-- **DP3 (core): durable publication.** Advance a policy-checked commit frontier, reconstruct
-  historical versions when later work overlaps, and protect multi-path materialization
-  with a WAL.  This completes P1/C3 by separating recovery from publication.
+- **DP3 (core): context-aligned rollback.** Bind tool-call spans to ledger steps,
+  close recovery over filesystem and message dependencies to one fixed point, and use
+  that same step set to reconstruct the workspace and model-visible history. This
+  completes C3 by keeping the agent's context aligned with the reconstructed workspace.
 - **DP4 (bonus engineering): amortized long-trajectory execution.** A persistent `try`
   worker, trusted-tool declarations, content-addressed blobs, and incremental snapshots
-  reduce repeated setup and storage work.  This improves P3 but is not presented as a
-  fourth correctness challenge.
+  reduce repeated setup and storage work.  This improves P3 but is not presented as an
+  additional correctness challenge.
 
 All core problems are covered within an explicit identity contract.  Tested hard-link
 groups are supported; bind mounts, external aliases, and arbitrary generation changes
@@ -103,14 +105,14 @@ remain fail-closed C2 coverage rather than hidden behind the ledger abstraction.
 
 **System.** A roughly 3.5 K-line Python/Linux prototype built on unprivileged `try`,
 OverlayFS, and `strace`.  It implements a persistent shared semisolate, effect ledger,
-selective rollback, content-addressed snapshots, commit policy, frontier materialization,
-and crash-recovery WAL.
+selective rollback, context rewind, and content-addressed snapshots.
 
 **Evidence.** The current evaluation includes a 64-call runtime comparison, a canonical
-x86 ten-write comparison with 50 fresh workspaces per mode, 54/64/96-call scaling,
-preserved optimization iterations, 144 real-overlay causal-retention runs, a dependency
-ablation, three real-agent causal-recovery runs, 27 real-LLM replay-token samples, worker
-crash injection, a reloadable 256-step session, and four disjoint concurrent agents.
+x86 ten-write comparison with 50 fresh workspaces per mode, 32/64/96/128-call scaling,
+400 paired motivation manifests, artifact-native YoloFS and Waypoint recovery on all
+400 manifests, 144 real-overlay causal-retention runs, a dependency
+ablation, conversation-rewind tests, three real-agent causal-recovery runs, and
+27 real-LLM replay-token samples.
 
 **Headline results.** Full causal recovery retained 100% of independent work and removed
 100% of invalid descendants in the controlled DAG suite.  At the largest replay input it
@@ -119,11 +121,12 @@ abort.  In the canonical repeated comparison, full AgentTX reached 58.757 ms/ste
 68.169 ms/step p99, 66.4% below per-call `try` at p99, and was causal-correct in 50/50 runs.
 The separate 64-call full path remained 43% below per-call isolation.
 
-**Claim boundary.** Checkpoint and whole-abort results emulate recovery granularity rather
-than external artifacts.  Real-agent tasks are seeded, causal rollback is explicit rather
+**Claim boundary.** YoloFS and Waypoint results are artifact-native recovered-state
+measurements on the 400-case suite. Other checkpoint and whole-abort results are
+oracle-aided semantic upper bounds for their recovery granularity, not measurements of
+named external systems. Real-agent tasks are seeded, causal rollback is explicit rather
 than the default, the object-identity contract is incomplete outside tested hard-link
 groups, and non-filesystem effects are outside the transaction.
 
 **Judgment: PASS for draft stage.**  The system and evidence support the central semantic
-claim.  External artifact comparisons and broader repositories remain required for an
-OSDI submission.
+claim. Broader repository coverage remains required for an OSDI submission.

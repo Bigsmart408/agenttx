@@ -1,6 +1,6 @@
 # AgentTX 相关工作与开源基线调研（2026）
 
-调研截止日期：**2026-08-06**。
+调研截止日期：**2026-09-22**。
 
 范围：面向多步 Coding Agent / AI Agent 的文件系统副作用隔离、事务、checkpoint/rollback、selective commit、因果依赖追踪与策略执行。优先纳入 OSDI/NSDI/SOSP/ASPLOS 及 2026 年最新 arXiv 工作，并区分“论文公开”和“代码可复现”。
 
@@ -31,7 +31,7 @@ AgentTX 的事务单位是完整 agent trajectory，而不是单条命令或单�
 | [try](https://www.usenix.org/conference/osdi26/presentation/lamprou) | OSDI '26 Best Paper + Distinguished Artifact | 单个 opaque command 的无特权 semisolate；effect inspection、optional apply、stacking | 由调用者选择 effect/layer | [MIT](https://github.com/binpash/try) | AgentTX 基于 try，新增 trajectory 边界、自动 causal ledger、cascade rollback、commit frontier 与 WAL |
 | [hS](https://www.usenix.org/conference/osdi26/technical-sessions) | OSDI '26 | 动态检测 shell subprocess effect，乱序 speculative execution | 无冲突时选择性提交独立 subprocess effect | 截止调研未找到官方公开 artifact | 已证明动态依赖和 selective commit 不是 AgentTX 首创；目标是脚本并行加速，不是 agent 轨迹恢复 |
 | [Incr](https://www.usenix.org/conference/osdi26/presentation/xie-yizheng) | OSDI '26 | effect/dependency analysis + shell 增量重执行 | 复用仍有效的中间结果 | 截止调研未找到官方公开 artifact | 优化多次执行间的复用；AgentTX 控制一次持续演化的 trajectory |
-| [YoloFS](https://arxiv.org/abs/2604.13536) | arXiv 2026 | stackable kernel FS；staging、snapshot、progressive permission | session staging、snapshot/time travel、最终 commit | arXiv/论文页未给出公开代码 | YoloFS 的完整 mediation、权限 UX 和 FS data path 更强；AgentTX 强在 per-tool 因果关系、非连续回滚、commit frontier、无特权部署 |
+| [YoloFS](https://arxiv.org/abs/2604.13536) | arXiv 2026 | stackable kernel FS；staging、snapshot、progressive permission | session staging、snapshot/time travel、最终 commit | [GPL-2.0](https://github.com/YoloFS/YoloFS)；另有官方 perf harness | YoloFS 的完整 mediation、权限 UX 和 FS data path 更强；AgentTX 强在 per-tool 因果关系、非连续回滚、commit frontier、无特权部署 |
 | [Fork, Explore, Commit / BranchFS](https://arxiv.org/abs/2602.08199) | AgenticOS Workshop @ ASPLOS '26 | FUSE COW nested branches，支持并行 agent | 整个 leaf branch 原子 commit/abort | [MIT](https://github.com/multikernel/branchfs) | BranchFS 是 branch-granular；AgentTX 可在一条线性轨迹内部删除 producer+dependents 并保留独立后续工作 |
 | [Waypoint](https://daplab.cs.columbia.edu/projects/waypoint/) | Systems for Agentic AI Workshop @ SOSP '25 | OverlayFS + CRIU 捕获 FS、process、memory、PTY | 完整 temporal checkpoint/restore/branch | [Apache-2.0](https://github.com/Alex-XJK/waypoint) | Waypoint 状态覆盖更完整；AgentTX 的优势是 causal/selective filesystem recovery |
 | [DeltaBox](https://arxiv.org/abs/2605.22781) | arXiv 2026 | DeltaFS layers + DeltaCR incremental process C/R | 完整 sandbox checkpoint/rollback | [项目页](https://github.com/dongyunpeng-sjtu/deltabox)说明代码尚未公开 | 报告 14 ms checkpoint、5 ms rollback；没有 per-effect causal rollback/selective commit |
@@ -55,16 +55,18 @@ AgentTX 的事务单位是完整 agent trajectory，而不是单条命令或单�
 ### 在具备依赖的评测机上纳入
 
 1. **BranchFS（首要开源 baseline）**：比较 whole-branch abort 与 causal non-contiguous rollback。
-2. **Waypoint（首要 full-state C/R baseline）**：比较完整 temporal rewind 与只撤销因果相关文件 effect。
-3. **Sandlock**：比较单次 run 的 confinement/COW commit-abort 与多步事务。
-4. **ActPlane（可选）**：仅用于 policy coverage/overhead，不放进 rollback correctness 排名。
-5. **AgentFS（可选）**：仅用于 persistence/auditability，不作为同语义事务系统。
+2. **YoloFS（首要 agent-native FS baseline）**：比较 session snapshot/travel 与 causal non-contiguous rollback。
+3. **Waypoint（首要 full-state C/R baseline）**：比较完整 temporal rewind 与只撤销因果相关文件 effect。
+4. **Sandlock**：比较单次 run 的 confinement/COW commit-abort 与多步事务。
+5. **ActPlane（可选）**：仅用于 policy coverage/overhead，不放进 rollback correctness 排名。
+6. **AgentFS（可选）**：仅用于 persistence/auditability，不作为同语义事务系统。
 
-YoloFS、DeltaBox、Crab、hS、Incr 在 artifact 可运行前只做 qualitative comparison。论文中必须把“作者报告的数据”和“本地复现实验”拆成两张表。
+DeltaBox、Crab、hS、Incr 在 artifact 可运行前只做 qualitative comparison。YoloFS、BranchFS 和 try 已在当前 x86 主机完成 artifact-native 部署；YoloFS 和 BranchFS 也完成了共同 harness smoke measurement，详见 `docs/current-host-external-baselines.md`。Sandlock 的公开 artifact 已在当前主机构建，但内核未启用 `CONFIG_SECURITY_LANDLOCK`，不能产生有效运行数据。Waypoint 已公开 Apache-2.0 artifact，但当前主机缺少 CRIU 和免密 root，因此只能在具备相应权限的独立 Linux 主机上加入实测。论文中仍必须把“作者报告的数据”和“本地复现实验”拆成两张表。
 
-## 5. 当前远程 VM 的环境备注
+## 5. 历史远程 VM 的环境备注
 
-2026-08-06 对 AgentTX 远程 VM 的只读探测结果：
+2026-08-06 对 AgentTX 旧远程 VM 的只读探测结果如下；这不是 2026-09-03
+完成 YoloFS/BranchFS 部署的当前 x86 主机：
 
 - Linux kernel 5.15.0-139-generic；
 - bubblewrap 0.4.0 的 namespace smoke test 通过；

@@ -5,22 +5,24 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import statistics
+import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Sequence
 
 import tiktoken
 
+ROOT = Path(__file__).resolve().parents[2]
+sys.path[:0] = [str(ROOT / "src"), str(ROOT)]
 
-POLICIES = (
-    "turn_checkpoint_proxy",
-    "temporal_step",
-    "whole_branch",
-    "agenttx_causal",
-    "ideal_oracle",
-)
+from experiments.motivation_strategies import REAL_TRACE_POLICIES  # noqa: E402
+
+
+POLICIES = REAL_TRACE_POLICIES
+SCHEMA = "agenttx.motivation.real_counterfactual/noncausal-v1"
 
 
 def percentile(values: Sequence[float], q: float) -> float:
@@ -115,7 +117,6 @@ def analyze_trace(path: Path, encoding) -> list[dict]:
                 "turn_checkpoint_proxy": set(nodes),
                 "temporal_step": {node for node in nodes if node >= root},
                 "whole_branch": set(nodes),
-                "agenttx_causal": closure(nodes, parents, root),
                 "ideal_oracle": set(invalid),
             }
             manifest = json.dumps(
@@ -137,8 +138,11 @@ def analyze_trace(path: Path, encoding) -> list[dict]:
                         "turn_id": int(turn["turn_id"]),
                         "fault_step_id": root,
                         "policy": policy,
-                        "recovery_context_variant": "compact" if policy == "agenttx_causal" else "not_applicable",
+                        "recovery_context_variant": "not_applicable",
                         "manifest": manifest,
+                        "manifest_hash": hashlib.sha256(
+                            manifest.encode("utf-8")
+                        ).hexdigest(),
                         "loop_first_step": first,
                         "calls_per_turn": len(nodes),
                         "closure_size": len(invalid),
@@ -149,7 +153,7 @@ def analyze_trace(path: Path, encoding) -> list[dict]:
                         "useful_steps_wasted": len(useful),
                         "useful_tokens_wasted": sum(weights[node] for node in useful),
                         "invalid_steps_retained": len(invalid - targets),
-                        "agenttx_to_ideal_gap_steps": len(useful) if policy == "agenttx_causal" else "",
+                        "avoidable_gap_steps": len(useful),
                         "final_correct_without_replay": not (invalid - targets) and not useful,
                         "execution_kind": "recorded_graph_counterfactual",
                     }
@@ -176,6 +180,26 @@ def main() -> int:
     if not rows:
         raise RuntimeError("no M4-eligible turns found")
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    trace_paths = sorted(args.trace_dir.glob("*.json"))
+    source_systems = sorted(
+        {
+            str(json.loads(path.read_text(encoding="utf-8")).get("source_system"))
+            for path in trace_paths
+        }
+    )
+    config = {
+        "schema": SCHEMA,
+        "policies": list(POLICIES),
+        "trace_count": len(trace_paths),
+        "source_systems": source_systems,
+        "trace_sha256": {
+            path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in trace_paths
+        },
+    }
+    (args.output_dir / "config.json").write_text(
+        json.dumps(config, indent=2) + "\n", encoding="utf-8"
+    )
     write_csv(args.output_dir / "motivation_real_counterfactual_raw.csv", rows)
 
     per_turn = defaultdict(list)
@@ -218,7 +242,7 @@ def main() -> int:
                 "# M4 real-trace counterfactual recovery",
                 "",
                 "This is a recorded-graph recovery-boundary analysis, not an end-to-end continuation or replay-token result.",
-                "All `agenttx_causal` rows use the required compact recovery context.",
+                "Motivation excludes AgentTX causal and compares only non-causal coarse boundaries with the ideal oracle.",
                 f"Eligible real turns: {len({(row['trace_id'], row['turn_id']) for row in rows})}; fault-policy rows: {len(rows)}.",
                 "",
                 "| policy | turns | wasted token weight median | P95 | P99 | retention mean | invalid removal mean |",

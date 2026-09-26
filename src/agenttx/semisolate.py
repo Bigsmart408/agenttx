@@ -980,12 +980,14 @@ class SharedSemisolate:
         # The script already has a fixed bash shebang and executable mode;
         # executing it directly avoids an extra shell parse in every try call.
         command = [str(script)]
-        # `try` mounts a private /tmp and /run for the command namespace.  A
-        # trace file written there therefore disappears when the namespace is
-        # torn down, even though the command itself succeeded.  Keep the
-        # trace on the command's stderr pipe instead; both the one-shot path
-        # and the persistent worker already return that stream to the host.
-        trace_to_stderr = False
+        # `try` mounts a private /tmp and /run for the command namespace. Put
+        # the trace in overlaid /var/tmp so it survives namespace teardown without
+        # becoming visible in the agent's workspace, then remove it before collecting
+        # write effects. Sending it to stderr
+        # would expose the raw syscall log to an interactive agent as command
+        # output and multiply the model context on every subsequent turn.
+        trace_path: Optional[Path] = None
+        trace_upper_path: Optional[Path] = None
         tracer: Optional[str] = None
         trace_effects: List[Effect] = []
         if should_trace_reads:
@@ -999,7 +1001,10 @@ class SharedSemisolate:
                 tracer = "strace"
                 strace_bin = shutil.which("strace")
                 assert strace_bin is not None  # validated during initialization
-                trace_to_stderr = True
+                trace_path = Path("/var/tmp") / (
+                    f".agenttx-strace-{os.getpid()}-{self._step_count}-{time.time_ns()}"
+                )
+                trace_upper_path = upper.joinpath(*trace_path.relative_to("/").parts)
                 command = [
                     strace_bin,
                     "-yy",
@@ -1009,7 +1014,7 @@ class SharedSemisolate:
                     "--seccomp-bpf",
                     "--trace=%file,process",
                     "-o",
-                    "/dev/stderr",
+                    str(trace_path),
                     *command,
                 ]
 
@@ -1034,11 +1039,19 @@ class SharedSemisolate:
                 cp = self._run_try([*flags, "--", *command], cwd=self.workspace, timeout_s=timeout_s)
             duration = time.perf_counter() - t0
 
-        if trace_to_stderr:
-            trace_text = cp.stderr or ""
+        if trace_path is not None:
+            assert trace_upper_path is not None
+            try:
+                trace_text = trace_upper_path.read_text(
+                    encoding="utf-8", errors="replace"
+                )
+            except FileNotFoundError:
+                trace_text = ""
+            finally:
+                trace_upper_path.unlink(missing_ok=True)
             if not trace_text.strip():
                 raise RuntimeError(
-                    "strace did not produce dependency output on stderr"
+                    "strace did not produce dependency output in the workspace"
                 )
             trace_effects = parse_strace_effects(trace_text, self.workspace)
 

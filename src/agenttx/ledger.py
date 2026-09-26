@@ -83,6 +83,10 @@ class Ledger:
             if s.step_id > self.committed_frontier and s.status != "rolled_back"
         )
 
+    def active_uncommitted(self) -> List[Step]:
+        """Return active steps after the committed frontier in ledger order."""
+        return list(self._uncommitted())
+
     @staticmethod
     def _paths_overlap(left: str, right: str) -> bool:
         left = left.rstrip("/") or "/"

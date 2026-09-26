@@ -111,6 +111,9 @@ def _manifest_after_policy(agent, injected, mode: str):
         workdir=workdir,
         rollback_targets=_last_targets(agent),
         path_exists=path_exists,
+        oracle_fault_step_id=(
+            injected["root_step"] if mode == "ideal_oracle" else None
+        ),
     )
 
 
@@ -335,6 +338,28 @@ def test_terminal_verifier_uses_selected_python_runtime_libraries():
     )
 
 
+def test_swe_agent_verifier_runs_fail_to_pass_only_without_verified_prefix():
+    from experiments.workloads.swe_bench_suite import agent_test_command
+
+    instance = {
+        "repo": "astropy/astropy",
+        "FAIL_TO_PASS": ["astropy/modeling/tests/test_separable.py::test_cstack"],
+    }
+    unseeded = agent_test_command(SWE_SHORT, instance, "/venv/bin/python")
+    seeded = agent_test_command(
+        SWE_SHORT,
+        instance,
+        "/venv/bin/python",
+        reference_progress_verified=True,
+    )
+
+    assert "verify_swe_recovery.py" in unseeded
+    assert "test_separable.py::test_cstack" in unseeded
+    assert " && " in unseeded
+    assert "verify_swe_recovery.py" in seeded
+    assert "test_separable.py::test_cstack" not in seeded
+
+
 def test_control_prompts_distinguish_clean_recovery_and_no_rollback():
     from experiments.workloads.recovery_inject import recovery_prompt
 
@@ -364,8 +389,10 @@ def test_control_prompts_distinguish_clean_recovery_and_no_rollback():
     assert "preserves the injected workspace state" not in no_rollback
     assert "Recovery protocol:" in clean
     assert "Recovery protocol:" in no_rollback
-    assert "known task source `pkg/core.py`" in clean
-    assert "known faulty producer path `pkg/core.py`" in no_rollback
+    assert "clean unsolved benchmark checkout" in clean
+    assert "reference solution is already materialized" not in clean
+    assert "Complete the official task" in clean
+    assert "step and path are not disclosed" in no_rollback
     assert "named verifier" in clean
     assert "named verifier" in no_rollback
     assert "`pytest -q`" in clean
@@ -393,16 +420,82 @@ def test_compact_manifest_handoff_omits_hashes(tmp_path, monkeypatch):
         agent.harness.close(destroy=True)
 
 
-def test_compact_manifest_handoff_is_causal_only(tmp_path, monkeypatch):
+def test_compact_manifest_handoff_hides_location_from_coarse_policy(tmp_path, monkeypatch):
     agent, injected = _inject(tmp_path / "ws", tmp_path / "sess")
     try:
         _apply_policy(agent, "temporal_checkpoint", injected["root_step"])
         manifest = _manifest_after_policy(agent, injected, "temporal_checkpoint")
         monkeypatch.setenv("AGENTTX_RECOVERY_CONTEXT", "compact")
         prompt = render_recovery_manifest_prompt(manifest)
-        assert "compact; authoritative" not in prompt
-        assert "sha256=" in prompt
-        assert "INVALIDATED BY RECOVERY" in prompt
+        assert recovery_context_variant("temporal_checkpoint") == "compact"
+        assert "compact; authoritative" in prompt
+        assert "sha256=" not in prompt
+        assert "pkg/fault.py" not in prompt
+        assert "no fault step or source path is disclosed" in prompt
+    finally:
+        agent.harness.close(destroy=True)
+
+
+def test_compact_handoff_information_is_policy_scoped(monkeypatch):
+    monkeypatch.setenv("AGENTTX_RECOVERY_CONTEXT", "compact")
+    base = {
+        "schema": "agenttx.recovery_manifest/v1",
+        "authoritative": True,
+        "state_id": "state",
+        "generation": {"ledger_steps": 9, "committed_frontier": 1},
+        "retained": [],
+        "recreate_required": [],
+        "invalidated": [
+            {
+                "path": "secret/fault.py",
+                "reason": "fault_producer_rolled_back",
+                "current_state": "absent",
+                "must_stay_absent": False,
+            }
+        ],
+        "pending": ["run verifier"],
+        "fault_location_source": "hidden",
+        "localized_fault_step_ids": [],
+        "oracle_post_recovery_verified": False,
+    }
+
+    for policy in (
+        "crash_no_rollback",
+        "temporal_checkpoint",
+        "whole_branch_abort",
+    ):
+        prompt = render_recovery_manifest_prompt({**base, "policy": policy})
+        assert "secret/fault.py" not in prompt
+        assert "no fault step or source path is disclosed" in prompt
+
+    causal = render_recovery_manifest_prompt(
+        {
+            **base,
+            "policy": "causal",
+            "fault_location_source": "agenttx_localizer",
+            "localized_fault_step_ids": [4],
+        }
+    )
+    assert "secret/fault.py" in causal
+    assert "AgentTX-localized root step(s): 4" in causal
+
+    ideal = render_recovery_manifest_prompt(
+        {**base, "policy": "ideal_oracle", "oracle_fault_step_id": 4}
+    )
+    assert "secret/fault.py" in ideal
+    assert "Oracle fault step: 4" in ideal
+
+
+def test_ideal_oracle_compact_handoff_discloses_exact_step(tmp_path, monkeypatch):
+    agent, injected = _inject(tmp_path / "ws", tmp_path / "sess")
+    try:
+        _apply_policy(agent, "ideal_oracle", injected["root_step"])
+        manifest = _manifest_after_policy(agent, injected, "ideal_oracle")
+        monkeypatch.setenv("AGENTTX_RECOVERY_CONTEXT", "compact")
+        prompt = render_recovery_manifest_prompt(manifest)
+        assert recovery_context_variant("ideal_oracle") == "compact"
+        assert f"Oracle fault step: {injected['root_step']}" in prompt
+        assert manifest["oracle_fault_step_id"] == injected["root_step"]
     finally:
         agent.harness.close(destroy=True)
 
@@ -419,6 +512,25 @@ def test_clean_recovery_can_use_compact_execution_constraints(monkeypatch):
         mode="clean_recovery",
     )
     assert recovery_context_variant("clean_recovery") == "compact"
-    assert "clean compact control has no recovery certificate" in prompt
+    assert "unsolved clean checkout" in prompt
+    assert "complete the official task" in prompt
+    assert "Make no tool calls" not in prompt
     assert "compact recovery certificate is authoritative" not in prompt
-    assert "This is a clean recovery-context control" in prompt
+    assert "No crash was injected" in prompt
+
+
+def test_verified_clean_recovery_uses_compact_no_tool_fast_path(monkeypatch):
+    monkeypatch.setenv("AGENTTX_RECOVERY_CONTEXT", "compact")
+    prompt = recovery_prompt(
+        title="control",
+        context="control",
+        instruction="Do the task.",
+        docs=(),
+        test_cmd="pytest -q",
+        focus_path="pkg/core.py",
+        mode="clean_recovery",
+        reference_progress_verified=True,
+    )
+    assert "clean compact recovery baseline" in prompt
+    assert "Make no tool calls" in prompt
+    assert "reference solution was materialized" in prompt

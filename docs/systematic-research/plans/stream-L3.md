@@ -1,104 +1,98 @@
-# L3 Consistency Report: AgentTX | OSDI | 2026-08-18
+# L3 Consistency Report: AgentTX | OSDI | 2026-09-23
+
+## Current status
+
+**OPEN -- evaluation restructuring required.** The core rollback thesis and
+workspace--context semantics remain consistent, but the canonical experiment
+order changed after the last paper audit. The required order is now:
+
+```text
+Microbenchmark
+  -> Real-world Workloads (SWE-Bench Lite and Terminal-Bench)
+  -> Breakdown
+  -> Other Overheads
+```
+
+Correctness and interrupted-recovery tests move to the appendix. The current
+`paper/main.tex` still presents the previously completed pilot evidence as four
+RQ subsections. It must not be marked structurally complete until the same 400
+Motivation manifests have complete full-system Microbenchmark results and the
+complete live-agent real-world runs replace the pilot/oracle cells. The
+Evaluation prose must then be reordered accordingly.
 
 ## Scope
 
-This audit checks the polished `paper/main.tex` against `stream-L0.md`, the
-merged-section `stream-L1.md`, the systems-paper guide, and current result
-artifacts.  Missing experiments are recorded in
-`docs/paper-outline-and-experiment-plan.md` instead of being hidden by prose.
+This audit checks `paper/main.tex` against the L0 thesis, L1 section contracts,
+the current result artifacts, and the systems-paper writing guide. It covers
+novelty hierarchy, terminology, quantitative claims, prose, references, and
+the compiled document.
 
-## Thesis and structure
+## Novelty and structure
 
-**PASS.** The abstract and Introduction state one thesis: the trajectory is the
-speculation unit, while a causal subgraph of versioned effects is the recovery
-unit.  Section 2 combines the minimum background with execution and recovery
-evidence.  Section 3 defines AET without Linux mechanisms.  Section 4 maps the
-abstraction to AgentTX.  Evaluation, limitations, related work, and conclusion
-all retain this recovery-unit distinction.
+**PASS.** The paper now states one claim throughout: the trajectory is the
+speculation unit, while a dependency-defined subgraph of versioned effects is
+the recovery unit. AET is the abstraction that separates these units. AgentTX
+is the Linux realization through effect capture, object-aware history,
+selective workspace reconstruction, and context-aligned rollback.
 
-The three challenges map to the design and evidence:
+The three challenges map directly to the abstraction and implementation:
 
-- Dependency Discovery maps to effect capture, the ledger, and the no-dependency
-  ablation.
-- Object Identity maps to hierarchy, symlinks, rename, and tested hard-link
-  groups.  Bind mounts, external aliases, and arbitrary generation changes fail
-  closed.
-- Selective Reconstruction maps to causal closure, historical state, overlap
-  rejection, frontier publication, and WAL recovery.
+- Dependency Discovery maps to typed effect capture and ledger edges.
+- Object Identity maps to hierarchy, symlink, rename, and tested alias handling.
+- Selective Reconstruction maps to affected-subgraph selection, historical versions,
+  and conversation rewind.
+OverlayFS, tracing, persistent workers, and incremental snapshots are presented
+as mechanisms or optimizations, not as independent conceptual contributions.
+Publication is explicitly outside the paper's recovery scope.
 
-Persistent workers and incremental snapshots remain performance engineering,
-not a fourth correctness challenge.
+## Results and claim boundaries
 
-## Result consistency
+**PASS.** The motivation reports one population of 400 paired manifests; no
+separate small-case validation is part of the paper protocol. The current
+results report 54.02% and 56.90% collateral
+loss for turn-checkpoint and temporal-step recovery, and 97.5% non-prefix exact
+survivor states. The evaluation consistently reports 100% independent-work
+retention, 100% invalid-descendant removal, and replay avoidance of 1,424.7 and
+3,340.3 tokens at 48 entries.
 
-**PASS for the claims left in the draft.** The manuscript consistently reports:
+The paper distinguishes controlled recovery semantics from official task
+repair, local boundary emulations from artifact-native systems, and avoided
+replay from total session-token savings. Filesystem identity, external side
+effects, publication scope, model count, and native-agent evidence remain
+explicitly bounded.
 
-- 144 controlled real-overlay runs over 48 aggregated configurations;
-- 100% independent-work retention and 100% invalid-descendant removal;
-- 41% temporal retention at 64 calls and 4% invalid removal without read
-  dependencies;
-- 1,424.7 and 3,340.3 avoided replay tokens at 48 document entries;
-- 148.5 ms/step for the 64-call full path, 43% below per-call isolation;
-- 58.757 ms/step mean and 68.169 ms/step p99 for the canonical x86 ten-write
-  comparison, with 50/50 causal-correct full-system runs;
-- 202.746 ms/step p99 for per-call `try`, making the full path 66.4% lower at
-  p99 on that fixed trajectory.
+The 400-case artifact comparison is complete for try, BranchFS, YoloFS, and
+Waypoint. YoloFS and Waypoint each discard 65.89% of valid work, compared with
+54.02% for the oracle-aided turn-boundary upper bound. BranchFS and try discard
+the complete speculative unit through their native abort/discard operations.
 
-The token result is always called **avoided replay**, not total session-token
-savings.  Temporal checkpoint and whole-session abort are recovery-granularity
-emulations rather than external artifacts.  The GitHub-context figure is
-explicitly exploratory: each task and policy has one run, and tokens are not
-treated as savings when the success predicate differs.
+Figure 3 also reports all four artifact-native results over the 210-case
+dependency sweep. YoloFS and Waypoint select identical survivor states, as do
+BranchFS and try. The figure names every system and distinguishes coincident
+measurements with separate markers.
 
-The 50-run table and p99 figure use only the canonical x86 artifact.  The paper
-keeps that fixed ten-write trajectory separate from the 64-call coding workload
-and does not compare their absolute latency values.
+## Prose and terminology
 
-## Claim boundaries
-
-**PASS.** The draft does not claim complete syscall coverage, arbitrary
-filesystem identity, non-filesystem transactions, external multi-path atomic
-visibility, automatic upstream issue resolution, or measured superiority over
-unavailable artifacts.  Tested hard-link cases are described as supported;
-unsupported topology remains fail closed.
-
-The strace and persistent eBPF comparison is limited to one 12-step probe.  The
-paper states that both capture the same read and negative-lookup cases only in
-that probe and makes no general tracer-equivalence claim.
-
-## Prose and symbol hygiene
-
-**PASS.** The revision removes the visible development-stage labels P0/P1,
-diff-anchored words such as “now,” the Unicode numeric dash, and promotional
-phrasing.  Long background taxonomies and repeated limitation lists were
-collapsed.  The Abstract is a compact version of the Introduction and preserves
-all sample counts and claim boundaries.
+**PASS.** Abstract, Introduction, AET, implementation, evaluation, related
+work, and conclusion use the same abstraction--implementation hierarchy.
+The Introduction summarizes the Motivation's three qualitative findings but
+does not repeat its case counts, per-policy percentages, or figure-level data.
+Motivation introduces the ideal oracle as removing the failed step and its
+dependent steps without assuming the later AET terminology. Paragraphs use at
+most six sentences; substantive prose sentences use at most 30 words. Internal
+experiment labels and stale three-challenge wording are absent.
 
 ## LaTeX and visual QA
 
-- `latexmk` completes with no undefined references or citations.
-- Output is US Letter, twelve pages including references; the main text ends on
-  page 11.
-- Overview/design pages 4--6 and evaluation pages 7--10 were rendered to PNG
-  and inspected after the structure update.
-- No text, table, equation, caption, footer, or figure is clipped or overlapped.
-- Only cosmetic underfull-box warnings remain; no overfull box is reported.
+- `make -C paper` completes and produces a 15-page PDF.
+- No undefined references, undefined citations, overfull boxes, LaTeX errors,
+  or duplicate figure/table anchors remain.
+- All Motivation figures are single-column; their internal subplots render
+  without clipping, overlap, or displacement.
+- The selected motivation and external-artifact suites pass all 12 tests with
+  the repository root on `PYTHONPATH`.
 
-## Evidence still needed for submission
-
-1. Storage, frequency control, and confidence intervals for the canonical
-   repeated runtime comparison; CPU, vCPU, memory, kernel, commit, and command
-   are already recorded in its manifest.
-2. At least three repeats per GitHub-context task/policy, plus fair repeated
-   Aider runs under the same model, timeout, prompt, and validator.
-3. A WAL phase fault-injection matrix and a syscall/object-identity coverage
-   matrix.
-4. Shared-path concurrency and snapshot scaling by repository size, churn, and
-   session length, or correspondingly narrower claims.
-5. Artifact-native external baselines where reproducible, with a blocker table
-   for the rest.
-
-**Verdict:** the draft is consistent and compilable.  Its controlled semantic
-claim and fixed-trajectory runtime distribution are supported.  Live-agent
-generalization, crash statistics, and external comparisons remain the main OSDI
-evidence gaps.
+**Verdict:** the draft remains compilable and preserves the central novelty
+claim, but L3 is open because Evaluation has not yet been migrated to the new
+evidence order and still lacks the canonical system-microbenchmark,
+full real-world, interrupted-recovery, and resource-overhead datasets.

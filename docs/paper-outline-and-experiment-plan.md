@@ -1,198 +1,292 @@
-# AgentTX 论文大纲与实验补全计划
+# AgentTX 当前实验设计与运行计划（2026-09-23）
 
-本文档按 OSDI 12 页系统论文组织当前材料。它只使用仓库中已有实现和结果，未完成的实验均明确标为缺口。
+本文档是 `agent.md` 的中文运行配套说明，用于统一研究问题、对照组、运行顺序、停止
+条件和结果口径；发生冲突时以 `agent.md` 为准。模式名、脚本名、命令行参数及结果字段
+保留代码中的英文标识，其余说明使用中文。
 
-## 1. 论文主线
+## 1. 实验目标
 
-AgentTX 的核心论点是：多步 coding agent 的执行状态应以整条 trajectory 作为隔离单元，以版本化文件系统 effect 的因果子图作为恢复单元。命令、session 和时间 checkpoint 可以保存状态，却无法只撤销错误 producer 及其后继，同时保留时间上更晚但因果独立的工作。
+AgentTX 要验证的核心问题不是单纯的运行速度，而是：发生错误后，能否根据实际依赖
+关系只撤销错误及其派生结果，同时保留因果无关的有效工作，并减少智能体重新执行这些
+工作的令牌成本。
 
-论文需要始终区分三层内容：
+当前实验回答五个层层递进的问题：
 
-- Agent Effect Transaction (AET) 是恢复模型。
-- AgentTX 是 AET 的 Linux 实现。
-- persistent worker、trusted declarations 和 incremental snapshot 是性能优化，不是新的正确性挑战。
+1. Microbenchmark 中，依赖密度、轨迹长度和故障位置如何改变粗粒度回滚浪费？
+2. 完整系统 microbenchmark 中，AgentTX 能否把语义收益转化为成功率、token 和时间收益？
+3. 在 SWE-Bench Lite 与 Terminal-Bench 真实负载上，该收益是否仍然成立？
+4. Dependency capture、object history、selective reconstruction 和 context rewind 各自贡献什么？
+5. 正确性边界、恢复过程被中断时的行为，以及额外时间/空间开销是什么？
 
-当前可支持的强结论是：在受支持的文件拓扑和 syscall 覆盖范围内，AgentTX 能保留独立工作、删除错误的传递后继，并在提交前保持 host 不变。论文不能声称完整支持 bind mount、外部 alias、任意多对象原子可见性或非文件系统副作用。
+论文和执行顺序统一为：
 
-## 2. 建议的大纲与页数
+```text
+Microbenchmark（同一批 Motivation case 的分析与完整系统执行）
+  -> Real-world Workloads（SWE-Bench Lite + Terminal-Bench）
+  -> Breakdown
+  -> Appendix Correctness / Interrupted Recovery
+  -> Other Overheads
+```
 
-| 章节 | 页数 | 叙事任务 |
+## 2. 真实负载范围
+
+全量应用任务共 541 个：
+
+| 套件 | 任务数 | 验证方式 |
 |---|---:|---|
-| Abstract | 0.25 | 问题、现有恢复单元的缺陷、AET、AgentTX、核心结果 |
-| 1. Introduction | 1.25 | 多步 agent 背景，恢复单元不匹配，三个挑战，方法和贡献 |
-| 2. Background and Motivation | 1.50 | 最少背景，执行路径观察，恢复路径观察，导出设计要求 |
-| 3. Agent Effect Transactions | 1.50 | AET 状态、effect DAG、因果闭包、重建不变量、frontier |
-| 4. AgentTX Design and Implementation | 2.00 | effect capture、identity、shared speculation、reconstruction、WAL |
-| 5. Evaluation | 4.00 | 语义、性能、机制、真实 agent、token、健壮性与边界 |
-| 6. Discussion and Limitations | 0.50 | 支持边界和未解决的系统问题 |
-| 7. Related Work | 0.75 | 按 recovery unit 分类比较 |
-| 8. Conclusion | 0.25 | 问题、方法、结果 |
-| **合计** | **12.00** | 参考文献不计页数 |
+| SWE-Bench Lite | 300 | 官方 Docker 评测镜像 |
+| Terminal-Bench | 241 | 官方任务验证器；特殊任务使用其 Dockerfile 和 `run-tests.sh` |
 
-### 2.1 Introduction
+所有模式必须使用相同的任务版本、官方验证器、模型、推理强度、超时和并发配置。
+聚合结果时，以
+`suite/task/mode/recovery_context_variant/repeat/model/harness` 作为唯一键。
 
-逻辑顺序：多步 coding agent 已成为有状态系统任务；现有机制按命令、session、branch 或时间组织恢复；一个交错轨迹说明时间顺序不等于因果依赖；由此得到 dependency discovery、object identity 和 selective reconstruction；AET 改变恢复单元；AgentTX 给出受支持范围内的实现；最后列出可验证的贡献和结果。
+SWE-Bench Lite 与 Terminal-Bench 统一归入 Real-world Workloads。受控任务统一归入
+Microbenchmark，并且必须复用 Motivation 的 case，不得另建一套 workload。
 
-引言只保留一组 headline 结果。建议使用因果保留率和 avoided replay tokens，把性能数字留到 Motivation 和 Evaluation，直到 x86 性能数据完成统一重跑。
+## 3. 对照模式
 
-### 2.2 Background and Motivation
+正式主实验使用以下恢复策略；`causal` 全程采用紧凑恢复上下文：
 
-本章以原 Motivation 为主线，Background 只定义 trajectory、READ/NEGATIVE/WRITE/DELETE、speculative view 和 recovery granularity。
+| 模式 | 含义 | 主要用途 |
+|---|---|---|
+| `no_fault` / `clean_recovery` | 不注入恢复故障，直接完成官方任务 | 无故障参考组 |
+| `crash_no_rollback` | 注入相同故障但不回滚 | 负正确性对照 |
+| `causal-compact` | 因果回滚，使用紧凑恢复证书 | AgentTX 核心方法的紧凑上下文版本 |
+| `turn_checkpoint` | 回到受影响 turn 的起点 | turn 粒度对照，需 runner 提供独立边界 |
+| `temporal_checkpoint` | 从错误发生的时间点向后回滚 | 时间点恢复对照组 |
+| `whole_branch_abort` | 丢弃整个未提交分支 | 整分支恢复对照组 |
 
-叙事顺序：
+所有恢复配置使用相同的故障注入轨迹和成功判定。`no_fault` 不经历同一故障
+恢复过程，因此它适合说明无故障工作量，但不能直接作为“因果回滚节省量”的唯一基线。
+主要令牌结论比较 `causal-compact` 与无回滚和各粗粒度恢复策略。`causal-full` 只在
+Breakdown 中用于量化恢复交接压缩的贡献，不进入真实负载主结果。
 
-1. 最小背景：工具调用是 opaque process tree，路径不等于对象。
-2. 执行观察：逐调用隔离重复建立 namespace 和 overlay，共享状态降低固定成本，但 tracing 仍形成明显 tail。
-3. 恢复观察：temporal rollback 删除正确后继，no-dependency 消融留下错误派生物。
-4. 设计结论：trajectory 是 speculation unit，causal subgraph 是 recovery unit。
+## 4. 紧凑恢复上下文
 
-保留一个性能动机图和一个因果保留图即可。优化历史、长度 scaling 和 tail 可以合并成一个多面板图，避免 Background and Motivation 占用过多篇幅。
+AgentTX 的紧凑恢复交接由以下环境变量控制：
 
-### 2.3 Agent Effect Transactions
+```bash
+export AGENTTX_RECOVERY_CONTEXT=compact
+```
 
-本章只写抽象，不出现 `strace`、OverlayFS、upperdir、persistent worker 或具体 WAL 文件。
+该开关只作用于 `causal`。虽然底层未设置时仍默认 `full`，但正式实验启动器必须显式
+设置 `compact`，结果也必须满足 `recovery_context_variant=compact`。
 
-逻辑顺序：定义 $\langle V,L,H,F\rangle$；说明 append、recover 和 finalize；定义 effect overlap 和 dependency edge；计算错误节点的传递闭包；给出 selective reconstruction 不变量；定义允许 rolled-back holes 的 monotonic frontier。
+历史运行中未设置该变量的 `causal` 是 **causal-full**，只能作为审计或 Breakdown 数据，
+不能并入正式主结果。正式真实负载的必跑集合为：
 
-当前 LaTeX 盒图应替换为正式架构图。图中需要显示 tool calls、speculative view、effect ledger、causal closure、historical state 和 approved frontier。
+```text
+causal-compact
+crash_no_rollback
+turn_checkpoint（仅当 runner 提供独立的多 turn 边界）
+temporal_checkpoint-full
+whole_branch_abort-full
+clean_recovery
+```
 
-### 2.4 AgentTX Design and Implementation
+Breakdown 中比较 `causal-full` 和 `causal-compact` 时，必须使用相同任务、模型、推理
+强度、代码和验证器，并通过结果字段 `recovery_context_variant` 区分。Codex 自身可能
+发生的自动上下文压缩不等于 AgentTX 的紧凑恢复交接，两者必须在论文中分开描述。
 
-按正确性数据流组织，而不是按代码文件组织：
+## 5. 分析型 Microbenchmark（Motivation）
 
-1. Effect capture and coverage gate：写入来自 upperdir diff，读取和负查找来自 persistent `strace`，无法解析的 fd-relative path fail closed。
-2. Object identity：层次路径、symlink 双名、rename delete/create、已验证 hard-link group 和不支持的 bind/external alias。
-3. Shared speculation and reconstruction：共享 `try -N`、per-step historical state、retained-effect overlap 检查和 suffix rebase。
-4. Durable publication：policy 在 WAL 之前执行，prepare/install/finalize 支持 crash recovery，但不保证外部观察者看到原子多路径切换。
-5. Performance engineering：persistent worker、content-addressed blobs 和 incremental snapshots 单独作为优化段落。
+Motivation 统一使用 `agent.md` 定义的 MB1--MB3 microbenchmark，不混入真实轨迹、模型
+token 或已实现的 causal 策略：
 
-删除正文中的 P0/P1、Step 27/28 和“本轮新增”等开发阶段术语。正文只描述最终机制和边界。
+1. **MB1 scale**：固定四步 closure，sweep turn width，共 100 个 case。
+2. **MB2 chronology**：固定 width 和 closure，sweep fault position，共 90 个 case。
+3. **MB3 dependency**：sweep 21 个 `dependency_value`，共 210 个 case。
 
-## 3. Evaluation 的最终结构
+Motivation 只保留两张主图：`FIG-Motivation-Coarse-Waste` 和
+`FIG-Motivation-Dependency`。`agenttx_causal`、幂等性、连续隔离运行成本、长轨迹尾延迟、
+native trace、真实模型 replay、SWE-Bench 和 Terminal-Bench 均属于 Evaluation 或
+Appendix，不得与 MB1--MB3 合并成同一组 Motivation 数据。
 
-评估应先验证中心语义，再讨论成本。建议将当前 RQ 顺序调整为以下五组。
+完整复现命令、case grid、策略定义和图表契约以仓库根目录 `agent.md` 为准。
 
-### RQ1: Causal recovery 是否同时保留有效工作并删除无效后继
+## 6. 完整系统 Microbenchmark
 
-已有证据：144 次 real-overlay run，覆盖 16/32/64 calls、三种 DAG shape、三种 fault position 和三种 independent-work ratio。完整 causal recovery 的 useful retention 和 invalid removal 均为 100%；64 calls 下 temporal retention 为 41%，无 dependency capture 时 invalid removal 为 4%。
+完整系统实验直接执行 Motivation 的同一批 400 个 MB1--MB3 manifest，不生成新的 case。
+`case_id`、turn 数、操作顺序、依赖值、故障位置和预期 survivor set 必须完全一致。每个
+case 和策略运行三次；策略集合、成功判定、prompt 公平性和验收条件以 `agent.md` 第 15
+节为准。调试子集不进入论文结果。
 
-主图：`FIG-Causal-Retention.pdf`。
+## 7. 真实负载实验
 
-还需补充：在图注和正文中明确 144 是 run 数，48 是聚合 configuration 数，并说明三次重复如何分配。
+### E0. 环境检查
 
-### RQ2: 连续隔离和 dependency capture 的成本是多少
+任何模型实验开始前，都必须在正式 Conda 环境中执行环境检查：
 
-已有证据：64-call workload、54/64/96-call scaling、trace microbenchmark、optimization history 和 comparison repeat 脚本。
+```bash
+source /home/bfq/miniconda3/etc/profile.d/conda.sh
+conda activate agenttx
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-已完成：在 x86 主机 `pengpeng-ubuntu-01-1`（Linux 5.4.0-216-generic，AMD EPYC 7713，Python 3.8.10）上以固定十次写入轨迹、每模式 50 个 fresh workspace 完成重跑。完整模式显式使用 `strace`，结果为 58.757 ms/step mean、57.738/63.511/68.169 ms/step p50/p95/p99，并在 50/50 次满足 causal-retention predicate。原始结果位于 `experiments/results/comparison_repeats.{csv,json,md}`，运行记录位于 `docs/x86-comparison-20260818.md`；历史 tiao2 数字仍只保留在 history，不进入正文。
+PYTHONPATH=src:. python experiments/scripts/check_experiment_environment.py \
+  --suite all --task-set full \
+  --output experiments/results/environment_check
+```
 
-主图：重新生成的 x86 p50/p95/p99 或 CDF。不要把 10-write microbenchmark 与 64-call coding workload 混成同一性能结论。
+首次准备环境时可以额外使用 `--prepare-missing`；正式启动前必须再执行一次不带该参数的
+只读检查。检查范围包括 Conda 环境、Python 依赖、Docker 服务、SWE 官方镜像和
+Terminal-Bench 任务定义，不运行 AgentTX、`try` 或完整官方测试。
 
-### RQ3: 哪些机制是正确性所必需的
+通过条件为 541 个任务全部通过且脚本退出码为零。任何任务失败都必须先修复环境，不能
+通过缩小任务列表绕过。
 
-已有证据：no-read-tracing 消融、parent/child、negative lookup、symlink、hard-link probe、persistent `strace` 与 eBPF 对比、snapshot storage 和 commit policy 测试。
+### E1. 代表任务冒烟实验
 
-需要补充一个 capability/ablation 表：
+在分层代表集中运行全部适用的正式主配置，每格一次。所有
+预期单元格必须完整，且满足
+`environment_error=0`、`usage_source` 不为 `none`、验证字段完整，以及不同 worker
+的模型、推理强度和超时一致。
 
-| 机制 | 删除后预期失败 | 当前证据 | 最终需要的结果 |
-|---|---|---|---|
-| READ dependency | 派生 artifact 被保留 | no-trace ablation | invalid removal rate |
-| NEGATIVE dependency | absence assumption 丢失 | ledger integration test | targeted pass rate |
-| Object identity | sibling alias 漏边或错误提交 | hard-link probe | supported/fail-closed matrix |
-| Historical reconstruction | partial rollback 恢复错误版本 | same-path/frontier tests | state equality |
-| WAL | crash 后 host/frontier 不一致 | crash tests | phase-by-phase recovery rate |
+### E2. 代表任务重复实验
 
-还需运行 syscall/identity coverage matrix，至少包含普通 path、`openat`、fd-relative read、symlink、rename、pre-existing hard link、upper-created hard link、bind mount 和 external alias。支持项报告正确率，不支持项报告 fail-closed 率。
+对按 SWE 仓库和 Terminal-Bench 难度、类别分层的代表集运行全部适用的正式主配置，每格至少三次，
+预算允许时运行五次。该实验用于报告方差、置信区间、中位数、第 95 百分位数及配对胜率。
+不得在同一运行目录中途切换紧凑上下文变量。
 
-### RQ4: 真实 agent 能否使用恢复接口，保留工作能否降低用户成本
+### E3. 全量应用实验
 
-已有证据：
+以下历史运行仅作 provenance，不能作为新协议下的规范主结果：
 
-- `deepseek-v4-flash` 的 causal recovery 3/3 成功，wall p50/p95 为 42.939/44.430 s。
-- controlled replay-token sweep 有 27 个样本。48 entries 时 causal policy 相对 temporal 和 whole abort 分别避免 1,424.7 和 3,340.3 replay tokens。
-- full autonomous recovery 已有 12/24/48 entries、三种 policy、每格两次的结果。
-- GitHub-context Requests、Flask 和 pytest 各有三种 policy 的一次运行。
-- AgentTX-LLM 与 Aider 各有一次同模型 refactor 结果。
+| 项目 | 配置 |
+|---|---|
+| 模型 | `gpt-5.6-luna` |
+| 推理强度 | `max` |
+| 模式 | `no_fault causal temporal_checkpoint whole_branch_abort` |
+| 重复次数 | 1 |
+| 任务数 | 541 |
+| 预期单元格 | 2164 |
+| worker 数 | 4 |
+| 最大并发模型请求 | 4 |
+| 单次模型超时 | 1800 秒 |
+| 恢复上下文 | `full`，未开启 compact |
+| 镜像策略 | `AGENTTX_KEEP_EVAL_IMAGES=1`，保留评测镜像 |
 
-当前不足：GitHub-context 每格只有一次，Aider 只有一次，不能作为统计结论。Full autonomous recovery 中 temporal 和 whole-abort 多数样本未满足 success predicate，token 更少时也不能解释为更优。最终图应同时显示 total tokens 和 success/independent-retention，或只比较所有策略都成功的配对样本。
+当前运行名称为 `codex_luna_max_4mode_full_r1_parallel_20260907`。启动器必须显式传递
+`model_reasoning_effort="max"`，把配置写入 `run_config.json`，在任一分片非零退出或
+出现环境错误时停止全部分片，并且不得运行 Docker 镜像清理命令。中断后必须使用相同
+运行名称、worker 数和模式集合续跑，只跳过已经完成的单元格。
 
-最低补全方案：
+本次运行记录的 Git 工作树为 dirty，因此可以作为当前全量测量和调试依据，但最终论文
+的规范数据仍应在冻结提交上复现，或者在论文产物中明确记录该运行对应的完整差异。
 
-1. 三个 GitHub-context 任务的每个 policy 至少运行 3 次，推荐 5 次。
-2. 固定模型为 `deepseek-v4-flash`，固定 prompt、tool schema、max turns 和 validator。
-3. 报告 success、causal-target accuracy、independent retention、host leak、total tokens 和 wall p50/p95。
-4. Aider 对比至少 3 次，并使用相同任务、模型、timeout 和测试判定。
-5. 将 controlled avoided replay 与 full-loop total token 分成两个结论，不能相互替代。
+新协议下的规范运行必须重跑全量 `causal-compact`，并与相同冻结版本下的其他正式主配置
+配对：
 
-### RQ5: 系统在 crash、长 session 和并发下是否保持不变量
+| 项目 | 配置 |
+|---|---|
+| 模式 | `causal` |
+| 恢复上下文 | `compact` |
+| 任务数 | 541 |
+| 预期单元格 | 541 |
+| 模型与并发 | 与第一阶段完全一致 |
+| 结果目录 | 独立目录，不得复用第一阶段目录 |
 
-已有证据：persistent-worker crash fallback、256-step reload、4 个 disjoint agent、snapshot dedup、policy reload、hard-link publication 和 WAL 恢复测试。
+建议运行名称为 `codex_luna_max_causal_compact_full_r1_parallel_20260907`。启动时必须显式
+设置 `AGENTTX_RECOVERY_CONTEXT=compact`，并继续设置
+`AGENTTX_KEEP_EVAL_IMAGES=1`。完成后必须检查所有正式 `causal` 结果均满足
+`recovery_context_variant=compact`。必跑单元格总数由冻结后的适用策略清单计算，不再
+沿用历史四模式运行的 2705 单元格口径。
 
-最终还需：
+```bash
+AGENTTX_RECOVERY_CONTEXT=compact \
+AGENTTX_KEEP_EVAL_IMAGES=1 \
+PYTHONPATH=src:. python experiments/scripts/run_parallel_official_tasks.py \
+  --run-name codex_luna_max_causal_compact_full_r1_parallel_20260907 \
+  --workers 4 --max-requests 4 --repeats 1 \
+  --modes causal --model gpt-5.6-luna --reasoning-effort max \
+  --harness-timeout 1800 --python "$CONDA_PREFIX/bin/python"
+```
 
-- 对 prepare、install 和 finalize 的每个故障点做重复注入，报告恢复成功率和 host/frontier 一致性。
-- 将 WAL crash test 从少量定点测试扩展为可统计的 fault matrix。
-- 增加 shared-tree 或 same-path 并发；若不实现，则把结论严格限定为 disjoint workspace concurrency。
-- 对 repository size、changed-path ratio 和 session length 做 snapshot 时间与空间 scaling。
+### E4. 第二模型泛化
 
-## 4. 当前证据清单
+Codex 主结果稳定后，在同一代表任务集上使用第二个模型运行四个恢复配置，每格至少三次，
+其中 `causal` 同样只使用 `causal-compact`。
+第二模型用于说明智能体层面的泛化，不要求第一阶段复制完整的 541 个任务。
 
-| 证据 | 状态 | 可用于正文的结论 | 主要文件 |
-|---|---|---|---|
-| Causal retention sweep | 可用 | supported topology 下 100% retain 和 100% remove | `experiments/results/causal_retention.*` |
-| 64-call runtime and scaling | 可用但需统一 generation | 长任务的开销和 tail | `motivation_runtime_comparison.*`, `long_workload_scaling.*` |
-| 50-run comparison | 已完成，可用于正文 | 统一 x86 artifact、50 fresh workspaces、p50/p95/p99、causal predicate | `comparison_repeats.*`, `docs/x86-comparison-20260818.md` |
-| Real-agent recovery | 可用，样本小 | 模型能使用 control plane | `experiments/results/deepseek/real_agent_recovery.*` |
-| Controlled replay tokens | 可用 | avoided replay tokens | `experiments/results/deepseek/token_recovery.*` |
-| Full-loop tokens | 可用（2 repeats） | 与 success 联合解释；已入正文 | `experiments/results/deepseek/token_end_to_end.*` |
-| GitHub-context tasks | preliminary | 三种规模上 causal 均成功 | `experiments/results/deepseek/github_token_tasks.*` |
-| Aider comparison | preliminary | 单次功能对照，不能作统计优势 | `experiments/results/deepseek/refactor_agent_compare.*` |
-| Robustness | 可用但需 crash matrix | worker、reload、disjoint agents | `experiments/results/robustness.*` |
-| Identity and tracing | 可用 | coverage + hard-link fail-closed | `coverage_matrix.*`, `hardlink_alias_probe.*` |
-| WAL fault matrix | 可用 | 六相位 5/5 恢复 | `wal_fault_matrix.*` |
+## 8. 指标与统计口径
 
-## 5. 投稿前的实验优先级
+### 8.1 正确性指标
 
-### P0: 必须完成
+- `success`：智能体正常结束、提交成功、官方验证通过且恢复不变量成立；
+- `tests_ok`：官方任务验证通过；
+- `independent_retained`：因果独立的有效工作保持不变；
+- `derived_removed`：错误派生结果已经删除；
+- `environment_error`：验证器或运行基础设施未能正常执行。
+- `idempotence_ok`：第二次相同恢复及 reload 后重放均不改变语义可观察状态；
+- `second_recovery_targets`：第二次恢复实际选择的目标，预期为空或明确的 no-op。
 
-1. ~~统一 x86 canonical dataset，清除论文中混入的 tiao2 50-run 数字。~~ 已完成；正文使用新 x86 表，历史数字仅留在 history。
-2. 在 x86 上随机交错运行 50 次 runtime comparison，生成 mean、p50、p95、p99 和置信区间。
-3. 将 GitHub-context 扩展到至少 3 次重复；full autonomous recovery 已有 2 次/格并写入正文（须联读 success）。
-4. ~~建立 WAL phase fault-injection matrix。~~ 已完成（5/phase，`wal_fault_matrix.*`）。
-5. ~~建立 syscall/object-identity coverage matrix。~~ 已完成（3/case，`coverage_matrix.*`）。
-6. 在 Setup 中补齐 CPU、memory、storage、kernel、Python、`try` commit、AgentTX commit 和频率控制信息。
+### 8.2 令牌指标
 
-### P1: 强烈建议
+- `total_tokens`：主修复会话报告的令牌量；
+- `doc_replay_tokens`：重建被恢复策略删除的独立文档所消耗的令牌量；
+- 合计令牌量：`total_tokens + doc_replay_tokens`；
+- 主要节省量：同任务、同重复、双方都成功时，各对照策略合计令牌量分别减去
+  `causal-compact` 的合计令牌量；
+- compact 收益只在 Breakdown 中计算：配对成功样本中，`causal-full` 合计令牌量减去
+  `causal-compact` 合计令牌量。
 
-1. 公平重复 Aider 对比；对无法运行的 BranchFS、Waypoint、YoloFS 等给出 artifact/blocker 表。
-2. 增加 shared-path concurrency 或明确删除相关泛化表述。
-3. 对大 repository 和高 churn upperdir 做 snapshot scaling。
-4. 增加第二个模型只用于 agent-level generalization；系统正确性结论仍由独立 validator 判断。
+令牌比较必须优先使用配对成功样本，同时报告样本数、成功率、均值、中位数和配对胜率。
+不能把失败较多但令牌较少的策略解释为更高效，也不能用尚未配齐全部适用配置的任务计算主
+结论。
 
-### P2: 可放入 artifact evaluation
+### 8.3 时间和系统指标
 
-1. 一键生成全部 CSV、notebook、PDF figure 和论文表格。
-2. 为每个 result 写 manifest 和 SHA256，避免历史运行覆盖 canonical 文件。
-3. 提供 unsupported syscall、bind mount 和 external alias 的 fail-closed regression suite。
+报告恢复时间、端到端时间、中位数、第 95 和第 99 百分位数，同时记录快照空间、跟踪
+开销、worker 超时、崩溃恢复和宿主机污染情况。
 
-## 6. 最终图表安排
+## 9. Breakdown、正确性与其他开销
 
-| 位置 | 图表 | 当前状态 | 操作 |
-|---|---|---|---|
-| Section 2 | Motivation performance figure | 三张图信息重叠 | 合并 optimization、scaling 和 tail |
-| Section 2 | Recovery granularity table | 可用 | 保留 |
-| Section 3 | AET lifecycle | 当前是 LaTeX box sketch | 重画为正式双栏架构图 |
-| RQ1 | Causal retention | 可用 | 作为 evaluation 第一张主图 |
-| RQ2 | x86 runtime distribution | 当前混入非 x86 50-run 数据 | 重跑后生成 CDF 或 p50/p95/p99 |
-| RQ3 | Mechanism and coverage table | 已写入 `tab:coverage` / `tab:wal` | 保持 |
-| RQ4 | Controlled replay tokens | 可用 | 保留并明确 avoided replay |
-| RQ4 | Full-loop token-success | 已有 `FIG-Token-End-to-End` | GitHub 仍需重复 |
-| RQ5 | Robustness | 可用但较杂 | 用 crash matrix、session 和 concurrency 三个 panel |
+- Breakdown 在同一组 400-case Microbenchmark 上逐项移除 READ/NEGATIVE capture、
+  object identity、selective history reconstruction 和 context rewind；persistent worker 与
+  compact handoff 作为性能消融单独报告。
+- Appendix correctness 覆盖 effect 类型、同路径多版本、目录层次、rename、symlink、
+  hardlink、fd-relative、多个故障根、重复恢复、reload 和 workspace/context 一致性。
+- Interrupted recovery 在恢复计划、generation 构建、workspace swap、context rewrite 和
+  metadata persistence 五个阶段注入 `SIGKILL`。恢复后只能观察到完整旧状态或完整新状态。
+- Other Overheads 报告 tracing、历史存储、RSS、ledger/message index、closure planning、
+  reconstruction、context handoff、启动和 reload 成本。
 
-## 7. 数据管理规则
+详细矩阵、重复次数和验收条件以 `agent.md` 第 17--19 节为准。
 
-最终论文只读取一个 x86 canonical result directory。每次运行必须记录 host、kernel、CPU、memory、git commit、model、trace backend、repeat、seed 和完整命令。历史优化结果保留在 history 目录，不得覆盖当前 baseline。Notebook 只读取明确的 canonical CSV，图注必须给出样本数和 workload。若外部 artifact 无法运行，正文和表格只报告可复现的 blocker，不填入推测数字。
+## 10. 停止条件
 
-## 8. 推荐执行顺序
+出现以下任一情况时，停止扩大实验或由 supervisor 自动停机：
 
-第一阶段先统一 x86 数据和实验 manifest，并重跑 50 次 runtime comparison。第二阶段补 GitHub/full-loop repeats、WAL fault matrix 和 coverage matrix。第三阶段按新的 RQ 顺序重排 Evaluation，更新所有图注和 headline 数字，最后再做一次 LaTeX 全文一致性检查。
+1. `environment_error` 非零；
+2. 任一 worker 非零退出；
+3. 任务数量或预期单元格数量与配置不一致；
+4. 模型、推理强度、提示、验证器或代码在运行中发生变化；
+5. `usage_source=none` 或令牌字段缺失；
+6. 官方验证结果与 runner 的成功判定不一致；
+7. 已完成单元格被重复执行或不同分片发生键冲突。
+8. 幂等性矩阵中第二次恢复改变工作区、控制状态或最终提交结果。
+
+任务本身未解决不属于环境错误，应保留为正常失败样本。
+
+## 11. 数据管理
+
+- 环境检查、冒烟、校准、正式运行和定点补跑使用不同目录；
+- 每次运行保存代码提交、dirty 状态、主机环境、Conda Python、Codex CLI、模型、推理
+  强度、超时、并发、命令和任务清单；
+- 环境失败只允许在相同代码和配置下定点续跑；代码变化后必须新建运行代次；
+- 图表只读取明确指定的规范 CSV，不扫描整个结果目录猜测“最新文件”；
+- 分片结果先按唯一键去重，再生成合并表和论文图；
+- 调试结果和历史结果不得混入最终规范数据。
+
+## 12. 推荐执行顺序
+
+1. 冻结代码、prompt、模型、推理强度、验证器和结果 schema；
+2. 重现 MB1--MB3 的 400-case 分析型 Microbenchmark；
+3. 完成协议调试后，对同一 400 个 case 运行完整系统三次重复；
+4. 使用 Conda 完成 541 个真实任务的只读环境检查和分层冒烟；
+5. 以一遍完整任务为主结果，运行 SWE-Bench Lite 与 Terminal-Bench 所有模式；
+6. 审计环境错误、缺失单元格、重复键、上下文变体、成功率和 token 来源；
+7. 在冻结配置下运行 Breakdown；
+8. 完成 Appendix correctness 与五阶段 interrupted-recovery 矩阵；
+9. 运行 Other Overheads 并报告时间、空间、RSS 和 context 成本；
+10. 锁定规范数据，统一生成表格、图和论文文本。

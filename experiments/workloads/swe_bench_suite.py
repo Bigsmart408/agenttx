@@ -8,12 +8,15 @@ official utility predicate.
 
 from __future__ import annotations
 
+import fcntl
+import hashlib
 import json
 import os
 import shlex
 import shutil
 import subprocess
 import sys
+import time
 import urllib.request
 import uuid
 from dataclasses import dataclass
@@ -218,13 +221,17 @@ PYTHON_DEPS = {
 
 REPO_PIP = {
     "astropy/astropy": [
-        "numpy",
+        "numpy<2",
         "hypothesis",
-        "pytest",
+        "pytest<8",
         "pytest-astropy",
         "packaging",
         "pyerfa",
         "Jinja2",
+        "extension-helpers",
+        "setuptools<70",
+        "Cython<3",
+        "PyYAML",
     ],
     "django/django": ["asgiref", "sqlparse", "tblib", "pytz", "typing_extensions"],
     "matplotlib/matplotlib": ["numpy", "pytest", "cycler", "pyparsing", "python-dateutil"],
@@ -289,13 +296,99 @@ def ensure_eval_image(instance_id: str, timeout: int = 1800) -> str:
     )
     if inspect.returncode == 0:
         return image
-    print(f"pulling {image}", flush=True)
-    subprocess.run(["docker", "pull", image], check=True, timeout=timeout)
-    return image
+
+    # Serialize cache misses so independent shards do not overload the registry,
+    # and recheck after acquiring the lock in case another worker pulled first.
+    lock_path = Path(
+        os.environ.get(
+            "AGENTTX_DOCKER_PULL_LOCK",
+            f"/tmp/agenttx-docker-pull-{os.geteuid()}.lock",
+        )
+    )
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        inspect = subprocess.run(
+            ["docker", "image", "inspect", image],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if inspect.returncode == 0:
+            return image
+
+        mirror_prefixes = [
+            value.strip().rstrip("/")
+            for value in os.environ.get("AGENTTX_DOCKER_MIRROR_PREFIXES", "").split(",")
+            if value.strip()
+        ]
+        pull_images = [f"{prefix}/{image}" for prefix in mirror_prefixes] or [image]
+        pull_env = os.environ.copy()
+        for key in (
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        ):
+            pull_env.pop(key, None)
+        pull_env.update({"NO_PROXY": "*", "no_proxy": "*"})
+        attempts = max(1, int(os.environ.get("AGENTTX_DOCKER_PULL_ATTEMPTS", "12")))
+        retry_initial = max(
+            0.0, float(os.environ.get("AGENTTX_DOCKER_PULL_RETRY_INITIAL", "5"))
+        )
+        retry_max = max(
+            retry_initial,
+            float(os.environ.get("AGENTTX_DOCKER_PULL_RETRY_MAX", "60")),
+        )
+        last = None
+        last_command = None
+        for attempt in range(attempts):
+            for pull_image in pull_images:
+                command = ["docker", "pull", pull_image]
+                last_command = command
+                print(
+                    f"pulling {pull_image} attempt={attempt + 1}/{attempts}",
+                    flush=True,
+                )
+                last = subprocess.run(
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=False,
+                    timeout=timeout,
+                    env=pull_env,
+                )
+                if last.returncode == 0:
+                    if last.stdout:
+                        print(last.stdout.rstrip(), flush=True)
+                    if pull_image != image:
+                        subprocess.run(
+                            ["docker", "tag", pull_image, image],
+                            check=True,
+                            env=pull_env,
+                        )
+                    return image
+                detail = (last.stderr or last.stdout or "docker pull failed").strip()
+                print(detail[-2000:], file=sys.stderr, flush=True)
+            if attempt + 1 < attempts:
+                time.sleep(min(retry_initial * (2**attempt), retry_max))
+        assert last is not None
+        assert last_command is not None
+        raise subprocess.CalledProcessError(
+            last.returncode,
+            last_command,
+            output=last.stdout,
+            stderr=last.stderr,
+        )
 
 
 def remove_eval_image(instance_id: str) -> None:
-    """Drop the instance image; parent env layers stay until prune."""
+    """Keep instance images by default; opt into deletion with ``=0``."""
+    if os.environ.get("AGENTTX_KEEP_EVAL_IMAGES", "1") != "0":
+        return
     if not docker_available():
         return
     image = swe_eval_image(instance_id)
@@ -309,7 +402,9 @@ def remove_eval_image(instance_id: str) -> None:
 
 
 def prune_unused_eval_layers() -> None:
-    """Delete dangling layers after a repo group no longer needs them."""
+    """Keep shared layers by default; opt into pruning with ``=0``."""
+    if os.environ.get("AGENTTX_KEEP_EVAL_IMAGES", "1") != "0":
+        return
     if not docker_available():
         return
     subprocess.run(
@@ -361,35 +456,126 @@ def ensure_venv(
     repo = str(instance.get("repo") or "")
     pkgs = PYTHON_DEPS.get(task.instance_id) or list(REPO_PIP.get(repo) or ["pytest"])
     wanted = "\n".join(pkgs) + "\n"
-    if py.exists() and marker.exists() and marker.read_text(encoding="utf-8") == wanted:
-        return str(py)
     venv.parent.mkdir(parents=True, exist_ok=True)
-    if not py.exists():
-        subprocess.run([python, "-m", "venv", str(venv)], check=True)
-    pip = str(venv / "bin" / "pip")
-    subprocess.run([pip, "install", "-q", "--upgrade", "pip"], check=False)
-    subprocess.run([pip, "install", "-q", *pkgs], check=True)
-    marker.write_text(wanted, encoding="utf-8")
+    lock_dir = venv.parent / ".locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / f"{env_key}.lock"
+    with lock_path.open("a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        if py.exists() and marker.exists() and marker.read_text(encoding="utf-8") == wanted:
+            return str(py)
+
+        # A missing marker means a prior builder did not publish a complete
+        # environment. Rebuild it while holding the per-environment lock.
+        if venv.exists():
+            shutil.rmtree(venv)
+        try:
+            subprocess.run([python, "-m", "venv", str(venv)], check=True)
+            subprocess.run(
+                [str(py), "-m", "pip", "install", "-q", "--upgrade", "pip"],
+                check=True,
+            )
+            subprocess.run([str(py), "-m", "pip", "install", "-q", *pkgs], check=True)
+            marker.write_text(wanted, encoding="utf-8")
+        except Exception:
+            shutil.rmtree(venv, ignore_errors=True)
+            raise
     return str(py)
 
 
 def ensure_workspace_venv(workdir: Path, python: str) -> str:
-    """Interpreter inside the protected workspace so live-agent pip cannot leak.
+    """Interpreter inside the workspace, seeded from the cached task environment.
 
     Official Docker verify still uses ``DOCKER_TESTBED_PYTHON`` in the SWE-Bench
     image.  This venv is only for the agent's own test and pip commands, which
-    the commit policy requires to stay under ``workdir``.
+    the commit policy requires to stay under ``workdir``.  A ``.pth`` file makes
+    the cached task dependencies importable without letting agent-initiated pip
+    commands modify that shared environment.
     """
     workdir = Path(workdir)
     venv = workdir / ".venv"
     py = venv / "bin" / "python"
     if py.exists():
         return str(py)
-    subprocess.run(
-        [python, "-m", "venv", "--system-site-packages", str(venv)],
+    source_site = subprocess.run(
+        [
+            python,
+            "-c",
+            "import json, site; print(json.dumps(site.getsitepackages()))",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
         check=True,
     )
+    subprocess.run(
+        [python, "-m", "venv", str(venv)],
+        check=True,
+    )
+    target_site = subprocess.run(
+        [
+            str(py),
+            "-c",
+            "import json, site; print(json.dumps(site.getsitepackages()))",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=True,
+    )
+    source_paths = json.loads(source_site.stdout)
+    target_paths = json.loads(target_site.stdout)
+    if not source_paths or not target_paths:
+        raise RuntimeError("unable to resolve virtualenv site-packages")
+    target_site = Path(target_paths[0])
+    target_site.joinpath("_agenttx_legacy_compat.py").write_text(
+        "import collections\n"
+        "import collections.abc\n"
+        "\n"
+        "for name in (\n"
+        "    'Callable', 'Iterable', 'Iterator', 'Mapping', 'MutableMapping',\n"
+        "    'Sequence', 'MutableSequence',\n"
+        "):\n"
+        "    if not hasattr(collections, name):\n"
+        "        setattr(collections, name, getattr(collections.abc, name))\n",
+        encoding="utf-8",
+    )
+    target_site.joinpath("agenttx-task-dependencies.pth").write_text(
+        "import _agenttx_legacy_compat\n"
+        + "".join(f"{Path(path).resolve()}\n" for path in source_paths),
+        encoding="utf-8",
+    )
+    (venv / ".agenttx_dependency_paths").write_text(
+        "".join(f"{Path(path).resolve()}\n" for path in source_paths),
+        encoding="utf-8",
+    )
     return str(py)
+
+
+def prepare_workspace_runtime(workdir: Path, instance: dict, python: str) -> None:
+    """Build project-local runtime pieces needed by the agent-side verifier."""
+    if str(instance.get("repo") or "") != "astropy/astropy":
+        return
+    dependency_file = Path(python).parent.parent / ".agenttx_dependency_paths"
+    dependency_paths = dependency_file.read_text(encoding="utf-8").splitlines()
+    env = os.environ.copy()
+    prior_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = os.pathsep.join(
+        [*dependency_paths, *([prior_pythonpath] if prior_pythonpath else [])]
+    )
+    result = subprocess.run(
+        [python, "setup.py", "build_ext", "--inplace"],
+        cwd=str(workdir),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=600,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "Astropy build_ext failed")[-2000:]
+        raise RuntimeError(detail)
 
 
 def _strip_live_agent_scratch(workdir: Path) -> None:
@@ -439,8 +625,60 @@ def _upstream_bare(cache_root: Path, repo: str) -> Path:
     return Path(cache_root) / "swe_bench" / "upstream" / (repo.replace("/", "__") + ".git")
 
 
+def ensure_repo_dependencies(repo_dir: Path, cache_root: Path) -> None:
+    """Hydrate and verify pinned Git submodules before a task is materialized."""
+    repo_dir = Path(repo_dir)
+    if not (repo_dir / ".gitmodules").is_file():
+        return
+
+    lock_dir = Path(cache_root) / "swe_bench" / ".locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_name = hashlib.sha256(str(repo_dir.resolve()).encode()).hexdigest()[:20]
+    with (lock_dir / f"submodules-{lock_name}.lock").open("a+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        status = _git(["submodule", "status", "--recursive"], cwd=repo_dir)
+        broken = [line for line in status.splitlines() if line[:1] in {"-", "+", "U"}]
+        if broken:
+            env = os.environ.copy()
+            env["GIT_TERMINAL_PROMPT"] = "0"
+            result = subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "protocol.file.allow=always",
+                    "submodule",
+                    "update",
+                    "--init",
+                    "--recursive",
+                    "--checkout",
+                ],
+                cwd=str(repo_dir),
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=600,
+                check=False,
+            )
+            if result.returncode != 0:
+                detail = (result.stderr or result.stdout or "submodule update failed")[-2000:]
+                raise RuntimeError(
+                    f"failed to prepare repository submodules for {repo_dir.name}: {detail}"
+                )
+
+        verified = _git(["submodule", "status", "--recursive"], cwd=repo_dir)
+        invalid = [
+            line for line in verified.splitlines() if line[:1] in {"-", "+", "U"}
+        ]
+        if invalid:
+            raise RuntimeError(
+                f"repository submodules are not at pinned commits for {repo_dir.name}: "
+                + "; ".join(invalid)
+            )
+
+
 def ensure_repo(task: SWETask, cache_root: Path) -> Tuple[Path, dict]:
-    """Use a pre-cloned instance tree. Never fetch GitHub during a run."""
+    """Use a pre-cloned instance tree and hydrate its pinned dependencies."""
     instance = fetch_instance(task.instance_id, cache_root)
     cache_root = Path(cache_root)
     repo_dir = cache_root / "swe_bench" / "repos" / task.instance_id
@@ -481,6 +719,7 @@ def ensure_repo(task: SWETask, cache_root: Path) -> Tuple[Path, dict]:
             stderr=subprocess.PIPE,
         )
         marker.write_text(task.instance_id + "\n", encoding="utf-8")
+    ensure_repo_dependencies(repo_dir, cache_root)
     return repo_dir, instance
 
 
@@ -572,24 +811,56 @@ def test_command(task: SWETask, instance: dict, python: str = sys.executable) ->
     repo = str(instance.get("repo") or "")
     names = fail_to_pass(instance)
     py = shlex.quote(python)
+    python_bin = Path(python).resolve()
+    runtime_lib = shlex.quote(str(python_bin.parent.parent / "lib"))
+    runtime_env = f"LD_LIBRARY_PATH={runtime_lib}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
     if repo == "django/django":
         return (
-            f"PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. {py} tests/runtests.py "
+            f"{runtime_env} PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. {py} tests/runtests.py "
             f"--verbosity 1 --settings=test_sqlite --parallel 1 "
             f"{_quoted(django_test_labels(names, instance))}"
         )
     if repo == "sympy/sympy":
         return (
-            f"PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. {py} bin/test -C --verbose "
+            f"{runtime_env} PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. {py} bin/test -C --verbose "
             f"{_quoted(_sympy_test_targets(instance, names))}"
         )
     pythonpath = task.pythonpath
     if pythonpath == "auto":
         pythonpath = "src:." if repo in {"pytest-dev/pytest", "pallets/flask"} else "."
     return (
-        f"PYTHONDONTWRITEBYTECODE=1 PYTHONPATH={pythonpath} "
+        f"{runtime_env} PYTHONDONTWRITEBYTECODE=1 PYTHONPATH={pythonpath} "
         f"{py} -m pytest -q --tb=line -p no:cacheprovider {_quoted(names)}"
     )
+
+
+def agent_test_command(
+    task: SWETask,
+    instance: dict,
+    python: str = sys.executable,
+    *,
+    reference_progress_verified: bool = False,
+) -> str:
+    """Crash-aware verifier exposed to recovery agents.
+
+    The marker check reports a generic crash signal without disclosing its
+    source path.  A motivation cell with a verified reference prefix only
+    needs that signal.  An unseeded official-task cell must continue into its
+    FAIL_TO_PASS verifier after removing the marker, otherwise clearing the
+    synthetic crash could be mistaken for solving the benchmark task.
+    """
+    script = Path(__file__).resolve().parents[1] / "scripts" / "verify_swe_recovery.py"
+    marker = _quoted(
+        (
+            python,
+            script,
+            "--workdir",
+            ".",
+        )
+    )
+    if reference_progress_verified:
+        return marker
+    return f"{marker} && {test_command(task, instance, python)}"
 
 
 def seed_task_workspace(workdir: Path, task: SWETask, instance: dict) -> None:
@@ -605,31 +876,60 @@ def seed_task_workspace(workdir: Path, task: SWETask, instance: dict) -> None:
     )
 
 
-def _faulty_content(workdir: Path, relpath: str) -> str:
-    path = Path(workdir) / relpath
-    original = path.read_text(encoding="utf-8") if path.exists() else ""
+def _faulty_content(agent_or_workdir, relpath: str) -> str:
+    """Corrupt the file visible in the transaction, including committed work.
+
+    Reading ``workdir / relpath`` bypasses the overlay.  In a recovery
+    experiment that accidentally replaced a committed reference solution with
+    the clean-checkout file, so the no-rollback arm had to solve the original
+    SWE task again in addition to repairing the injected crash.
+    """
+    if hasattr(agent_or_workdir, "harness"):
+        record = agent_or_workdir.harness.call_tool("read_file", {"path": relpath})
+        if int(getattr(record, "returncode", 1)) != 0:
+            original = ""
+        else:
+            original = str(getattr(record, "stdout", "") or "")
+    else:
+        path = Path(agent_or_workdir) / relpath
+        original = path.read_text(encoding="utf-8") if path.exists() else ""
     return (
         "# AGENTTX_INJECTED_FAULT: this write is the recovery-unit producer.\n"
-        "def agenttx_injected_fault():\n"
-        "    raise RuntimeError('agenttx injected fault')\n\n"
+        "raise RuntimeError('agenttx injected fault')\n\n"
         + original
     )
 
 
-def inject_task_trajectory(agent, task: SWETask, instance: dict, python: str) -> dict:
-    docs = task.docs()
+def inject_task_trajectory(
+    agent,
+    task: SWETask,
+    instance: dict,
+    python: str,
+    *,
+    docs: Optional[Sequence[DocSpec]] = None,
+    fault_after_docs: Optional[int] = None,
+) -> dict:
+    docs = tuple(docs) if docs is not None else task.docs()
     derived = (
         "mkdir -p recovery_build && "
         f"cp '{task.faulty_relpath}' recovery_build/derived.txt"
     )
-    official = test_command(task, instance, python)
-    # Open the producer with the traced Python so the test step parents the
-    # faulty write even when the official runner never imports that file.
-    read_producer = (
+    official = agent_test_command(
+        task, instance, python, reference_progress_verified=True
+    )
+    # Fail on the marker without printing its path. This keeps the crash real
+    # while forcing blind policies to search instead of receiving the source
+    # location for free in a traceback.
+    crash_guard = (
         f"{shlex.quote(python)} -c "
         + shlex.quote(
-            "from pathlib import Path; Path(%r).read_text(encoding='utf-8')"
-            % task.faulty_relpath
+            "from pathlib import Path; "
+            "marker=b'AGENTTX_INJECTED_FAULT'; "
+            "skip={'.git','.venv','.tmp','node_modules','__pycache__'}; "
+            "files=(p for p in Path('.').rglob('*') if p.is_file() "
+            "and not skip.intersection(p.parts)); "
+            "raise SystemExit(86 if any(marker in p.read_bytes() for p in files "
+            "if p.stat().st_size <= 2000000) else 0)"
         )
     )
     return inject_recovery_dag(
@@ -638,9 +938,10 @@ def inject_task_trajectory(agent, task: SWETask, instance: dict, python: str) ->
         task_name=task.instance_id,
         prefix_writes=(),
         faulty_path=task.faulty_relpath,
-        faulty_content=_faulty_content(agent.harness.workdir, task.faulty_relpath),
+        faulty_content=_faulty_content(agent, task.faulty_relpath),
         derived_cmd=derived,
-        test_cmd=f"{read_producer} && {official}",
+        test_cmd=f"{crash_guard} && {official}",
+        fault_after_docs=fault_after_docs,
     )
 
 
@@ -650,6 +951,8 @@ def task_prompt(
     python: str,
     mode: str = "causal",
     recovery_manifest: Optional[Mapping[str, object]] = None,
+    oracle_fault_step_id: Optional[int] = None,
+    reference_progress_verified: bool = False,
 ) -> str:
     if recovery_manifest is not None:
         note_rule = (
@@ -685,17 +988,25 @@ def task_prompt(
         ),
         instruction=instance.get("problem_statement") or task.instance_id,
         docs=task.docs(),
-        test_cmd=test_command(task, instance, python),
+        test_cmd=agent_test_command(
+            task,
+            instance,
+            python,
+            reference_progress_verified=reference_progress_verified,
+        ),
+        focus_path=task.faulty_relpath,
         extra_rules=(
             "Do not apply a hidden gold patch file; implement the issue in the repository sources.",
             "Use only the interpreter in the verifier command for tests and pip installs. Do not pip-install into a host conda or system Python.",
             "Run as one direct agent. Do not invoke, queue, or wait for research or delegated subagents; they are unavailable in this benchmark.",
-            "Use a bounded workflow: inspect only the issue-relevant implementation and FAIL_TO_PASS tests, make the smallest focused change, run the named verifier, and stop when it passes. Do not inventory the repository or repeat successful commands.",
-            "For repository inspection, use rg for one named symbol/path and sed -n for a bounded line range only. Do not use cat, find, ls -R, recursive directory listings, unscoped git diff/status, or a full test suite; run only the exact named verifier once.",
+            "Use a bounded workflow: inspect only the issue-relevant implementation and FAIL_TO_PASS tests, make the smallest focused change, run the named verifier, and stop when it passes. After a real test failure, use that failure to make a focused correction and rerun the same verifier. Continue only while each rerun follows a concrete issue-relevant edit; stop if there is no justified next edit. A verifier that fails before test execution because of the environment does not count as a task-code failure. Do not inventory the repository or repeat successful commands.",
+            "For repository inspection, use rg for one named symbol/path and sed -n for a bounded line range only. Do not use cat, find, ls -R, recursive directory listings, unscoped git diff/status, or a full test suite; run only the exact named verifier.",
             note_rule,
         ),
         mode=mode,
         recovery_manifest=recovery_manifest,
+        oracle_fault_step_id=oracle_fault_step_id,
+        reference_progress_verified=reference_progress_verified,
     )
 
 
@@ -749,11 +1060,12 @@ def _verify_tests_docker(workdir: Path, task: SWETask, instance: dict) -> dict:
     Compiled extensions stay in the image; ``docker cp`` only overwrites files
     present in the host tree, so ``.so`` artifacts are kept.
     """
-    image = ensure_eval_image(task.instance_id)
+    image = swe_eval_image(task.instance_id)
     name = _docker_container_name(task.instance_id)
     cmd = test_command(task, instance, DOCKER_TESTBED_PYTHON)
     _strip_live_agent_scratch(workdir)
     try:
+        image = ensure_eval_image(task.instance_id)
         subprocess.run(
             ["docker", "rm", "-f", name],
             stdout=subprocess.DEVNULL,
@@ -790,15 +1102,36 @@ def _verify_tests_docker(workdir: Path, task: SWETask, instance: dict) -> dict:
         )
         if started.returncode != 0:
             raise RuntimeError((started.stderr or started.stdout or "docker start failed")[-2000:])
-        copied = subprocess.run(
-            ["docker", "cp", f"{workdir}/.", f"{name}:/testbed/"],
+        archive = subprocess.Popen(
+            [
+                "tar",
+                "-C",
+                str(workdir),
+                "--exclude=.venv",
+                "--exclude=.codex",
+                "--exclude=.cache",
+                "--exclude=.tmp",
+                "-cf",
+                "-",
+                ".",
+            ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+        )
+        copied = subprocess.run(
+            ["docker", "exec", "-i", name, "tar", "-xf", "-", "-C", "/testbed"],
+            stdin=archive.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             check=False,
         )
-        if copied.returncode != 0:
-            raise RuntimeError((copied.stderr or copied.stdout or "docker cp failed")[-2000:])
+        if archive.stdout is not None:
+            archive.stdout.close()
+        archive_stderr = archive.stderr.read() if archive.stderr is not None else b""
+        archive_rc = archive.wait()
+        if archive_rc != 0 or copied.returncode != 0:
+            detail = copied.stderr or copied.stdout or archive_stderr or b"workspace copy failed"
+            raise RuntimeError(detail.decode(errors="replace")[-2000:])
         result = subprocess.run(
             ["docker", "exec", "-w", "/testbed", name, "bash", "-lc", cmd],
             stdout=subprocess.PIPE,
@@ -842,6 +1175,114 @@ def _verify_tests_docker(workdir: Path, task: SWETask, instance: dict) -> dict:
         )
 
 
+_REFERENCE_VERIFY_CACHE: Dict[str, dict] = {}
+
+
+def verify_reference_solution(task: SWETask, instance: dict) -> dict:
+    """Verify the official test and gold patches in the official eval image."""
+    cached = _REFERENCE_VERIFY_CACHE.get(task.instance_id)
+    if cached is not None:
+        return dict(cached)
+
+    image = swe_eval_image(task.instance_id)
+    name = _docker_container_name(f"reference-{task.instance_id}")
+    cmd = test_command(task, instance, DOCKER_TESTBED_PYTHON)
+    try:
+        image = ensure_eval_image(task.instance_id)
+        created = subprocess.run(
+            [
+                "docker",
+                "create",
+                "--name",
+                name,
+                "--workdir",
+                "/testbed",
+                "--entrypoint",
+                "bash",
+                image,
+                "-lc",
+                "sleep infinity",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if created.returncode != 0:
+            raise RuntimeError((created.stderr or created.stdout or "docker create failed")[-2000:])
+        started = subprocess.run(
+            ["docker", "start", name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if started.returncode != 0:
+            raise RuntimeError((started.stderr or started.stdout or "docker start failed")[-2000:])
+        for label, patch in (
+            ("test patch", str(instance.get("test_patch") or "")),
+            ("gold patch", str(instance.get("patch") or "")),
+        ):
+            if not patch.strip():
+                continue
+            applied = subprocess.run(
+                ["docker", "exec", "-i", "-w", "/testbed", name, "git", "apply", "--whitespace=nowarn", "-"],
+                input=patch,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+            )
+            if applied.returncode != 0:
+                raise RuntimeError(
+                    f"official {label} failed: "
+                    + (applied.stderr or applied.stdout or "git apply failed")[-1600:]
+                )
+        result = subprocess.run(
+            ["docker", "exec", "-w", "/testbed", name, "bash", "-lc", cmd],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=600,
+            check=False,
+        )
+        verdict = {
+            "tests_rc": result.returncode,
+            "tests_ok": result.returncode == 0,
+            "verifier_stdout": (result.stdout or "")[-4000:],
+            "verifier_stderr": (result.stderr or "")[-4000:],
+            "verifier_backend": "docker_reference",
+            "docker_image": image,
+        }
+    except subprocess.TimeoutExpired:
+        verdict = {
+            "tests_rc": "timeout",
+            "tests_ok": False,
+            "verifier_stdout": "",
+            "verifier_stderr": "reference solution verification timed out",
+            "verifier_backend": "docker_reference",
+            "docker_image": image,
+        }
+    except Exception as exc:  # noqa: BLE001
+        verdict = {
+            "tests_rc": "error",
+            "tests_ok": False,
+            "verifier_stdout": "",
+            "verifier_stderr": str(exc)[-4000:],
+            "verifier_backend": "docker_reference",
+            "docker_image": image,
+        }
+    finally:
+        subprocess.run(
+            ["docker", "rm", "-f", name],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    _REFERENCE_VERIFY_CACHE[task.instance_id] = dict(verdict)
+    return verdict
+
+
 def verify(
     workdir: Path,
     task: SWETask,
@@ -849,6 +1290,7 @@ def verify(
     python: str,
     *,
     require_recovery_artifacts: bool = True,
+    recovery_docs: Optional[Sequence[DocSpec]] = None,
 ) -> dict:
     mode = (os.environ.get("AGENTTX_SWE_VERIFY") or "auto").strip().lower()
     if mode == "docker" or (mode == "auto" and docker_available()):
@@ -856,7 +1298,10 @@ def verify(
     else:
         tests = _verify_tests_host(workdir, task, instance, python)
     docs_ok = (
-        all_documents_valid(workdir, all_midcrash_docs(task.docs()))
+        all_documents_valid(
+            workdir,
+            tuple(recovery_docs) if recovery_docs is not None else all_midcrash_docs(task.docs()),
+        )
         if require_recovery_artifacts
         else True
     )

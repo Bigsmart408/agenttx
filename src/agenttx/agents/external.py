@@ -11,15 +11,18 @@ available.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import shlex
 import shutil
 import subprocess
 import time
+import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, Iterator, List, Optional, Sequence, TextIO
 
 from ..providers import load_provider_env
 
@@ -27,6 +30,42 @@ try:  # Optional at import time; the remote benchmark environment installs it.
     import zstandard as _zstandard
 except ImportError:  # pragma: no cover - exercised only on minimal installations
     _zstandard = None
+
+
+@contextmanager
+def _external_request_slot() -> Iterator[None]:
+    """Limit external model requests across independent benchmark workers."""
+    configured = os.environ.get("AGENTTX_EXTERNAL_MAX_CONCURRENCY", "").strip()
+    if not configured:
+        yield
+        return
+
+    limit = int(configured)
+    if limit < 1:
+        raise ValueError("AGENTTX_EXTERNAL_MAX_CONCURRENCY must be positive")
+    slot_dir_value = os.environ.get("AGENTTX_EXTERNAL_SLOT_DIR", "").strip()
+    slot_dir = Path(slot_dir_value or f"/tmp/agenttx-external-slots-{os.geteuid()}")
+    slot_dir.mkdir(parents=True, exist_ok=True)
+
+    acquired: Optional[TextIO] = None
+    while acquired is None:
+        for index in range(limit):
+            candidate = (slot_dir / f"slot-{index:02d}.lock").open("a+", encoding="utf-8")
+            try:
+                fcntl.flock(candidate.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                candidate.close()
+            else:
+                acquired = candidate
+                break
+        if acquired is None:
+            time.sleep(0.25)
+
+    try:
+        yield
+    finally:
+        fcntl.flock(acquired.fileno(), fcntl.LOCK_UN)
+        acquired.close()
 
 
 @dataclass(frozen=True)
@@ -134,6 +173,21 @@ def _parse_jsonl(stdout: str) -> tuple[List[dict], tuple[int, int, int], int]:
             key in event for key in ("name", "tool", "tool_name", "function")
         ):
             tool_calls += 1
+            continue
+        # Codex CLI emits tools as nested item events. Count only completion
+        # events so the matching item.started/item.completed pair is not
+        # double-counted.
+        item = event.get("item")
+        if event_type == "item.completed" and isinstance(item, dict):
+            item_type = str(item.get("type", "")).lower()
+            if item_type in {
+                "command_execution",
+                "file_change",
+                "mcp_tool_call",
+                "dynamic_tool_call",
+                "web_search",
+            }:
+                tool_calls += 1
     return events, tuple(usage), tool_calls  # type: ignore[return-value]
 
 
@@ -263,6 +317,15 @@ def _parse_external_output(
     return stdout_events, stdout_usage, stdout_tools, "stdout_jsonl"
 
 
+def _decode_subprocess_stream(value: Any) -> str:
+    """Normalize TimeoutExpired streams, which may be bytes despite text=True."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
 class ExternalHarness:
     """Small common seam shared by DeepSeek Harness and Codex adapters."""
 
@@ -329,20 +392,21 @@ class ExternalHarness:
         started = time.perf_counter()
         started_ns = time.time_ns()
         try:
-            completed = subprocess.run(
-                self.command(task, workdir),
-                cwd=str(workdir),
-                env=merged_env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=self.timeout_s,
-                check=False,
-            )
+            with _external_request_slot():
+                completed = subprocess.run(
+                    self.command(task, workdir),
+                    cwd=str(workdir),
+                    env=merged_env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=self.timeout_s,
+                    check=False,
+                )
             stdout, stderr, returncode = completed.stdout, completed.stderr, completed.returncode
         except subprocess.TimeoutExpired as exc:
-            stdout = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
-            stderr = (exc.stderr or "") if isinstance(exc.stderr, str) else ""
+            stdout = _decode_subprocess_stream(exc.stdout)
+            stderr = _decode_subprocess_stream(exc.stderr)
             returncode = 124
             stderr = (stderr + f"\nexternal harness timeout after {self.timeout_s:.1f}s").strip()
         except OSError as exc:
@@ -378,12 +442,13 @@ class ExternalHarness:
         started = time.perf_counter()
         started_ns = time.time_ns()
         try:
-            record = transaction_harness.tx.run_tool(
-                f"external:{self.name}",
-                self.command(task, workdir),
-                trace_reads=True,
-                timeout_s=self.timeout_s,
-            )
+            with _external_request_slot():
+                record = transaction_harness.tx.run_tool(
+                    f"external:{self.name}",
+                    self.command(task, workdir),
+                    trace_reads=True,
+                    timeout_s=self.timeout_s,
+                )
             stdout, stderr, returncode = record.stdout, record.stderr, record.returncode
         except Exception as exc:  # keep the benchmark row instead of hiding startup failures
             stdout, stderr, returncode = "", f"{type(exc).__name__}: {exc}", 127
@@ -534,6 +599,33 @@ def _fontconfig_xml(cache_home: Path) -> str:
     )
 
 
+def _resolve_codex_binary(configured: Optional[str] = None) -> str:
+    """Resolve Codex before entering try's PATH-resetting login shell."""
+    if configured:
+        return shutil.which(configured) or configured
+
+    resolved = shutil.which("codex")
+    if resolved:
+        return resolved
+
+    fixed = Path("/home/pengpeng/.local/bin/codex")
+    if fixed.is_file() and os.access(fixed, os.X_OK):
+        return str(fixed)
+
+    home = Path(os.environ.get("HOME") or Path.home())
+    extension_root = home / ".vscode-server" / "extensions"
+    candidates = [
+        path
+        for path in extension_root.glob(
+            "openai.chatgpt-*-linux-x64/bin/linux-x86_64/codex"
+        )
+        if path.is_file() and os.access(path, os.X_OK)
+    ]
+    if candidates:
+        return str(max(candidates, key=lambda path: path.stat().st_mtime_ns).resolve())
+    return "codex"
+
+
 class CodexHarness(ExternalHarness):
     """Run the official Codex CLI in unattended execution mode."""
 
@@ -542,6 +634,7 @@ class CodexHarness(ExternalHarness):
     def __init__(
         self,
         model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
         command: Optional[str] = None,
         proxy_command: Optional[str] = None,
         timeout_s: float = 1800.0,
@@ -553,29 +646,42 @@ class CodexHarness(ExternalHarness):
             timeout_s=timeout_s,
             proxy_command=proxy_command,
         )
+        self.reasoning_effort = reasoning_effort
         self.command_override = command or os.environ.get("CODEX_COMMAND")
-        self.binary = os.environ.get("CODEX_BIN")
-        if not self.binary:
-            self.binary = (
-                "/home/pengpeng/.local/bin/codex"
-                if Path("/home/pengpeng/.local/bin/codex").exists()
-                else "codex"
-            )
+        # Resolve while still in the host process. The external command runs
+        # through a root login shell inside try, which may replace PATH and
+        # make a host-visible bare `codex` command disappear.
+        self.binary = _resolve_codex_binary(os.environ.get("CODEX_BIN"))
 
     def command(self, task: str, workdir: Path) -> List[str]:
-        prefix = shlex.split(self.command_override) if self.command_override else [
-            self.binary,
-            "exec",
-            "--model",
-            self.model,
-            # AgentTX supplies the outer filesystem sandbox.  The Codex CLI
-            # option below avoids an interactive approval protocol; combining
-            # --approve-for-me with --sandbox is rejected by current Codex
-            # releases.
-            "--dangerously-bypass-approvals-and-sandbox",
-            "--skip-git-repo-check",
-            "--json",
-        ]
+        if self.command_override:
+            prefix = shlex.split(self.command_override)
+            if prefix:
+                prefix[0] = shutil.which(prefix[0]) or prefix[0]
+        else:
+            prefix = [
+                self.binary,
+                "exec",
+                "--model",
+                self.model,
+                # Plugin discovery clones a large catalog into each fresh
+                # CODEX_HOME. Benchmarks use only the built-in coding tools, so
+                # disable that unrelated state and its effect-accounting noise.
+                "-c",
+                "features.plugins=false",
+                # AgentTX supplies the outer filesystem sandbox.  The Codex CLI
+                # option below avoids an interactive approval protocol; combining
+                # --approve-for-me with --sandbox is rejected by current Codex
+                # releases.
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--skip-git-repo-check",
+                "--json",
+            ]
+            if self.reasoning_effort:
+                prefix[4:4] = [
+                    "-c",
+                    f'model_reasoning_effort="{self.reasoning_effort}"',
+                ]
         # Codex creates its own temporary command wrappers and lock files.
         # Keep CODEX_HOME and package caches inside the protected workspace;
         # otherwise the transaction commit policy quite correctly rejects
@@ -583,17 +689,24 @@ class CodexHarness(ExternalHarness):
         # the agent was sandboxed.  Also redirect Python's user site: a direct
         # benchmark prompt may legitimately run `pip install`, and that must
         # remain inside the transaction workspace instead of ~/.local.
-        codex_home = workdir / ".codex"
-        cache_home = workdir / ".cache"
+        run_home = workdir / f".agenttx-codex-{uuid.uuid4().hex}"
+        codex_home = run_home / "codex"
+        cache_home = run_home / "cache"
         pip_cache = cache_home / "pip"
-        tmp_home = workdir / ".tmp"
-        userbase = workdir / ".userbase"
-        conda_bin = Path("/home/pengpeng/miniconda3/envs/agenttx/bin")
+        tmp_home = run_home / "tmp"
+        userbase = run_home / "userbase"
+        conda_bin = Path(
+            os.environ.get("AGENTTX_CONDA_BIN")
+            or Path.home() / "miniconda3" / "envs" / "agenttx" / "bin"
+        )
         shell = [
             "bash",
             "-lc",
             f"cd {shlex.quote(str(workdir))} && "
-            "mkdir -p .codex .cache/pip .cache/fontconfig .cache/matplotlib .cache/pyc .tmp .userbase/bin && "
+            f"mkdir -p {shlex.quote(str(codex_home))} {shlex.quote(str(pip_cache))} "
+            f"{shlex.quote(str(cache_home / 'fontconfig'))} {shlex.quote(str(cache_home / 'matplotlib'))} "
+            f"{shlex.quote(str(cache_home / 'pyc'))} {shlex.quote(str(tmp_home))} "
+            f"{shlex.quote(str(userbase / 'bin'))} && "
             f"if [ -d {shlex.quote(str(conda_bin))} ]; then export PATH={shlex.quote(str(conda_bin))}:$PATH; fi && "
             'if [ -x .venv/bin/python ]; then '
             'export VIRTUAL_ENV="$PWD/.venv"; '
@@ -606,18 +719,19 @@ class CodexHarness(ExternalHarness):
             f"TMP={shlex.quote(str(tmp_home))} "
             "PYTHONNOUSERSITE=1 PIP_USER=0 PYTHONDONTWRITEBYTECODE=1 && "
             f"printf %s {shlex.quote(_fontconfig_xml(cache_home))} > {shlex.quote(str(cache_home / 'fonts.conf'))} && "
-            # A ChatGPT OAuth login normally lives in ~/.codex/auth.json.
-            # Read it through a workspace-local symlink so the CLI can use
-            # the subscription allowance without placing its temp/session
-            # writes in the host home directory.  The EXIT trap removes the
-            # symlink before AgentTX publishes the workspace.
+            # Seed the isolated CODEX_HOME from the host configuration. Codex
+            # may migrate config or refresh auth while it runs, so symlinks
+            # would turn those writes into attempted host-home mutations.
             'CODEX_AUTH_SOURCE="${CODEX_AUTH_FILE:-$HOME/.codex/auth.json}" && '
-            'if [ -r "$CODEX_AUTH_SOURCE" ] && [ ! -e .codex/auth.json ]; then '
-            'ln -s "$CODEX_AUTH_SOURCE" .codex/auth.json; '
-            "trap 'rm -f .codex/auth.json' EXIT; fi && "
+            f'if [ -r "$CODEX_AUTH_SOURCE" ] && [ ! -e {shlex.quote(str(codex_home / "auth.json"))} ]; then '
+            f'install -m 600 "$CODEX_AUTH_SOURCE" {shlex.quote(str(codex_home / "auth.json"))}; fi && '
+            'CODEX_CONFIG_SOURCE="${CODEX_CONFIG_FILE:-$HOME/.codex/config.toml}" && '
+            f'if [ -r "$CODEX_CONFIG_SOURCE" ] && [ ! -e {shlex.quote(str(codex_home / "config.toml"))} ]; then '
+            f'install -m 600 "$CODEX_CONFIG_SOURCE" {shlex.quote(str(codex_home / "config.toml"))}; fi && '
+            f"trap 'rm -rf -- {shlex.quote(str(run_home))}' EXIT && "
             # Prefer an available ChatGPT login for the subscription-backed
             # path.  Set CODEX_AUTH_MODE=api to force API-key billing.
-            'if [ "${CODEX_AUTH_MODE:-auto}" != "api" ] && [ -r .codex/auth.json ]; '
+            f'if [ "${{CODEX_AUTH_MODE:-auto}}" != "api" ] && [ -r {shlex.quote(str(codex_home / "auth.json"))} ]; '
             'then unset CODEX_API_KEY OPENAI_API_KEY; '
             'else export CODEX_API_KEY="${CODEX_API_KEY:-${OPENAI_API_KEY:-}}"; fi && '
             # The transaction worker owns its stdin pipe.  Feed an explicit

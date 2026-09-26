@@ -1,249 +1,112 @@
-# AgentTX motivation experiments
+# Intra-turn recovery motivation campaign
 
-This directory turns the iterative AgentTX optimization work into a reproducible
-paper-motivation section. All model-bearing application runs use the same
-official SWE-Bench Lite and Terminal-Bench manifests as the main evaluation;
-the recovery DAG is a controlled fault overlay on those tasks. The default
-models are `deepseek-v4-flash` (DeepSeek Harness) and `gpt-5.6-luna` (Codex).
+The canonical motivation campaign is the unified MB1--MB3 microbenchmark
+specified in Section 2 of `agent.md`. Its only result root is:
 
-The single entry point is:
-
-```bash
-PYTHONPATH=src:. python3 motivation/bench_official_application.py \
-  --suite all --harness deepseek_harness --repeats 1
+```text
+experiments/results/motivation/
 ```
 
-It writes raw rows and `official_token_summary.{csv,json,md}` below the selected
-harness result directory. Use `--harness codex` to repeat the same task matrix
-with Codex. The compatibility scripts in this directory dispatch to this
-entry point; they no longer generate the historical synthetic long trajectory.
+Do not mix the canonical bundle with the historical top-level
+`experiments/results/motivation_*.{csv,json,md}` files or with date-stamped
+protocol directories.
 
-The deterministic trajectories retained elsewhere in the repository are
-mechanism-only microbenchmarks for syscall, overlay, snapshot, DAG, and WAL
-costs. They are not application workloads and are not used for token claims.
+## Current microbenchmark evidence and figures
 
-For a Chinese, paper-oriented explanation of terminology, baseline semantics,
-experimental design, results, and claim boundaries, start with
-`docs/experiments-explained.md`.
+| Phase | Role | Current source | Paper figure |
+|---|---|---|---|
+| MB1--MB2 | Fixed-closure task-length and chronology sweeps | `controlled_case/{controlled_recovery,controlled_position}_*.csv` | `FIG-Motivation-Coarse-Waste` |
+| MB1--MB3 summary | Recovery completeness and collateral cost over all 400 paired manifests | controlled and microbenchmark raw CSVs | `FIG-Motivation-Suite` |
+| MB3 | Controlled dependency-value sweep | `microbenchmark/motivation_recovery_raw.csv` | `FIG-Motivation-Dependency` |
+| MB1--MB3 derived view | Coarse-boundary crossover over the same 400 paired manifests | controlled and microbenchmark raw CSVs | `FIG-Motivation-Boundary-Crossover` |
+| Supporting analysis | One-factor sensitivity and robustness | `microbenchmark/sensitivity/*/` | `FIG-Motivation-Sensitivity` (supporting) |
 
-## Historical compatibility names
+These are the figures currently generated from the unified microbenchmark; the
+crossover view introduces no additional cases. This is not a limit on the
+number of figures allowed in the Motivation section. A
+supporting figure may move into the main text when it establishes a distinct
+claim; figure placement is not constrained to two figures.
 
-The old command names remain callable so existing automation does not fail:
-
-```bash
-PYTHONPATH=src:. python3 motivation/bench_optimization_comparison.py \
-  --length 64 --repeats 2
-```
-
-They now forward to the official application runner and produce the canonical
-official result bundle. Historical CSVs are retained for provenance only.
-
-## Official multi-step comparison
-
-The paper compares causal recovery against temporal checkpoint and whole-branch
-abort on the same short/medium/long official tasks:
+Generate every currently valid figure with:
 
 ```bash
-PYTHONPATH=src:. python3 motivation/bench_existing_systems.py \
-  --suite all --harness deepseek_harness --repeats 1
+PYTHONPATH=src:. python3 motivation/plot_motivation_four.py
+PYTHONPATH=src:. python3 motivation/plot_dependency_sensitivity.py
 ```
 
-The result is the same official task bundle used by evaluation; token/model
-aggregates are in `official_token_summary.csv`.
-
-## Summarize all optimization iterations
-
-The history summarizer consumes the recorded before/after measurements and joins
-the deterministic and real-agent robustness bundles:
+Regenerate the MB1--MB2 data with:
 
 ```bash
-PYTHONPATH=src:. python3 motivation/summarize_optimization_history.py
+PYTHONPATH=src:. python3 experiments/scripts/bench_controlled_motivation.py \
+  --output-dir experiments/results/motivation/controlled_case
 ```
 
-It writes `experiments/results/motivation_optimization_history.{csv,json,md}`.
-The source pre-images remain under
-`src/agenttx/optimization_history/iteration_*` so each optimization is auditable.
+The scripts validate schemas, policy manifests, paired-cell cardinalities, and
+the absence of `agenttx_causal` before writing PDF and PNG files to both
+`motivation/` and `paper/img/`. All figures use the paper's compact line-plot
+style. MB3 includes all 21 preregistered dependency values and 10 paired cases
+per value.
+Canonical strategy identifiers and figure labels are defined in
+`experiments/motivation_strategies.py`. All six policies are retained and
+plotted. `Turn checkpoint` removes complete turns containing invalid effects,
+`Temporal step` removes the global suffix starting at the fault, and `Whole
+branch` removes the entire multi-turn branch. The boundaries may coincide for
+a one-turn case, but separate as task length and dependency placement vary.
 
-## Notebook views
+## Excluded M3 sources
 
-The notebooks use compact FAST/USENIX multi-panel line plots,
-Roman-compatible fonts, and 300-dpi PDF export, but consume AgentTX-specific
-result artifacts:
+M3 is a real-model replay experiment for the later system evaluation, not part
+of the canonical motivation figures. The retained implementation uses the
+multi-turn protocol in `m3/multiturn/`:
+eight turns, 128 opaque operations, multiple faults across turns, audited
+hierarchical diagnosis, and equal-cost policy prompts. A one-cell mechanism
+smoke for Codex and native SWEAgent covers no-rollback, turn-checkpoint,
+temporal-suffix, whole-branch, and AgentTX. Codex temporal is a fixed-budget
+timeout; the other cells pass. Clean/ideal controls and the five-repeat
+seven-policy campaign have not completed, so these are not final paper results.
 
-- `plot.ipynb` combines the before/after optimization chain with the current
-  bare/per-call/shared/AgentTX baselines.
-- `plot_tail.ipynb` shows deterministic p50/p95 tails alongside repeated
-  real-agent task latency and success.
-- `plot_scaling.ipynb` and `plot_tail_scaling.ipynb` report length scaling.
-- `plot_causal_retention.ipynb` quantifies the central recovery claim: useful
-  work retained, invalid descendants removed, joint recovery utility, and
-  rollback p95 across controlled effect DAGs.
-- `plot_token_recovery.ipynb` connects retained work to real DeepSeek replay
-  tokens, regenerated documents, and p95 recovery latency.
-- `plot_token_end_to_end.ipynb` compares complete autonomous recovery prompt,
-  completion, and total API tokens plus recovery p95 across the same policies.
-- `plot_real_agent_recovery.ipynb` exposes the live agent's recovery decision,
-  trajectory variability, rollback targets, and semantic success conditions.
-- `plot_bpf_trace.ipynb` compares the eBPF tracer against strace and no
-  tracing: per-step mean/p50/p95, the incremental tracing tax, and verified
-  READ/NEGATIVE capture fidelity.
-- `plot_robustness.ipynb` covers p50/p95 latency, worker-crash fallback,
-  long-session resume, and concurrent-agent isolation without combining their
-  heterogeneous latencies into one score.
-- `report.ipynb` is a short narrative notebook that tabulates the same
-  measurements for paper drafting.
+The historical M3 figure combines legacy v8 `crash_no_rollback` measurements with
+v7 clean, turn-checkpoint, temporal, whole-branch, and ideal-oracle measurements.
+The model, reasoning effort, opaque artifact contract, and strict
+one-artifact-per-write replay audit are fixed across the retained sources.
+Coarse policies receive only the shared crash notice, AgentTX receives the
+output of its own workspace localizer, and only ideal-oracle receives the
+injected fault root. It is retained for historical audit and must not be used as
+the current multi-turn result.
 
-From the repository root, run them with a notebook environment that has
-`jupyter`, `pandas`, `numpy`, and `matplotlib` installed:
+The plot does not compare unmatched campaign totals. For each backend it takes
+the intersection of `(trace_id, repeat)` cells present for every displayed
+policy: 30 cells for Codex and 25 for native SWEAgent. Failed attempts remain
+charged in `tokens per successful cell`. Original configs, raw rows, summaries,
+and reports are retained under `m3/{codex,sweagent}/` and `m3/legacy_v7/` so the
+mixed-source provenance is explicit and auditable.
 
-```bash
-jupyter nbconvert --to notebook --execute motivation/plot.ipynb \
-  --output motivation/plot.executed.ipynb
-jupyter nbconvert --to notebook --execute motivation/plot_tail.ipynb \
-  --output motivation/plot_tail.executed.ipynb
-jupyter nbconvert --to notebook --execute motivation/plot_causal_retention.ipynb \
-  --output motivation/plot_causal_retention.executed.ipynb
-jupyter nbconvert --to notebook --execute motivation/plot_token_recovery.ipynb \
-  --output motivation/plot_token_recovery.executed.ipynb
-jupyter nbconvert --to notebook --execute motivation/plot_token_end_to_end.ipynb \
-  --output motivation/plot_token_end_to_end.executed.ipynb
-jupyter nbconvert --to notebook --execute motivation/plot_real_agent_recovery.ipynb \
-  --output motivation/plot_real_agent_recovery.executed.ipynb
-jupyter nbconvert --to notebook --execute motivation/plot_bpf_trace.ipynb \
-  --output motivation/plot_bpf_trace.executed.ipynb
-jupyter nbconvert --to notebook --execute motivation/plot_robustness.ipynb \
-  --output motivation/plot_robustness.executed.ipynb
-jupyter nbconvert --to notebook --execute motivation/report.ipynb \
-  --output motivation/report.executed.ipynb
-```
+## Claim boundaries
 
-The causal-retention notebook writes `motivation/FIG-Causal-Retention.{pdf,png}`;
-the evaluation notebooks write `FIG-Token-Recovery.{pdf,png}`,
-`FIG-Token-End-to-End.{pdf,png}`, `FIG-Real-Agent-Recovery.{pdf,png}`,
-`FIG-Bpf-Trace.{pdf,png}`, and
-`FIG-Robustness.{pdf,png}`;
-the report notebook is intended for interactive inspection and does not
-duplicate the source result files.
+- MB1 contributes 100 paired cases that grow the branch from one to ten turns
+  at 16 operations per turn. MB2 adds 90 paired cases that move the fault from
+  10% to 90% in a ten-turn branch. Both keep the invalid closure fixed at four
+  operations. MB3 adds 210 dependency-value cases. Together, these same 400
+  manifests establish recovery completeness and collateral loss.
+- MB1--MB3 measure controlled recovery boundaries. Their token weights are
+  deterministic work attribution, not billed model usage.
+- The fixed 128-operation extreme case is retained only as an appendix
+  regression check. Main-text aggregate claims use all 400 paired MB1--MB3
+  manifests rather than this single endpoint.
+- Native-turn counterfactuals are retained for audit but belong in Real-world
+  Workload or Evaluation, not in the unified Motivation microbenchmark.
+- The legacy M3 figure supports only its displayed within-backend mixed-source
+  comparison. The new extreme-case table uses a shared protocol across
+  backends, but absolute Codex-versus-SWEAgent token ranking is still not a
+  recovery-policy claim because their agent loops differ.
+- The older 20-trace/638-turn native audit remains under `intra_turn/` as
+  supporting evidence. Its selected subset is not an AgentTX applicability
+  estimate and is not Figure 1.
+- `turn_checkpoint_proxy` is a recovery-boundary proxy, not a measurement of
+  the Crab artifact.
 
-## eBPF dependency-tracing overhead
-
-The eBPF backend replaces strace for workspace read/negative-lookup capture
-by attaching syscall tracepoints (with an optional `vfs_open` kprobe for
-symlink-alias resolution on bpftrace >= 0.10). It requires root and bpftrace;
-the runtime falls back to strace automatically in `auto` mode. The benchmark
-compares no tracing, strace, and eBPF on a read-heavy step and verifies that
-every traced step captured both the READ and the NEGATIVE effect:
-
-```bash
-PYTHONPATH=src:. python3 experiments/scripts/bench_bpf_trace.py \
-  --steps 20 --repeats 3 --workload read
-python3 motivation/plot_bpf_trace.py
-```
-
-It writes `bpf_trace_overhead.{csv,json,md}` and `FIG-Bpf-Trace.{pdf,png}`.
-Without root/bpftrace the benchmark exits non-zero with a clear message and
-writes nothing. Design and claim boundaries are in
-`docs/step27-bpf-dependency-tracing.md`.
-
-## Quantitative causal-retention experiment
-
-The controlled effect-DAG benchmark sweeps trajectory length, dependency
-shape, fault position, and independent-work ratio. Causal, temporal, and
-whole-session recovery receive the same declared read effects; a fourth mode
-deliberately removes dependency capture to isolate why tracing/manifests are
-necessary.
-
-```bash
-PYTHONPATH=src:. python experiments/scripts/bench_causal_retention.py --repeats 3
-```
-
-It writes `causal_retention.{csv,json,md}` plus per-repeat raw CSV data. The
-benchmark checks both the speculative merged view and the host state after
-commit, so retention numbers are tied to actual AgentTX recovery rather than a
-symbolic DAG simulation.
-
-## Real-agent recovery experiment
-
-The live recovery benchmark adds the decision-making layer: a seeded failure
-contains one faulty producer, independent later work, a derived artifact, and a
-failing test. The LLM must inspect the AgentTX ledger, select the faulty step,
-invoke causal rollback, and finish with the independent work preserved.
-
-```bash
-PYTHONPATH=src:. python experiments/scripts/bench_real_agent_recovery.py \
-  --repeats 3 --max-turns 30
-```
-
-Results are stored in `real_agent_recovery.{csv,json,md}`. Credentials are read
-from the local environment and never written to an artifact.
-
-## Avoided token replay after recovery
-
-The retention experiment connects causal filesystem recovery to LLM cost. A
-fixed failure DAG contains valid work before and after the fault. AgentTX causal
-rollback retains both documents; an optimistic temporal checkpoint loses the
-later one; whole branch/session abort loses both. Real DeepSeek `write_file`
-calls regenerate only the lost artifacts, and response usage reports the exact
-replay tokens.
-
-```bash
-PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python \
-  experiments/scripts/bench_token_recovery.py \
-  --document-lines 12 24 48 --repeats 3
-```
-
-The central metric is *avoided replay tokens*, not total end-to-end recovery
-tokens. Results live in `token_recovery.{csv,json,md}` and
-`token_recovery_raw.csv`; design and limitations are in
-`docs/step24-token-replay-evaluation.md`.
-
-## Complete autonomous recovery token comparison
-
-Step 26 runs the same post-policy task through the full `LLMToolAgent` loop and
-charges diagnosis, prompt/tool context, planning, validation, and regenerated
-content. This complements rather than replaces the isolated Step 24 replay
-attribution.
-
-```bash
-PYTHONPATH=src:. python3 experiments/scripts/bench_token_end_to_end.py \
-  --document-lines 12 24 48 --repeats 3 --max-turns 20
-python3 motivation/plot_token_end_to_end.py
-```
-
-A credentialed run writes `token_end_to_end.{csv,json,md}` plus raw CSV and the
-paper figure. The current VM has no API credentials, so numeric results and
-figures are intentionally absent. See
-`docs/step26-end-to-end-token-comparison.md`.
-
-## FAST-style multi-length line experiments
-
-The FAST'25 Pan paper uses compact 2x2 panels, marker-and-line curves, and
-point annotations over several workload parameters. AgentTX now has the same
-presentation for a more informative length sweep:
-
-```bash
-PYTHONPATH=src:. python motivation/bench_scaling.py \
-  --lengths 54 64 96 --repeats 2
-PYTHONPATH=src:. python motivation/bench_tail_scaling.py \
-  --lengths 54 64 96 --repeats 2
-```
-
-`plot_scaling.ipynb` reads `motivation_scaling.csv` and shows per-call cost,
-end-to-end cost, overhead relative to bare execution, and the read-trace
-penalty. `plot_tail_scaling.ipynb` reads `motivation_tail_scaling.csv` and
-shows p50/p95 call and trajectory tails. Their paper figures are
-`FIG-Motivation-Scaling.{pdf,png}` and
-`FIG-Motivation-Tail-Scaling.{pdf,png}`.
-
-## Motivation storyline
-
-1. The unoptimized path traces every tool and pays setup/teardown repeatedly.
-2. Trusted read/write effects remove redundant tracing while preserving causal dependencies.
-3. Persistent command scripts, deferred blob GC, and direct execution remove repeated userspace work.
-4. A persistent try worker removes per-call namespace/overlay setup and produces the largest endpoint reduction.
-5. Incremental upperdir snapshots reduce snapshot-stage traversal without weakening boundary fallbacks.
-6. Crash injection, long-session reload, concurrent-agent isolation, and real-agent repeats show that the optimized path remains recoverable and useful under realistic execution.
-
-The numbers are VM-local directional measurements. The motivation claim is the
-cost decomposition and the preservation of correctness, not a universal latency
-number.
+Detailed phase definitions, policy semantics, metrics, and fairness constraints
+are authoritative in `agent.md`. `plot_intra_turn_evidence.py` and its notebook
+are retained only for historical audit; they are not the canonical figure
+entry point. Exact result summaries are in the reports below each canonical
+result directory.

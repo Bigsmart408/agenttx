@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Prefetch SWE-Bench Lite git data onto this machine.
 
-Downloads each unique GitHub repo once (via agentTX-clash), then creates
+Downloads each unique GitHub repo once, then creates
 per-instance working copies with `git clone --local` hardlinks.
 Never overwrites an instance tree that already exists.
 """
@@ -16,12 +16,12 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-ROOT = Path("/home/pengpeng/agenttx")
+ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / "experiments" / "cache" / "swe_bench"
 MANIFEST = CACHE / "lite_test_manifest.json"
 UPSTREAM = CACHE / "upstream"
 REPOS = CACHE / "repos"
-CLASH = Path("/home/pengpeng/.local/bin/agentTX-clash")
+CLASH = Path(os.environ.get("AGENTTX_CLASH", Path.home() / ".local/bin/agentTX-clash"))
 GIT_GITHUB = "https://github.com/{repo}.git"
 
 
@@ -41,7 +41,11 @@ def run(cmd, cwd=None, check=True, capture=False):
 
 
 def clash_git(*git_args: str, cwd=None):
-    cmd = [str(CLASH), "run", "--", "git", *git_args]
+    cmd = (
+        [str(CLASH), "run", "--", "git", *git_args]
+        if CLASH.exists()
+        else ["git", *git_args]
+    )
     log("+ " + " ".join(cmd if len(cmd) < 12 else cmd[:8] + ["..."]))
     return run(cmd, cwd=cwd)
 
@@ -147,12 +151,13 @@ def main() -> int:
     log(f"wrote {njson} instance json files")
     repos = unique_repos(rows)
     log(f"unique upstream repos: {len(repos)}")
-    if not CLASH.exists():
-        raise SystemExit(f"missing {CLASH}")
-    status = run([str(CLASH), "status"], check=False, capture=True)
-    if "running" not in (status.stdout or ""):
-        log("starting clash")
-        run([str(CLASH), "start"], check=True)
+    if CLASH.exists():
+        status = run([str(CLASH), "status"], check=False, capture=True)
+        if "running" not in (status.stdout or ""):
+            log("starting clash")
+            run([str(CLASH), "start"], check=True)
+    else:
+        log("agentTX-clash not found; using git network configuration")
 
     for repo in repos:
         ensure_bare(repo)

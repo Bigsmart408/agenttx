@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +23,30 @@ def _begin(tmp_path: Path, name: str = "session") -> tuple[Path, AgentTX]:
     ws = tmp_path / (name + "-ws")
     ws.mkdir()
     return ws, AgentTX.begin(workdir=ws, session_dir=tmp_path / name)
+
+
+@pytest.mark.skipif(shutil.which("strace") is None, reason="strace is unavailable")
+def test_strace_metadata_is_not_exposed_as_command_stderr(tmp_path: Path) -> None:
+    ws = tmp_path / "trace-output-ws"
+    ws.mkdir()
+    (ws / "input.txt").write_text("input\n", encoding="utf-8")
+    tx = AgentTX.begin(
+        workdir=ws,
+        session_dir=tmp_path / "trace-output-session",
+        trace_backend="strace",
+    )
+    try:
+        record = tx.run_tool(
+            "inspect",
+            ["bash", "-c", "ls -A; cat input.txt; echo visible-error >&2"],
+        )
+
+        assert record.stdout == "input.txt\ninput\n"
+        assert record.stderr == "visible-error\n"
+        assert "execve(" not in record.stderr
+        assert all(".agenttx-strace-" not in effect.path for effect in record.effects)
+    finally:
+        tx.close(destroy=True)
 
 
 def test_selective_commit_materializes_only_frontier_paths(tmp_path: Path) -> None:
@@ -230,6 +255,25 @@ def test_causal_rollback_preserves_independent_later_step(tmp_path: Path) -> Non
         assert tx.commit(independent.step_id) == independent.step_id
         assert not (ws / "a.txt").exists()
         assert (ws / "b.txt").read_text(encoding="utf-8") == "two\n"
+    finally:
+        tx.close(destroy=True)
+
+
+def test_causal_rollback_allows_retained_read_of_replaced_path(tmp_path: Path) -> None:
+    ws, tx = _begin(tmp_path, "causal-retained-read")
+    source = ws / "source.txt"
+    source.write_text("committed\n", encoding="utf-8")
+    try:
+        inspected = tx.run_tool("inspect", ["bash", "-c", "cat source.txt"])
+        producer = tx.run_tool(
+            "producer", ["bash", "-c", "echo corrupted > source.txt"]
+        )
+
+        assert inspected.step_id not in producer.parents
+        assert tx.rollback_causal(producer.step_id) == [producer.step_id]
+        assert tx.ledger.steps[inspected.step_id].status == "speculative"
+        restored = tx.run_tool("read-restored", ["bash", "-c", "cat source.txt"])
+        assert restored.stdout == "committed\n"
     finally:
         tx.close(destroy=True)
 

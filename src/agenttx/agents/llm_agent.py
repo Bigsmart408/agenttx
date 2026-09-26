@@ -152,7 +152,7 @@ def _to_anthropic_messages(messages: List[dict]) -> tuple[List[dict], List[dict]
 
 
 class LLMToolAgent:
-    def __init__(self, workdir, model=None, session_dir=None, max_turns=30, api_base=None, api_key=None, provider=None, trace_backend="auto"):
+    def __init__(self, workdir, model=None, session_dir=None, max_turns=30, api_base=None, api_key=None, provider=None, trace_backend="auto", ephemeral_roots=()):
         self.workdir = Path(workdir).resolve()
         load_provider_env()
         self.provider: ProviderProfile = resolve_provider(provider)
@@ -164,7 +164,10 @@ class LLMToolAgent:
         self.harness = CodingAgentHarness(
             workdir=self.workdir,
             session_dir=session_dir,
-            policy=CommitPolicy(workdir=self.workdir),
+            policy=CommitPolicy(
+                workdir=self.workdir,
+                ephemeral_roots=ephemeral_roots,
+            ),
             trace_backend=trace_backend,
         )
         self.control_events: List[dict] = []

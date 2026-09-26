@@ -325,7 +325,7 @@ def test_copied_tokens_skip_tool_names_and_tiny_words():
     assert "hi" not in tokens
 
 
-def test_runtime_copy_without_file_parent_drops_conversation_token(tmp_path):
+def test_runtime_copy_without_file_parent_rolls_back_context_and_file(tmp_path):
     workdir = tmp_path / "ws"
     workdir.mkdir()
     agent = LLMToolAgent(workdir=workdir, session_dir=tmp_path / "session", api_key="test-key")
@@ -401,11 +401,54 @@ def test_runtime_copy_without_file_parent_drops_conversation_token(tmp_path):
         )
         assert conv.turns[1].calls[0].parents == [root.step_id]
         targets = agent.harness.tx.rollback_causal(root.step_id)
-        assert targets == [root.step_id]
-        assert copied.step_id not in targets
+        assert targets == [root.step_id, copied.step_id]
+        assert agent.harness.tx.ledger.steps[copied.step_id].status == "rolled_back"
+        check = agent.harness.tx.run_tool(
+            "run_shell", ["bash", "-c", "test ! -e keep.txt"], trace_reads=False
+        )
+        assert check.returncode == 0
         blob = json.dumps(conv.active_messages())
         assert TOKEN not in blob
         assert copied.step_id not in conv.active_step_ids()
+    finally:
+        agent.close(destroy=True)
+
+
+def test_unified_closure_follows_message_then_filesystem_dependency(tmp_path):
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    agent = LLMToolAgent(
+        workdir=workdir, session_dir=tmp_path / "session", api_key="test-key"
+    )
+    try:
+        conv = agent.harness.tx.conversation
+        conv.seed(SYSTEM, "do work")
+
+        root = agent.harness.call_tool("run_shell", {"cmd": f"printf '{TOKEN}'"})
+        conv.append_turn(_call(root.step_id, "stdout", "", stdout=TOKEN))
+
+        copied = agent.harness.call_tool(
+            "write_file", {"path": "bridge.txt", "content": TOKEN}
+        )
+        assert root.step_id not in copied.parents
+        conv.append_turn(_call(copied.step_id, "bridge.txt", TOKEN))
+        assert conv.turns[1].calls[0].parents == [root.step_id]
+
+        consumer = agent.harness.call_tool(
+            "run_shell", {"cmd": "cat bridge.txt > derived.txt"}
+        )
+        assert copied.step_id in consumer.parents
+        conv.append_turn(_call(consumer.step_id, "derived.txt", "derived"))
+
+        targets = agent.harness.tx.rollback_causal(root.step_id)
+        assert targets == [root.step_id, copied.step_id, consumer.step_id]
+        check = agent.harness.tx.run_tool(
+            "run_shell",
+            ["bash", "-c", "test ! -e bridge.txt && test ! -e derived.txt"],
+            trace_reads=False,
+        )
+        assert check.returncode == 0
+        assert conv.active_step_ids() == []
     finally:
         agent.close(destroy=True)
 

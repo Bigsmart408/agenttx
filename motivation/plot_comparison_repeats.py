@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import csv
+import argparse
 from pathlib import Path
 
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.patches import Patch
+from motivation.plot_motivation_four import configure_style
+from motivation.plot_paper_evaluation import COLORS
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULT = ROOT / "experiments" / "results" / "comparison_repeats.csv"
@@ -36,6 +38,19 @@ LABELS = {
     "agenttx_full": "AgentTX full",
 }
 
+# The paper's Table 2 predates comparison_repeats.csv and reports a separate
+# persistent-execution run. Keep its p99 figure on exactly the table's values.
+PAPER_P99 = {
+    "bare": 4.976,
+    "per_call_try": 202.746,
+    "session_try": 22.390,
+    "shared_try": 196.776,
+    "shared_checkpoint": 52.147,
+    "bubblewrap": 1.301,
+    "agenttx_without_read_tracing": 55.508,
+    "agenttx_full": 68.169,
+}
+
 
 def read_rows() -> dict[str, dict[str, str]]:
     with RESULT.open(newline="", encoding="utf-8") as handle:
@@ -50,49 +65,45 @@ def plot_quantile(rows: dict[str, dict[str, str]], modes: list[str], field: str,
                   title: str, filename: str) -> None:
     values = [float(rows[mode][field]) for mode in modes]
     x = list(range(len(modes)))
-    colors = ["#dce3ea", "#f7d4b5", "#e8dced", "#f3c8a7",
-              "#c8dff0", "#e5e9ef", "#bcdcf0", "#f2b6b6"]
-    edges = ["#7f8a98", "#b9997f", "#9d8fa6", "#b9997f",
-             "#7e9ab2", "#7f8a98", "#7e9ab2", "#b97878"]
-    hatches = ["///", "..", "xx", "///", "\\\\", "oo", "///", ""]
-    baseline = 0.6
-    fig, ax = plt.subplots(dpi=300, figsize=(17.8 / 2.54, 5.6 / 2.54))
-    for index, value in enumerate(values):
-        ax.bar(index, value - baseline, bottom=baseline, width=0.68,
-               color=colors[index], edgecolor=edges[index], linewidth=0.35,
-               hatch=hatches[index], zorder=3)
-    ax.set_yscale("log")
-    ax.set_ylim(baseline, max(values) * 2.5)
-    ax.set_xticks(x, [LABELS[mode] for mode in modes], rotation=24, ha="right", fontsize=6.5)
-    ax.set_ylabel("Per-step latency (ms, log scale)", fontsize=8)
-    ax.set_xlabel(f"Comparison policy\n{title}", fontsize=7)
-    ax.tick_params(axis="y", labelsize=7)
-    ax.grid(False)
-    handles = [
-        Patch(facecolor="#dce3ea", edgecolor="#7f8a98", hatch="///", label="bare"),
-        Patch(facecolor="#f7d4b5", edgecolor="#b9997f", hatch="..", label="try baselines"),
-        Patch(facecolor="#c8dff0", edgecolor="#7e9ab2", hatch="///", label="checkpoint / no-trace"),
-        Patch(facecolor="#f2b6b6", edgecolor="#b97878", label="AgentTX full (ours)"),
-    ]
-    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, 1.20),
-              ncol=4, fontsize=6, columnspacing=0.9, handlelength=1.6,
-              handletextpad=0.4, borderpad=0.3)
-    ax.annotate(
-        f"AgentTX full\n{values[-1]:.2f} ms/step",
-        xy=(x[-1], values[-1]),
-        xytext=(-2, 8), textcoords="offset points",
-        color="#b56d6d",
-        ha="right",
-        fontsize=6,
-    )
-    fig.tight_layout(pad=0.45)
-    fig.savefig(OUT / f"{filename}.png", dpi=300, bbox_inches="tight", pad_inches=0.02)
+    palette = {
+        "bare": COLORS["neutral"],
+        "per_call_try": COLORS["temporal"],
+        "session_try": COLORS["temporal"],
+        "shared_try": COLORS["temporal"],
+        "shared_checkpoint": COLORS["checkpoint"],
+        "bubblewrap": COLORS["neutral"],
+        "agenttx_without_read_tracing": COLORS["checkpoint"],
+        "agenttx_full": COLORS["agenttx"],
+    }
+    fig, ax = plt.subplots(figsize=(8.6 / 2.54, 6.0 / 2.54))
+    ax.barh(x, values, color=[palette[mode] for mode in modes], height=0.62)
+    ax.set_xscale("log")
+    ax.set_xlim(0.8, 300)
+    ax.set_yticks(x, [LABELS[mode] for mode in modes])
+    ax.invert_yaxis()
+    ax.set_xlabel("p99 latency per step (ms, log scale)")
+    ax.tick_params(axis="y", length=0)
+    fig.tight_layout(pad=0.4)
+    OUT.mkdir(parents=True, exist_ok=True)
     fig.savefig(OUT / f"{filename}.pdf", bbox_inches="tight", pad_inches=0.02)
+    if filename == "FIG-Comparison-P99":
+        fig.savefig(ROOT / "paper" / "img" / f"{filename}.pdf",
+                    bbox_inches="tight", pad_inches=0.02)
+    plt.close(fig)
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--paper-p99", action="store_true")
+    args = parser.parse_args()
     rows = read_rows()
     modes = [mode for mode in ORDER if mode in rows and rows[mode]["samples"] != "0"]
+    configure_style()
+    if args.paper_p99:
+        rows = {mode: {"per_step_ms_p99": str(value)} for mode, value in PAPER_P99.items()}
+        modes = list(ORDER)
+        plot_quantile(rows, modes, "per_step_ms_p99", "Repeated baseline p99 latency", "FIG-Comparison-P99")
+        return
     x = list(range(len(modes)))
     p50 = [float(rows[mode]["per_step_ms_p50"]) for mode in modes]
     p95 = [float(rows[mode]["per_step_ms_p95"]) for mode in modes]

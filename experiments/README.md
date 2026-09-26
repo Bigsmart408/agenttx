@@ -1,5 +1,47 @@
 ## Official application workloads (SWE-Bench + Terminal-Bench)
 
+The current code-freeze, rerun boundary, motivation matrix, and staged official
+campaign are tracked in
+[`docs/paper-outline-and-experiment-plan.md`](../docs/paper-outline-and-experiment-plan.md).
+Complete its preflight and smoke gates before starting a new full-catalog run.
+
+Before spending model calls, run the standalone environment check against the
+same task set as the planned experiment. It checks each task's local repository,
+dependency metadata and prepared Python environment. For SWE-Bench, it also
+requires the official eval image and starts a short-lived container to confirm
+that Docker can provide `/testbed` and the verifier Python. It does not run
+AgentTX, `try`, a model, or the official test cases.
+
+```bash
+source /home/bfq/miniconda3/etc/profile.d/conda.sh
+conda activate agenttx
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+PYTHONPATH=src:. python \
+  experiments/scripts/check_experiment_environment.py \
+  --prepare-missing \
+  --suite all --task-set full \
+  --output experiments/results/environment_check
+```
+
+Use `--prepare-missing` once to build missing or stale SWE-Bench cached venvs,
+deduplicated by repository/version. This installs task dependencies under
+`experiments/cache/swe_bench/venvs`; it does not add them to the `agenttx`
+Conda environment. Remove the flag for subsequent read-only checks. For
+Terminal-Bench, the check validates `task.yaml`, `run-tests.sh`, and the Docker
+Compose configuration; tests embedded by `run-tests.sh` do not require a
+separate `tests/` directory.
+
+The check **must** run from the activated `agenttx` Conda environment. Calling
+the environment's Python by absolute path without activation is not equivalent:
+native packages such as pandas/pyarrow may load the system `libstdc++` and fail
+even when the correct Conda runtime is installed. Confirm that
+`CONDA_PREFIX=/home/bfq/miniconda3/envs/agenttx` before starting the check.
+
+Use `--task-set representative` for a quick check, or `--task-set selected
+--tasks swe:<instance> tb:<task>` for an exact subset. The script writes JSON,
+CSV, and Markdown reports; it does not call a model or alter runner behavior.
+
 The paper's application evaluation uses only SWE-Bench Lite and Terminal-Bench.
 Mechanism microbenchmarks (isolation scaling, causal DAGs, coverage, WAL) remain
 available below but are not additional application workloads.

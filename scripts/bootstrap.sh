@@ -4,7 +4,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 mkdir -p third_party
 if [ ! -d third_party/try/.git ]; then
-  git clone --depth 1 https://github.com/binpash/try.git third_party/try || true
+  git clone --depth 1 https://github.com/binpash/try.git third_party/try
 fi
 
 # Ubuntu 20.04 / kernel 5.4 Docker-overlay hosts reject try's default
@@ -126,7 +126,7 @@ old_warn = (
     '        if [ -z "$UNION_HELPER" ]\n'
     '        then\n'
     '            ## We can ignore this mountpoint, if the user program tries to use it, it will crash, but if not we can run normally\n'
-    '            printf "%s: Warning: Failed mounting $mountpoint as an overlay and mergerfs or unionfs not set and could not be found, see \"$try_mount_log\"\n" "$TRY_COMMAND" >&2\n'
+    '            printf "%s: Warning: Failed mounting $mountpoint as an overlay and mergerfs or unionfs not set and could not be found, see \\"$try_mount_log\\"\\n" "$TRY_COMMAND" >&2\n'
     '        else'
 )
 new_warn = (
@@ -135,7 +135,7 @@ new_warn = (
     '            ## AGENTTX_RECURSIVE_OVERLAY: try per-subtree overlays first; the\n'
     '            ## warning below is only emitted when the whole subtree is unusable.\n'
     '            if ! recursive_overlay "$pure_mountpoint" 2>>"$try_mount_log"; then\n'
-    '                printf "%s: Warning: Failed mounting $mountpoint as an overlay and mergerfs or unionfs not set and could not be found, see \"$try_mount_log\"\n" "$TRY_COMMAND" >&2\n'
+    '                printf "%s: Warning: Failed mounting $mountpoint as an overlay and mergerfs or unionfs not set and could not be found, see \\"$try_mount_log\\"\\n" "$TRY_COMMAND" >&2\n'
     '            fi\n'
     '        else'
 )

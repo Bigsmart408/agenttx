@@ -426,8 +426,14 @@ class ConversationLog:
         while changed:
             changed = False
             for turn in self.turns:
+                if turn.status != "active":
+                    continue
                 for span in turn.calls:
-                    if span.step_id is None or span.step_id in frontier:
+                    if (
+                        span.status != "active"
+                        or span.step_id is None
+                        or span.step_id in frontier
+                    ):
                         continue
                     if frontier.intersection(span.parents):
                         frontier.add(span.step_id)

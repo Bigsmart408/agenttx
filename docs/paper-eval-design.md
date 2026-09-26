@@ -14,16 +14,14 @@ Purpose: 统一「论文 Evaluation 应该怎么设计」与「当前仓库已�
 
 当前仓库在语义主线（因果保留 + 依赖消融）和动机/消融上已经很强；弱项在外部系统公平对比、真实多模型端到端，以及把「实现完备性实验」与「论文主实验」分清。
 
-### 本轮 workload 口径（2026-08-24）
+### 当前 workload 口径（2026-09-23）
 
-应用层 workload 已统一为官方 SWE-Bench Lite 与 Terminal-Bench：当前清单
-包含每个套件的 short/medium/long 代表任务，motivation 与 evaluation 共用同一
-任务初始化、官方 verifier 和 recovery-DAG fault overlay。DeepSeek Harness 固定
-使用 `deepseek-v4-flash`，Codex 固定使用 `gpt-5.6-luna`；通过 `--model` 的其他
-模型只能作为显式独立 sweep。旧的 long trajectory、GitHub sidecar 和 synthetic
-document replay 结果仅保留作历史 provenance，不再作为应用 workload 或 token
-结论的来源。机制微基准（try、OverlayFS、trace、snapshot、DAG、WAL）仍可使用
-受控轨迹，但应在论文中标为 mechanism-only。
+实验统一分为五层：Microbenchmark、Real-world Workloads、Breakdown、Appendix
+Correctness / Interrupted Recovery 和 Other Overheads。Microbenchmark 同时包含
+同一批 Motivation case 的分析 sweep 与完整系统执行。SWE-Bench Lite 与
+Terminal-Bench 是真实负载。旧的 toy refactor、GitHub
+sidecar、oracle-repair official-task 和不完整全量结果仅保留作 provenance，不能替代
+上述规范实验。完整定义以仓库根目录 `agent.md` 为准。
 
 ---
 
@@ -48,85 +46,43 @@ document replay 结果仅保留作历史 provenance，不再作为应用 workloa
 
 ---
 
-## 2. 理想实验设计（论文主文结构）
+## 2. 规范实验结构
 
-按主张倒推，主文建议压成 **4 块主实验 + 1 段诚实限制**。
+主文实验按证据强度组织，不再沿用旧的 E0--E3 或 RQ1--RQ4 编排：
 
-### E0 — Motivation（主张 A）
+### 2.1 Microbenchmark
 
-**问题**：为什么「每 call 一层 try」和「时间点 / 整会话回退」都不够？
+Microbenchmark 对同一批 400 个 Motivation manifest 做两种测量。分析型 sweep 改变依赖
+密度、turn 数量和故障位置，解释粗粒度恢复为何产生额外丢弃；完整系统执行在完全相同的
+`case_id`、依赖图、故障位置和 survivor set 上运行真实 agent、工具、依赖捕获、回滚、
+context 重建和验证。正式结果覆盖全部 400 个 case，每个 case 和策略重复三次；调试子集
+不进入论文。
 
-| 子实验 | 必须回答 | 正确对照组 |
-|--------|----------|------------|
-| E0a 隔离成本 | 长轨迹下 per-call isolation 是否不可负担 | bare（不安全下界）、per_call_try、shared_try |
-| E0b 恢复粒度损失 | 故障后粗粒度会丢多少独立工作 | temporal / whole-session vs causal（同一轨迹） |
+### 2.2 Real-world Workloads
 
-**原则**：E0 只建立问题，不证明 AgentTX 最优。
+真实负载只使用完整的 SWE-Bench Lite 和 Terminal-Bench，并分别报告后再汇总。主结果必须
+使用 live agent 和官方 verifier；gold patch 或 oracle solution 只能用于环境检查或显式标注
+的上界，不能算作任务成功。正式 `causal` 配置统一使用 compact recovery context。
 
-### E1 — 核心语义（主张 B）← 论文最重要一块
+### 2.3 Breakdown
 
-**问题**：因果回滚是否同时做到 *useful retained = 1* 且 *invalid removed = 1*？依赖捕获是否必要？
+Breakdown 在同一套 400-case Microbenchmark 上逐项移除 dependency capture、object
+identity、selective history reconstruction 和 context rewind。Persistent worker 与 compact
+handoff 作为性能消融单独报告，避免把语义不正确的配置解释为性能优化。
 
-| 必须有 | 说明 |
-|--------|------|
-| 真实 overlay 上的 effect DAG（不是纯图仿真） | 已实现 |
-| 扫 length / shape / fault position / independence | 已实现 |
-| **消融**：`causal_without_dependencies` | 已实现，且结果非常关键 |
-| 与 temporal / whole_session 同轨迹对比 | 已实现 |
-| 指标：precision/recall、useful retained、invalid removed、host-clean | 已实现 |
+### 2.4 Appendix Correctness and Interrupted Recovery
 
-**原则**：这是唯一可以支撑 “Agent Effect Transactions” 命名的实验。没有它，其它都是周边。
+正确性矩阵覆盖 effect 类型、版本、目录关系、rename、alias、多故障根、重复恢复、reload
+以及 workspace--context 一致性。恢复过程的五个阶段分别注入中断；重启后只允许观察到完整
+旧状态或完整新状态，不能出现 workspace 与 agent context 混合状态。
 
-### E2 — Agent 可用性与收益（主张 B→C 的桥）
+### 2.5 Other Overheads
 
-拆成两个**不可混写**的问题：
+单独报告 tracing、历史存储、RSS、ledger/context index、closure planning、reconstruction、
+context handoff、startup 和 reload 成本，并给出重复测量的 mean、p50、p95 和 p99。
 
-| | E2a Control-plane | E2b Utility |
-|--|-------------------|-------------|
-| 问 | LLM 能否读 ledger、选 fault root、调因果回滚 | 保留独立工件是否减少 **replay** token |
-| 不应混入 | 总 session token、模型智商 | 诊断 / 测试 / 故障前已花 token |
-| 当前状态 | `real_agent_recovery` 3× DeepSeek，指标齐全 | `token_recovery` 隔离 replay；Step 26 端到端仍待 credential |
-
-**原则**：E2a 证明「接口可被 Agent 使用」；E2b 证明「语义转化为可量化收益」。二者缺一则要么“有机制无用途”，要么“有用途无机制”。
-
-### E2c — Official application workloads (SWE-Bench + Terminal-Bench)
-
-全文应用负载只保留这两套。协议：官方实例 → inject independent notes + faulty producer → causal/temporal/whole abort → 官方 gold/oracle 或 live agent → 官方 verifier **且** 独立文档保留。
-GitHub sidecar、long-coding mixed trajectory 不再作为应用负载进入主文。
-
-
-### E3 — 系统成本与稳健性（主张 C）
-
-**问题**：实现上述语义要付多少税？坏掉时会不会静默污染？
-
-应保留进主文的只有：
-
-- 相对 per-call / bare 的 ms/step（**明确写 bare 非正确性等价**）
-- 长度 scaling + p50/p95 尾延迟
-- worker crash fallback、reload、并发隔离（disjoint workspace）
-- hardlink 边界作为 **limitation 的实证**，不是失败掩饰
-
-Optimization history（iter 00–06）更适合 **附录 / motivation 图**，不宜占主文半壁江山——它支撑「我们理解热路径」，不支撑核心科学主张。
-
-### 不应进主文（或只能附录）的
-
-- 大量 step1–14 的工程里程碑 microbench（whiteout、WAL、chmod…）→ **正确性回归**，用一句话 + artifact
-- 无法跑起来的外部系统「定性点名」→ Discussion
-- 未配对的历史优化数字与当前 baseline 混拼 → 文档已禁止，需严格执行
-
-### 建议的主文叙事链
-
-```text
-E0 动机（贵 + 粗）
- → E1 因果保留 + 依赖消融     ← 核心贡献
- → E2a 真 Agent 调用控制面
- → E2b 避免 replay token        ← 把语义翻译成收益
- → E3 开销/尾延迟/稳健性 + hardlink 限制
-```
-
-附录：optimization history、snapshot storage、WAL crash、whiteout、evidence suite 全绿清单。
-
-数量上：主文 **3–4 张表/图** 足够（runtime、causal retention、token、robustness）；其余进 artifact。
+旧的 toy refactor 只作 smoke；GitHub sidecar、oracle-repair official-task 和未配齐的历史
+结果只作 provenance。无法运行的外部系统只能进入定性讨论，不能替代同构基线。
 
 ---
 
@@ -190,15 +146,15 @@ E0 动机（贵 + 粗）
 
 ---
 
-## 5. 与论文现有 RQ 的对齐
+## 5. 与新实验层级的对齐
 
-| 论文 RQ | 对应设计块 | 当前主证据 | 主文优先级 |
-|---------|------------|------------|------------|
-| RQ1 Overhead & scaling | E0a + E3 | `comparison_repeats`、`motivation_scaling`、robustness tails | 高 |
-| RQ2 Causal retention & ablation | E1 | `causal_retention.*` | **最高** |
-| RQ3a Real-agent recovery | E2a | `real_agent_recovery.*` | 高 |
-| RQ3b Avoided replay tokens | E2b | `token_recovery.*` + `token_end_to_end.*` | 高 |
-| RQ4 Robustness | E3 | `robustness.*`、hardlink probe | 中高 |
+| 实验层级 | 主要主张 | 当前证据状态 |
+|---------|----------|--------------|
+| Microbenchmark | 粗粒度浪费的机制；完整系统能否实现选择性恢复收益 | 400-case 分析型 sweep 已有；同 case 的完整系统数据待生成 |
+| Real-world Workloads | 收益能否在 SWE-Bench Lite 与 Terminal-Bench 上成立 | 历史 pilot 可审计；冻结版本的完整 live-agent 数据待生成 |
+| Breakdown | 每个语义机制和性能优化分别贡献什么 | 已有零散消融；统一 400-case 配对结果待生成 |
+| Appendix Correctness / Interrupted Recovery | 支持边界内是否正确；恢复被中断时是否保持 workspace--context 一致 | 语义回归已有；五阶段中断矩阵待生成 |
+| Other Overheads | tracing、历史、内存、规划、重建和 context handoff 的代价 | 零散数据已有；统一冻结版本结果待生成 |
 
 ---
 
@@ -219,9 +175,10 @@ E0 动机（贵 + 粗）
 
 ## 7. 总判
 
-- **系统实现深度**：ledger / shared semisolate / causal rollback / selective commit / WAL / policy / agent 已成闭环，远超早期 scaffold。
-- **实验相对贡献的对齐度**：E1（因果 + 消融）是最强资产；E0/E3 够用；E2 方向对但统计与任务多样性仍薄；Step26 与外部系统是最大未闭合环。
-- **最大认知风险**：把「工程做完很多 step」误当成「评价做完」。审稿人只认：**主张 → RQ → 可区分对照组 → 可证伪指标**。
+- **系统实现深度**：ledger、shared semisolate、causal rollback、context rewind、WAL、policy 和 agent 已形成闭环。
+- **当前最强证据**：分析型 Microbenchmark 与已有语义消融；它们解释机制，但不能替代完整系统和真实负载结果。
+- **当前主要缺口**：同一 400-case Motivation 集合的完整系统 Microbenchmark、冻结版本的 541-task live-agent 结果、统一 Breakdown、五阶段中断矩阵和资源开销。
+- **最大认知风险**：把历史 pilot 或工程里程碑误当作规范评价。所有主结论都必须满足“主张 → 同构对照 → 可证伪指标 → 冻结数据”。
 
 ---
 

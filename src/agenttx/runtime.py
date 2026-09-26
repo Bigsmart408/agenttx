@@ -465,6 +465,16 @@ class AgentTX:
             step_id = max(active)
         return self.rollback_causal_many([step_id])
 
+    def _unified_causal_targets(self, roots: Sequence[int]) -> List[int]:
+        """Close rollback over both filesystem and agent-context dependencies."""
+        targets = {int(step_id) for step_id in roots}
+        while True:
+            expanded = set(self.ledger.causal_dependents_many(targets))
+            expanded.update(self.conversation.conversation_closure(expanded))
+            if expanded <= targets:
+                return sorted(targets)
+            targets.update(expanded)
+
     def rollback_causal_many(self, step_ids: Sequence[int]) -> List[int]:
         """Roll back the union of multiple causal cones without losing retained paths."""
         roots = sorted({int(step_id) for step_id in step_ids})
@@ -480,7 +490,7 @@ class AgentTX:
         ):
             raise ValueError("cannot roll back an invalid or inactive step")
 
-        targets = self.ledger.causal_dependents_many(roots)
+        targets = self._unified_causal_targets(roots)
         if any(
             target <= self.ledger.committed_frontier for target in targets
         ):
@@ -504,6 +514,7 @@ class AgentTX:
             and step.status != "rolled_back"
             and step.step_id not in target_set
             for effect in step.effects
+            if effect.kind in (EffectKind.WRITE, EffectKind.DELETE)
             if self.commit_policy is None
             or not self.commit_policy.is_ignored(effect.path)
         ]

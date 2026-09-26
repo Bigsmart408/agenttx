@@ -8,14 +8,17 @@ sandbox path.  A recovery DAG is overlaid for causal vs coarse comparison.
 
 from __future__ import annotations
 
+import fcntl
+import hashlib
 import os
 import re
 import shlex
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 try:
     import yaml
@@ -48,6 +51,7 @@ class TBTask:
     official_full: bool = False
     difficulty: str = ""
     category: str = ""
+    container_verifier: bool = False
 
     @property
     def name(self) -> str:
@@ -156,7 +160,7 @@ def _official_fault_path(source: Path, task_id: str) -> str:
     if task_id == "cross-entropy-method":
         return "cross_entropy_method/cross_entropy.py"
     texts: List[str] = []
-    for path in [source / "solution.sh", source / "run-tests.sh"]:
+    for path in [source / "solution.sh", source / "solution.yaml", source / "run-tests.sh"]:
         if path.exists():
             texts.append(path.read_text(encoding="utf-8", errors="replace"))
     tests = source / "tests"
@@ -187,8 +191,14 @@ def _official_fault_path(source: Path, task_id: str) -> str:
             len(value),
         ),
     )
-    if scored:
-        return scored[0]
+    file_like = [
+        value
+        for value in scored
+        if Path(value).suffix.lower()
+        in {".py", ".sh", ".txt", ".csv", ".json", ".parquet", ".gz", ".out"}
+    ]
+    if file_like:
+        return file_like[0]
     return f".agenttx_faults/{task_id}.txt"
 
 
@@ -231,6 +241,7 @@ def load_tasks(cache_root: Path) -> Dict[str, TBTask]:
             official_full=True,
             difficulty=str(config.get("difficulty") or ""),
             category=str(config.get("category") or ""),
+            container_verifier=not any((source / "tests").rglob("*.py")),
         )
     return result
 
@@ -257,20 +268,174 @@ def _rewrite_app_paths(text: str, app_root: Path) -> str:
     return text.replace("/app", root)
 
 
+def _docker_run(command: List[str], *, timeout: int = 1800) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=timeout,
+        check=False,
+    )
+
+
+def _official_image_tag(task: TBTask, source: Path) -> str:
+    digest = hashlib.sha256((source / "Dockerfile").read_bytes()).hexdigest()[:12]
+    safe_task = re.sub(r"[^a-z0-9_.-]+", "-", task.task_id.lower())
+    return f"agenttx-tb-base:{safe_task}-{digest}"
+
+
+def _dockerfile_candidates(source: Path) -> List[Tuple[Optional[Path], str]]:
+    """Return domestic-mirror Dockerfiles followed by the untouched source."""
+    original = (source / "Dockerfile").read_text(encoding="utf-8")
+    prefixes = [
+        value.strip().rstrip("/")
+        for value in os.environ.get(
+            "AGENTTX_TB_GHCR_MIRRORS", "ghcr.nju.edu.cn"
+        ).split(",")
+        if value.strip()
+    ]
+    candidates: List[Tuple[Optional[Path], str]] = []
+    for prefix in prefixes:
+        rewritten = re.sub(
+            r"(?im)^(\s*FROM\s+(?:--platform=\S+\s+)?)ghcr\.io/",
+            rf"\1{prefix}/",
+            original,
+        )
+        if rewritten == original:
+            continue
+        handle = tempfile.NamedTemporaryFile(
+            mode="w",
+            prefix=f"agenttx-{source.name}-",
+            suffix=".Dockerfile",
+            delete=False,
+            encoding="utf-8",
+        )
+        with handle:
+            handle.write(rewritten)
+        candidates.append((Path(handle.name), prefix))
+    candidates.append((None, "origin"))
+    return candidates
+
+
+def ensure_official_image(task: TBTask, cache_root: Path) -> Tuple[str, str]:
+    """Build and retain the official base image for workspace materialization."""
+    source = task_source(cache_root, task)
+    image = _official_image_tag(task, source)
+    lock_dir = Path(cache_root) / "terminal_bench" / "image_locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    with (lock_dir / f"{task.task_id}.lock").open("w") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        inspected = _docker_run(["docker", "image", "inspect", image], timeout=120)
+        if inspected.returncode != 0:
+            failures: List[str] = []
+            candidates = _dockerfile_candidates(source)
+            try:
+                for dockerfile, label in candidates:
+                    command = ["docker", "build", "--tag", image]
+                    if dockerfile is not None:
+                        command.extend(["--file", str(dockerfile)])
+                    command.append(str(source))
+                    built = _docker_run(command, timeout=3600)
+                    if built.returncode == 0:
+                        break
+                    detail = (built.stderr or built.stdout or "docker build failed")[-1600:]
+                    failures.append(f"{label}: {detail}")
+                else:
+                    raise RuntimeError(
+                        f"failed to build {image}: " + " | ".join(failures)
+                    )
+            finally:
+                for dockerfile, _ in candidates:
+                    if dockerfile is not None:
+                        dockerfile.unlink(missing_ok=True)
+    inspected = _docker_run(
+        ["docker", "image", "inspect", "--format", "{{.Config.WorkingDir}}", image],
+        timeout=120,
+    )
+    workdir = inspected.stdout.strip()
+    if inspected.returncode != 0 or not (
+        workdir == "/app" or workdir.startswith("/app/")
+    ):
+        detail = inspected.stderr.strip() or workdir or "missing image workdir"
+        raise RuntimeError(f"invalid Terminal-Bench image {image}: {detail}")
+    return image, workdir
+
+
+def _extract_official_workspace(task: TBTask, workdir: Path, cache_root: Path) -> None:
+    image, image_workdir = ensure_official_image(task, cache_root)
+    created = _docker_run(["docker", "create", image, "true"], timeout=120)
+    container = created.stdout.strip()
+    if created.returncode != 0 or not container:
+        raise RuntimeError((created.stderr or "docker create failed")[-2000:])
+    try:
+        copied = _docker_run(
+            ["docker", "cp", f"{container}:{image_workdir}/.", str(workdir)],
+            timeout=900,
+        )
+        if copied.returncode != 0:
+            raise RuntimeError((copied.stderr or "docker cp failed")[-2000:])
+    finally:
+        _docker_run(["docker", "rm", "-f", container], timeout=120)
+
+
+def _materialize_dockerfile_copies(source: Path, workdir: Path) -> None:
+    """Apply local Dockerfile COPY directives to the host /app projection.
+
+    Visible-test tasks can be verified on the host, but their inputs still
+    come from Dockerfile layout rather than a flat copy of the task source.
+    RUN directives intentionally remain environment preflight concerns.
+    """
+    dockerfile = source / "Dockerfile"
+    current_workdir = "/app"
+    copied = False
+    for raw in dockerfile.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        instruction, _, remainder = line.partition(" ")
+        upper = instruction.upper()
+        if upper == "WORKDIR":
+            current_workdir = remainder.strip()
+            continue
+        if upper != "COPY" or remainder.lstrip().startswith("--from="):
+            continue
+        parts = shlex.split(remainder)
+        if len(parts) < 2:
+            continue
+        destination = parts[-1]
+        if not destination.startswith("/"):
+            destination = str(Path(current_workdir) / destination)
+        if not (destination == "/app" or destination.startswith("/app/")):
+            continue
+        relative_destination = Path(destination).relative_to("/app")
+        for source_name in parts[:-1]:
+            source_path = source / source_name
+            if not source_path.exists():
+                continue
+            destination_path = workdir / relative_destination
+            if destination.endswith("/") or source_path.is_dir() or len(parts[:-1]) > 1:
+                destination_path = destination_path / source_path.name
+            destination_path.parent.mkdir(parents=True, exist_ok=True)
+            if source_path.is_dir():
+                shutil.copytree(source_path, destination_path, dirs_exist_ok=True)
+            else:
+                shutil.copy2(source_path, destination_path)
+            copied = True
+    if not copied:
+        raise RuntimeError(f"Dockerfile for {source.name} has no local /app COPY inputs")
+
+
 def materialize(task: TBTask, workdir: Path, cache_root: Path) -> Path:
     src = task_source(cache_root, task)
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
     if task.official_full:
-        excluded = {"Dockerfile", "docker-compose.yaml", "run-tests.sh", "solution.sh", "task.yaml", "tests"}
-        for source in src.iterdir():
-            if source.name in excluded:
-                continue
-            dest = workdir / source.name
-            if source.is_dir():
-                shutil.copytree(source, dest, dirs_exist_ok=True)
-            elif source.is_file():
-                shutil.copy2(source, dest)
+        # Dockerfile COPY/RUN directives define the benchmark's real initial
+        # /app state. Flattening the task source tree loses those paths and can
+        # make both the reference solution and verifier fail for reasons
+        # unrelated to recovery.
+        _extract_official_workspace(task, workdir, cache_root)
     else:
         for rel in task.copy_from:
             source = src / rel
@@ -318,8 +483,11 @@ def test_command(python: str, task: Optional[TBTask] = None) -> str:
     # interpreter (3.11).  Keep child processes on the same interpreter.
     python_bin = Path(python).resolve()
     python_dir = shlex.quote(str(python_bin.parent))
+    python_lib = shlex.quote(str(python_bin.parent.parent / "lib"))
     return (
-        f"PATH={python_dir}:$PATH PYTHONDONTWRITEBYTECODE=1 {shlex.quote(str(python_bin))} -m pytest -q "
+        f"PATH={python_dir}:$PATH "
+        f"LD_LIBRARY_PATH={python_lib}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}} "
+        f"PYTHONDONTWRITEBYTECODE=1 {shlex.quote(str(python_bin))} -m pytest -q "
         f"{target} -p no:cacheprovider"
     )
 
@@ -336,20 +504,40 @@ def seed_task_workspace(workdir: Path, task: TBTask) -> None:
     )
 
 
-def inject_task_trajectory(agent, task: TBTask, python: str) -> dict:
+def inject_task_trajectory(
+    agent,
+    task: TBTask,
+    python: str,
+    *,
+    docs: Optional[Sequence[DocSpec]] = None,
+    fault_after_docs: Optional[int] = None,
+) -> dict:
     derived = (
         "mkdir -p recovery_build && "
         f"cp '{task.faulty_relpath}' recovery_build/derived.txt"
     )
+    crash_guard = (
+        f"{shlex.quote(python)} -c "
+        + shlex.quote(
+            "from pathlib import Path; "
+            "marker=b'AGENTTX injected recovery producer'; "
+            "skip={'.git','.venv','.tmp','node_modules','__pycache__'}; "
+            "files=(p for p in Path('.').rglob('*') if p.is_file() "
+            "and not skip.intersection(p.parts)); "
+            "raise SystemExit(86 if any(marker in p.read_bytes() for p in files "
+            "if p.stat().st_size <= 2000000) else 0)"
+        )
+    )
     return inject_recovery_dag(
         agent,
-        docs=task.docs(),
+        docs=tuple(docs) if docs is not None else task.docs(),
         task_name=task.task_id,
         prefix_writes=(),
         faulty_path=task.faulty_relpath,
         faulty_content=task.faulty_content,
         derived_cmd=derived,
-        test_cmd=test_command(python, task),
+        test_cmd=f"{crash_guard} && {test_command(python, task)}",
+        fault_after_docs=fault_after_docs,
     )
 
 
@@ -358,6 +546,8 @@ def task_prompt(
     python: str,
     mode: str = "causal",
     recovery_manifest: Optional[Mapping[str, object]] = None,
+    oracle_fault_step_id: Optional[int] = None,
+    reference_progress_verified: bool = False,
 ) -> str:
     extra_rules = ()
     if task.task_id == "cancel-async-tasks":
@@ -421,9 +611,12 @@ def task_prompt(
         instruction=task.instruction.replace("/app/", ""),
         docs=task.docs(),
         test_cmd=test_command(python, task),
+        focus_path=task.faulty_relpath,
         extra_rules=extra_rules,
         mode=mode,
         recovery_manifest=recovery_manifest,
+        oracle_fault_step_id=oracle_fault_step_id,
+        reference_progress_verified=reference_progress_verified,
     )
 
 
@@ -433,7 +626,7 @@ def direct_task_prompt(task: TBTask) -> str:
 
 
 def apply_oracle(agent, task: TBTask, python: str = "python", cache_root: Optional[Path] = None) -> None:
-    """Apply the gold solution. Official tasks keep solution.sh out of /app; run a rewritten copy."""
+    """Apply a gold solution in the task's declared runtime environment."""
     if task.official_full:
         if cache_root is None:
             raise ValueError("official Terminal-Bench oracle requires cache_root")
@@ -441,21 +634,92 @@ def apply_oracle(agent, task: TBTask, python: str = "python", cache_root: Option
         if not src.is_file():
             raise FileNotFoundError(src)
         workdir = Path(agent.harness.workdir).resolve()
-        rewritten = _rewrite_app_paths(src.read_text(encoding="utf-8"), workdir)
-        session_dir = Path(getattr(agent.harness.tx, "session_dir", "/tmp"))
-        session_dir.mkdir(parents=True, exist_ok=True)
-        script = session_dir / f"oracle_{task.task_id}.sh"
-        script.write_text(rewritten, encoding="utf-8")
-        script.chmod(0o755)
-        cmd = f"bash {script}"
-    else:
-        cmd = task.oracle_cmd
-        if cmd.startswith("python "):
-            cmd = python + cmd[len("python") :]
+        # Gold-prefix materialization is benchmark setup, not an agent action.
+        # Execute it in the official task image so task-specific binaries and
+        # libraries are available, while mounting the exact transaction base
+        # workspace at the benchmark's /app contract.
+        image, _ = ensure_official_image(task, cache_root)
+        staging = Path(
+            tempfile.mkdtemp(prefix=f"agenttx-oracle-{task.task_id}-", dir="/tmp")
+        )
+        shutil.copytree(
+            workdir,
+            staging,
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns(".tmp", ".venv", ".git"),
+        )
+        before = {
+            path.relative_to(staging).as_posix(): hashlib.sha256(path.read_bytes()).digest()
+            for path in staging.rglob("*")
+            if path.is_file()
+        }
+        uid_gid = f"{os.getuid()}:{os.getgid()}"
+        try:
+            result = _docker_run(
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--volume",
+                    f"{staging}:/app",
+                    "--volume",
+                    f"{src.resolve()}:/agenttx_solution.sh:ro",
+                    "--workdir",
+                    "/app",
+                    "--entrypoint",
+                    "bash",
+                    image,
+                    "-lc",
+                    (
+                        "bash /agenttx_solution.sh; rc=$?; "
+                        f"chown -R {uid_gid} /app; exit $rc"
+                    ),
+                ],
+                timeout=1800,
+            )
+            if result.returncode != 0:
+                detail = (result.stderr or result.stdout or "no oracle output")[-1200:]
+                raise RuntimeError(
+                    f"oracle command failed rc={result.returncode} for {task.task_id}: {detail}"
+                )
+            after_paths = {
+                path.relative_to(staging).as_posix(): path
+                for path in staging.rglob("*")
+                if path.is_file()
+            }
+            changed = [
+                (relpath, path)
+                for relpath, path in after_paths.items()
+                if before.get(relpath) != hashlib.sha256(path.read_bytes()).digest()
+            ]
+            for relpath, path in changed:
+                parent = Path(relpath).parent.as_posix()
+                command = (
+                    f"mkdir -p {shlex.quote(parent)} && "
+                    f"cp -a {shlex.quote(str(path))} {shlex.quote(relpath)}"
+                )
+                step = agent.harness.call_tool("run_shell", {"cmd": command})
+                if int(getattr(step, "exit_code", 1)) != 0:
+                    raise RuntimeError(f"failed to import oracle artifact {relpath}")
+            for relpath in sorted(set(before) - set(after_paths)):
+                agent.harness.call_tool("delete_file", {"path": relpath})
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+        return
+    cmd = task.oracle_cmd
+    if cmd.startswith("python "):
+        cmd = python + cmd[len("python") :]
     step = agent.harness.call_tool("run_shell", {"cmd": cmd})
     code = getattr(step, "exit_code", 0)
     if int(code) != 0:
-        raise RuntimeError(f"oracle command failed rc={code} for {task.task_id}")
+        detail = str(
+            getattr(step, "stderr", "")
+            or getattr(step, "stdout", "")
+            or "no oracle output"
+        )[-1200:]
+        raise RuntimeError(
+            f"oracle command failed rc={code} for {task.task_id}: {detail}"
+        )
 
 
 def verify(
@@ -464,22 +728,32 @@ def verify(
     python: str,
     *,
     require_recovery_artifacts: bool = True,
+    cache_root: Optional[Path] = None,
+    recovery_docs: Optional[Sequence[DocSpec]] = None,
 ) -> dict:
-    cmd = test_command(python, task)
-    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
-    result = subprocess.run(
-        cmd,
-        cwd=str(workdir),
-        env=env,
-        shell=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        timeout=900 if task.official_full else 180,
-        check=False,
-    )
+    if task.container_verifier:
+        if cache_root is None:
+            raise ValueError("container verifier requires cache_root")
+        result = _verify_in_official_container(workdir, task, cache_root)
+    else:
+        cmd = test_command(python, task)
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+        result = subprocess.run(
+            cmd,
+            cwd=str(workdir),
+            env=env,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=900 if task.official_full else 180,
+            check=False,
+        )
     docs_ok = (
-        all_documents_valid(workdir, all_midcrash_docs(task.docs()))
+        all_documents_valid(
+            workdir,
+            tuple(recovery_docs) if recovery_docs is not None else all_midcrash_docs(task.docs()),
+        )
         if require_recovery_artifacts
         else True
     )
@@ -492,3 +766,48 @@ def verify(
         "verifier_stdout": (result.stdout or "")[-2000:],
         "verifier_stderr": (result.stderr or "")[-2000:],
     }
+
+
+def _verify_in_official_container(
+    workdir: Path, task: TBTask, cache_root: Path
+) -> subprocess.CompletedProcess[str]:
+    image, image_workdir = ensure_official_image(task, cache_root)
+    source = task_source(cache_root, task)
+    created = _docker_run(
+        ["docker", "create", "--entrypoint", "sleep", image, "infinity"], timeout=120
+    )
+    container = created.stdout.strip()
+    if created.returncode != 0 or not container:
+        raise RuntimeError((created.stderr or "docker create failed")[-2000:])
+    try:
+        started = _docker_run(["docker", "start", container], timeout=120)
+        if started.returncode != 0:
+            raise RuntimeError((started.stderr or "docker start failed")[-2000:])
+        reset = _docker_run(
+            [
+                "docker", "exec", container, "bash", "-lc",
+                f"find {shlex.quote(image_workdir)} -mindepth 1 -maxdepth 1 -exec rm -rf -- {{}} +",
+            ],
+            timeout=300,
+        )
+        if reset.returncode != 0:
+            raise RuntimeError((reset.stderr or "container workspace reset failed")[-2000:])
+        for source_path, destination in (
+            (str(Path(workdir)) + "/.", image_workdir),
+            (str(source / "run-tests.sh"), "/tmp/agenttx-run-tests.sh"),
+        ):
+            copied = _docker_run(
+                ["docker", "cp", source_path, f"{container}:{destination}"], timeout=900
+            )
+            if copied.returncode != 0:
+                raise RuntimeError((copied.stderr or "docker cp failed")[-2000:])
+        return _docker_run(
+            ["docker", "exec", container, "bash", "/tmp/agenttx-run-tests.sh"],
+            timeout=3600,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return subprocess.CompletedProcess(
+            exc.cmd, "timeout", exc.stdout or "", exc.stderr or "official verifier timed out"
+        )
+    finally:
+        _docker_run(["docker", "rm", "-f", container], timeout=120)

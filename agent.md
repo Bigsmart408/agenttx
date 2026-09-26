@@ -1,693 +1,889 @@
-# AgentTX 在 SWE-Bench Lite + Terminal-Bench 全目录上的统一随机 Crash 七组实验矩阵
+# AgentTX Experiment Specification
 
-你是 `/home/bfq/agenttx` 上本实验的唯一操作员。目标是在 SWE-Bench Lite 与
-Terminal-Bench 的完整官方目录上，以相同任务、相同随机 crash 位置和相同模型配置，
-对比官方任务 runner 提供的全部七个实验 mode 的正确性、恢复完整性和总 token 成本。
-先完成两个 suite 的 smoke gate，再启动全量实验。
-不要把旧实验结果拼入新实验，不要在主实验运行期间修改策略、提示词、故障注入或
-计量代码。
+This document is the authoritative experiment specification. The evidence must
+be produced and presented in this order:
 
-**全局并发硬限制：本用户账号在本项目中的 agent/model 请求并发最多为 4。** 该限制
-适用于 smoke、主实验、续跑和第 11 节 motivation 实验。七个 mode 必须由最多四个
-worker 排队调度；不得把一个实验拆成多个 supervisor、后台命令或对话来绕过限制。
-启动前先检查本用户已有的相关实验进程，并把它们占用的请求计入总数。并发超过 4 会
-导致 agent 账号卡顿，因此任何命令中的 `--workers` 和 `--max-requests` 都不得大于 4。
+```text
+Microbenchmark
+    -> Real-world workloads (SWE-Bench Lite and Terminal-Bench)
+    -> System breakdown
+    -> Appendix correctness and interrupted-recovery tests
+    -> Other overheads
+```
 
-**Causal context 全局硬限制：所有实验中的 `causal` / `agenttx_causal` 必须全程使用
-`compact` context。** 该限制适用于 smoke、主实验、续跑、失败补跑、消融和第 11 节
-motivation；不得继承 `AGENTTX_RECOVERY_CONTEXT=full`，也不得临时切换为 full。通过
-官方任务 runner 运行时必须显式传入 `--causal-recovery-context compact`，并检查
-`run_config.json` 和每条 causal 结果的 `recovery_context_variant` 均为 `compact`。
-motivation 的固定 manifest replay 不包含完整故障前历史，因此其 `agenttx_causal`
-输入也必须保持 compact 表示。
+No layer substitutes for another. The microbenchmark combines analytical
+sweeps with complete, reproducible long agent trajectories; the two official
+suites provide real-world repository and shell workloads; the breakdown
+attributes the result to specific mechanisms; correctness tests establish
+invariants; and overhead experiments bound costs not visible in end-to-end
+completion metrics.
 
-## 1. 研究问题
+The existing 400-case Motivation suite remains the Microbenchmark layer. The
+earlier partial 541-task runs remain audit data, not completed real-world
+results. Final paper results must be regenerated from a frozen revision under
+the protocols below.
 
-主问题：agent 已经发生可观测故障后，不同回滚范围对最终成功率和恢复成本有何影响？
-辅助问题是无故障执行、恢复提示本身和故障污染分别带来多少成本。
+# Part I: Motivation Microbenchmark
 
-七个 mode 必须全部运行。它们不是七种 crash，也不是七种回滚算法，而是一个完整的
-实验控制矩阵：
+## 1. Goal
 
-| mode | 注入 crash | 回滚 | agent 提示 | 角色 |
-|---|---:|---|---|---|
-| `no_fault` | 否 | 无 | 原始任务提示 | 干净执行基线 |
-| `crash_direct` | 是 | 无 | 原始任务提示 | 故障污染本身的对照 |
-| `clean_recovery` | 否 | 无 | recovery-shaped compact 提示 | 无故障 compact 恢复基线 |
-| `crash_no_rollback` | 是 | 无 | recovery-shaped 提示 | agent 自行处理故障的对照 |
-| `causal` | 是 | 因果影响锥 | recovery-shaped compact 提示 | AgentTX 主回滚策略 |
-| `temporal_checkpoint` | 是 | 从故障时刻向后 | recovery-shaped 提示 | 时间回滚策略 |
-| `whole_branch_abort` | 是 | 整个未提交分支 | recovery-shaped 提示 | 全量回滚策略 |
+Measure how recovery granularity behaves across a branch containing multiple
+agent turns. The benchmark sweeps both `dependency_value` and task length,
+represented by `turn_count=1..10`, rather than selecting one sparse,
+single-turn graph that maximizes the ideal oracle's gap.
 
-其中 `crash_no_rollback`、`causal`、`temporal_checkpoint` 和
-`whole_branch_abort` 是同一 crash 下的四种故障处理/回滚选择。`crash_direct` 是原始
-提示控制组，不应被称为第五种回滚算法。`no_fault` 与 `clean_recovery` 不注入故障，
-也不能加入“随机 crash 后成功率”的分母。
+This is a controlled microbenchmark, analogous to sweeping thread count in a
+systems benchmark. It establishes the mechanism behind the motivation claim:
 
-## 2. 公平性约束
+> Temporal, turn-level, and branch-level rollback waste work when chronology is
+> a poor proxy for causal dependence; the ideal selective rollback bound
+> quantifies how much valid work a precise recovery mechanism could preserve.
 
-1. 正式全量必须同时包含 SWE-Bench Lite 和 Terminal-Bench，使用本地完整官方目录，
-   不得把 50-task SWE pilot 称为全量。随机 crash、配对 seed 和 causal 自动定位必须
-   在两个 suite 上都生效；任一 suite 未通过对应 smoke 时不得启动全量。
-2. 七个 mode 必须使用同一任务集合、同一 `repeat`、同一模型、同一 reasoning effort、
-   同一 verifier 和同一 timeout。
-3. 五个有 crash 的 mode 必须共享同一注入器、faulty producer、独立文档集合、文档
-   顺序、derived artifact、失败 verifier 和 crash 位置。固定 `AGENTTX_FAULT_SEED=0`；
-   trial seed 由 `seed + task + repeat` 派生且不包含 mode，因此同一
-   `(task, repeat)` 的五个 crash 组必须有相同的 `crash_trial_seed` 和
-   `fault_after_independent_steps`。
-4. 设置 `AGENTTX_RANDOMIZE_CRASH=1`。每个有 crash 的 cell 注入一次 crash；
-   正式全量使用 `--repeats 1`，即每个任务只进行一次随机位置 trial。两个无 crash
-   基线仍不注入。
-5. 设置 `AGENTTX_AUTO_LOCALIZE=1`。`causal` 必须通过运行时故障定位得到根步骤，
-   不得直接把隐藏的 injected root 当作 causal 的定位结果。
-6. 全局设置 `AGENTTX_RECOVERY_CONTEXT=full`，但通过 runner 的
-   `--clean-recovery-context compact` 和 `--causal-recovery-context compact` 分别覆盖
-   `clean_recovery`、`causal` worker。`no_fault` 和 `crash_direct` 的记录应为 `none`，
-   `clean_recovery` 与 `causal` 必须为 `compact`，其余三个 recovery-shaped 组必须为
-   `full`。这项设计按要求以 clean compact 替换 clean full；
-   因此 `no_fault` 与 `clean_recovery` 的差异同时包含恢复提示和 compact 投影影响，
-   不能再解释成纯提示词消融。
-7. 七个 mode 应放在同一个 run 中，并用 `--mode-parallel` 在最多四个 worker 上排队
-   执行，避免不同日期、服务负载或代码版本成为混杂因素。
-8. 正式 run 启动后，测试未通过是有效实验结果，不重跑。只有 `environment_error=True`
-   或未完整落盘的 cell 可以用同一 run name 续跑。
-9. 若修改了恢复策略、故障定位、注入轨迹、prompt 或 token 计量逻辑，当前 run 作废，
-   必须换新 run name 从头开始。只修不影响实验语义的基础设施 bug 时，才允许续跑，
-   并在最终报告中记录补丁和时间。
+No SWE-Bench or Terminal-Bench run is required to regenerate the Motivation
+figures. Those suites form the separate real-world workload layer in Part II.
 
-## 3. 固定配置
+## 2. Motivation Argument and Unified Microbenchmark
 
-- 仓库：`/home/bfq/agenttx`
-- Python：`/home/bfq/miniconda3/envs/agenttx/bin/python3.11`
-- Harness：Codex CLI
-- 模型：`gpt-5.6-luna`
-- Reasoning effort：`max`
-- Harness timeout：1800 秒
-- 正式任务集：SWE-Bench Lite 完整 test split 300 tasks，加 Terminal-Bench
-  `original-tasks` 完整目录 241 tasks，共 541 tasks
-- 正式全量：541 tasks × 1 repeat × 7 modes = 3,787 cells
-- 50-task SWE 冻结集仅作为 pilot/subset，不属于正式全量
-- 并发：最多 4 个 worker、4 个外部模型请求；七个 mode 排队执行
-- trace backend：默认 `strace`
-- verifier：SWE-Bench 官方 Docker eval；Terminal-Bench 官方 task verifier/container
+The Motivation section uses one controlled microbenchmark family. It does not
+mix native-trace incidence, real-model tokens, or implemented-system results
+into the recovery-boundary argument. Its claim is:
 
-已有的 `causal compact`、clean 或其他旧结果只能用于辅助分析，不能替代本轮同期、
-同代码、同随机注入计划跑出的七组数据。
+> Existing recovery boundaries follow execution structure (time, turn, or
+> branch), while corruption follows dependencies. Under-rollback leaves
+> invalid descendants; correct coarse rollback removes valid independent work.
+> No fixed coarse boundary dominates as task length, fault position, and
+> dependency structure change.
 
-## 4. 启动前检查
+All experiments use the same deterministic filesystem-effect generator,
+canonical policy definitions, paired manifests, and validators. The ideal
+oracle is an analytical upper bound, not an implemented system. Motivation
+must not run, plot, or claim results for `agenttx_causal`.
 
-进入仓库并固定环境：
+### 2.0 Motivation writing outline (authoritative)
+
+The narrative structure is adapted from the evidence flow in
+[WOLVES (OSDI '25)](https://www.usenix.org/conference/osdi25/presentation/pan):
+analyze the existing paths, measure and break down their cost, state the
+significance, explain why incremental attempts remain insufficient, then derive
+the key insight and design requirements. We borrow this argumentative
+progression, not its file-system claims or terminology.
+
+The section must answer one central question:
+
+> Why can no recovery boundary defined only by execution structure provide
+> both complete recovery and low collateral loss for a multi-turn agent?
+
+The three observations are not parallel facts. They form the following causal
+chain:
+
+```text
+coarse boundaries can recover correctly only by over-deleting
+    -> because temporal order does not encode failure dependence
+    -> therefore choosing or tuning one fixed coarse boundary cannot solve it
+    -> recovery needs a dependency-defined unit inside a long-lived trajectory
+```
+
+#### 3.1 Analyzing Recovery Paths of Stateful Agents
+
+Open with one short paragraph and the recovery-boundary table from Background.
+Group existing mechanisms by the state they can restore: failed step, turn,
+temporal suffix, or whole branch. State the shared limitation neutrally: these
+boundaries are defined by execution structure, not by which later effects were
+actually influenced by the failure. Do not introduce the proposed system or
+claim that causality is already the answer.
+
+This subsection plays the same role as the reference paper's I/O-path analysis:
+before measuring overhead, trace how each representative mechanism reaches its
+recovered state. Follow one shared multi-turn example and show the selected set
+for root-only, turn-checkpoint, temporal-suffix, and whole-branch recovery. Use
+the ideal set only as a reference target. Explain what each path preserves and
+what it necessarily cannot distinguish; do not report benchmark percentages in
+this subsection.
+
+The current `paper/main.tex` subsection **Recovery Boundaries in Stateful Agent
+Execution** belongs here. It must be moved before the experiments, not left
+after Observations 1--3. Its existing-boundary and state-propagation paragraphs
+should be condensed into this path analysis; its design requirements belong in
+Section 3.3 below.
+
+#### 3.2 Analyzing Recovery Overheads
+
+This subsection corresponds to the reference paper's crash-consistency
+overhead analysis. It first states the methodology, then reports a breakdown,
+three observations, and their significance. Every result is a consequence of
+the paths defined in Section 3.1.
+
+Define the two measured axes here, rather than in the path analysis:
+
+1. **Recovery completeness:** what fraction of failure-affected effects is
+   removed?
+2. **Collateral recovery cost:** how much valid, independent work is discarded
+   once completeness is satisfied?
+
+This distinction prevents `no_recovery` or `root_only` from appearing efficient
+merely because they leave corrupted descendants behind.
+
+##### Methodology: one workload family and one statistical population
+
+Describe the multi-turn microbenchmark once: 16 operations per turn; 1--10
+turns; controlled fault position, dependency value, graph shape, and
+interleaving; identical manifests and fault roots for all six policies.
+
+All three main observations and every later full-system Microbenchmark
+experiment use the same 400 paired manifests as their statistical population:
+
+- 100 task-length cases;
+- 90 fault-position cases;
+- 210 dependency-value cases.
+
+The paper should state this 400-case population once and reuse it. A subsection
+may zoom into one registered sweep to explain a mechanism, but it must return
+to the same suite-level population and must not present that slice as a new
+workload.
+
+##### Observation 1: correctness creates a collateral-loss dilemma
+
+**Claim.** Correct coarse recovery removes the invalid closure but also
+discards useful work; low-cost under-recovery is not a valid alternative.
+
+**Evidence.** Begin with the correctness gate over the shared suite. No
+recovery removes 0% of the invalid closure and root-only removes 17.03% on
+average. Turn checkpoint, temporal step, whole branch, and ideal all remove
+100%. Among these correctness-qualified policies, checkpoint, temporal, and
+whole-branch rollback discard 54.02%, 56.90%, and 100% of valid work on
+average, while ideal discards none. Use the task-length sweep only to make the
+amplification concrete: as a branch grows around a fixed four-operation
+closure, coarse rollback grows while the exact target does not.
+
+**Significance.** Existing boundaries face a correctness--retention dilemma:
+rolling back less is incorrect, while rolling back safely may erase most of a
+long-running agent's useful progress.
+
+**Figure role.** `FIG-Motivation-Suite` is the independent Observation 1
+figure. It shows the correctness gate and collateral-cost breakdown over the
+400 paired cases. `FIG-Motivation-Coarse-Waste` remains a separate controlled-
+scaling figure; do not merge it with the three observation figures. In the
+paper, keep `FIG-Motivation-Suite` within one column and arrange its two internal
+panels horizontally.
+
+##### Observation 2: chronology--dependency mismatch is the root cause
+
+**Claim.** The waste is not an incidental property of one checkpoint policy;
+it arises because failure propagation follows dependencies while coarse
+recovery follows time, turns, or branches.
+
+**Evidence.** Introduce `dependency_value` only here, after Observation 1 has
+established the symptom. Across the shared 400 manifests, 390 recovery targets
+(97.5%) are non-prefix states. In the registered dependency sweep, temporal
+recovery approaches the exact bound only as dependency value approaches one;
+when dependencies are sparse, independent and affected work interleave and
+temporal rollback discards the independent effects between them.
+
+**Significance.** An exact recovered state often never existed as a temporal
+checkpoint. Faster checkpoint creation, denser checkpoint placement, or a
+cheaper branch abort can reduce mechanism overhead, but cannot represent that
+non-prefix state.
+
+**Figure role.** `FIG-Motivation-Dependency` is the root-cause figure. Its
+x-axis is dependency value and its lines show discarded useful work, retained
+valid work, and rollback amplification. Every statement about the mechanism
+must be tied to a visible trend in this figure. Keep the figure within one
+column and keep all internal panels horizontally aligned.
+
+##### Observation 3: selecting a different fixed boundary does not solve it
+
+**Claim.** No static coarse boundary is consistently best across workload
+structures.
+
+**Evidence.** Reuse the same 400 cases. Turn checkpoint has lower attributed
+waste in 139 cases, temporal step in 251, and they tie in 10. The ranking
+reverses by registered slice: checkpoint wins 60/100 task-length and 60/90
+fault-position cases, while temporal wins 191/210 dependency cases. The best
+fixed boundary still discards 10.5% more useful token weight than the post-hoc
+per-case minimum of those two coarse choices.
+
+**Significance.** The result rules out the obvious incremental response to
+Observation 2: picking a globally better checkpoint or suffix policy. Boundary
+selection changes which independent work is lost, but no fixed execution
+boundary expresses the desired recovery set.
+
+**Figure role.** `FIG-Motivation-Boundary-Crossover` is the limitation figure.
+It reports both rank reversals and fixed-policy cost. The per-case minimum is a
+diagnostic coarse-policy envelope, not the ideal oracle and not an implemented
+adaptive policy. Keep the figure within one column and arrange its two internal
+panels horizontally.
+
+End Section 3.2 with one **Significance** paragraph that combines the three
+observations without repeating their numbers: correct coarse recovery wastes
+work, the waste is structural rather than an implementation artifact, and no
+fixed coarse boundary removes the tradeoff. Do not introduce the solution in
+this paragraph.
+
+The current `paper/main.tex` subsection **Recovery Microbenchmark** becomes
+Section 3.2. Move its recovery-policy definitions to Section 3.1, keep its
+workload and measurements here, and remove the standalone suite-level detour
+between Observations 1 and 2.
+
+#### 3.3 Motivation: Attempts, Insight, and Design Challenges
+
+Close the section in the same order as the reference paper's motivation:
+
+1. **Attempts.** Root-only rollback preserves work but fails completeness.
+   Turn checkpoints constrain loss to affected turns but cannot retain valid
+   work within them. Temporal rollback is exact only when all later work
+   depends on the fault. Whole-branch abort is safe but maximally coarse.
+   Increasing checkpoint frequency changes cost, not representability.
+2. **Insight.** The lifetime of speculation and the unit of recovery are
+   different system decisions. Keep the trajectory as the speculation unit,
+   but define the recovery unit by affected effects rather than by one
+   contiguous execution interval.
+3. **Design challenges.** State the non-trivial questions implied by the
+   insight: (i) how to discover dependencies hidden inside opaque tool calls
+   and descendant processes; (ii) how to track object identity and historical
+   versions across aliases, renames, replacements, and copy-up; (iii) how to
+   reconstruct a non-prefix state consistently across workspace and
+   agent-visible context; and (iv) how to publish only an approved durable
+   frontier without exposing a speculative suffix.
+4. **Transition.** End by stating that the next section introduces an
+   abstraction addressing these challenges. Do not name AgentTX or describe
+   implementation mechanisms inside Motivation; the system name belongs at
+   the start of the following design section.
+
+##### Section flow and figure order
+
+The intended main-text order is:
+
+```text
+3.1 trace existing recovery paths (no performance claims)
+    -> 3.2 unified methodology and suite-level correctness gate
+       -> Observation 1 + correctness/collateral-cost figure
+       -> Observation 2 + dependency-sweep figure
+       -> Observation 3 + boundary-crossover figure
+       -> combined significance
+    -> 3.3 attempts -> insight -> design challenges -> transition
+```
+
+Keep the three observation figures independent. Do not compress
+`FIG-Motivation-Suite`, `FIG-Motivation-Dependency`, and
+`FIG-Motivation-Boundary-Crossover` into one composite. The separate
+`FIG-Motivation-Coarse-Waste` figure documents controlled task-length,
+chronology, and rollback-amplification trends before the observations;
+one-factor sensitivity plots remain supporting material.
+
+### 2.1 MB1: Coarse-boundary scaling
+
+**Question.** If the true fault closure stays small while the branch grows from
+one to ten turns, how much unnecessary work does each correct policy remove?
+
+**Input.** Sweep 1--10 turns with 16 operations per turn. Fix the fault at 25%
+of the complete branch and its invalid closure at four operations. Use 10 paired
+manifests per turn count and keep the full policy manifest for audit, but
+exclude unsafe controls from efficiency claims.
+
+**Figure 1a/1c.** Sweep 1--10 turns at 16 operations per turn and report valid
+operations discarded and rollback amplification. The fault closure remains
+four operations, so growth is caused by task length rather than fault size.
+
+### 2.2 MB2: Chronology sensitivity
+
+**Question.** Does a temporal policy change when dependencies remain fixed but
+the fault moves through execution order?
+
+**Input.** Hold task length at 10 turns, turn width at 16, and closure size at
+four. Sweep global fault position from 0.10 to 0.90 with 10 paired manifests
+per point.
+
+**Figure 1b.** Report valid operations discarded. Turn checkpoint follows the
+turns containing invalid effects, whole branch follows the complete branch,
+ideal remains exact, and temporal waste varies with the suffix. This isolates
+chronology from dependency structure.
+
+### 2.3 MB3: Dependency-value sweep
+
+**Question.** How does the mismatch change as causal density ranges from sparse
+to dense?
+
+**Input.** Use five turns of 16 operations, a 25% global fault position,
+layered shape, alternating interleaving, all 21 `dependency_value` points from
+0.00 to 1.00, and 10 paired manifests per point.
+
+**Figure 3.** Plot useful work discarded, valid work retained, and rollback
+amplification for all four correct policies. Include every preregistered point,
+including dense cases where temporal approaches ideal.
+
+### 2.4 Fixed-boundary crossover
+
+**Question.** Can one coarse recovery boundary remain the better choice as
+task structure changes?
+
+**Input.** Reuse exactly the 400 paired MB1--MB3 manifests. Do not generate a
+new workload or select a favorable subset. For each manifest, compare
+`turn_checkpoint_proxy` and `temporal_step` by `useful_tokens_wasted`, report
+which policy has lower waste, and retain ties.
+
+**Figure 4.** Report lower-waste policy frequency separately for the task-
+length, fault-position, dependency-value, and combined slices. Also report the
+mean waste of each fixed policy and the post-hoc per-case minimum of the two.
+The per-case minimum is an analytical coarse-policy envelope, not a realizable
+oracle and not an additional recovery policy.
+
+### 2.5 Supporting sensitivity and breakdown
+
+One-factor sweeps over turn count, fault position, graph shape, and interleaving use
+the same generator and policy semantics. They may appear in the main text when
+they support a distinct claim; otherwise they belong in the appendix. The
+suite-level summary combines all 400 paired manifests from MB1--MB3: 100
+turn-count cases, 90 fault-position cases, and 210 dependency-value cases. It reports
+recovery completeness for all policies, then measures collateral recovery cost
+only for policies that remove the complete invalid closure.
+
+Native-trace audits, real-turn counterfactuals, real-model replay, SWE-Bench,
+and Terminal-Bench belong in Real-world Workload or Evaluation. They must not
+be used to form a second Motivation workload family.
+
+### 2.6 Main-text figure disposition
+
+There is no fixed upper bound on the number of Motivation figures, but the main
+text should follow the three-observation chain in Section 2.0. The current
+artifacts map to it as follows:
+
+1. **Correctness--retention dilemma:** use the suite-level correctness and
+   collateral-cost results from `FIG-Motivation-Suite` as Observation 1. Use
+   `FIG-Motivation-Coarse-Waste` for controlled task-length, chronology, and
+   rollback-amplification trends.
+2. **Temporal--dependency mismatch:** MB3 in `FIG-Motivation-Dependency`,
+   supporting Observation 2. Across MB1--MB3, 390/400 exact survivor states
+   cannot be represented by one temporal-prefix checkpoint, demonstrating how
+   often execution order diverges from failure dependence.
+3. **Coarse-boundary crossover:** the same 400 MB1--MB3 manifests in
+   `FIG-Motivation-Boundary-Crossover`, supporting Observation 3 by showing
+   that turn-checkpoint and temporal-step recovery reverse rank across the
+   registered workload slices.
+The one-factor turn-count, fault-position, shape, and interleaving sweeps remain
+available in `FIG-Motivation-Sensitivity` as supporting robustness evidence,
+but they are not a separate main-text observation.
+
+`FIG-Motivation-Suite` and `FIG-Motivation-Coarse-Waste` remain separate:
+the former supports Observation 1, while the latter shows controlled scaling.
+Additional main-text figures may
+report another controlled view only when it supports a distinct observation.
+`FIG-M1-Strategy-Outcomes` is a historical, noncanonical plot and
+`FIG-M2-Extreme-Tradeoff` is a historical rendering of the same MB1 endpoint,
+so it must not be counted as additional evidence.
+
+### 2.7 Current data status
+
+| evidence | protocol | status |
+|---|---|---|
+| MB1 task-length scaling | 1--10 turns, 10 paired manifests/point, fixed turn width 16 and closure 4 | complete; 100 paired cases |
+| MB2 chronology | 9 fault positions, 10 paired manifests/position, 10 turns | complete; 90 paired cases |
+| MB3 dependency sweep | 21 values, 10 paired manifests/value, 5 turns | complete; 210 paired cases |
+| Boundary crossover | derived from the same 400 MB1--MB3 paired manifests | complete; no additional cases |
+| Supporting sensitivity | turn count, fault position, shape, interleaving | complete; no missing paired cells |
+
+## 3. Hard Constraints
+
+- Repository: `/home/bfq/agenttx`
+- Python: `/home/bfq/miniconda3/envs/agenttx/bin/python3.11`
+- At most 6 concurrent agent/model requests for this user. The deterministic
+  sweep does not call a model and should normally run serially.
+- Do not run or plot `agenttx_causal` in motivation. Its implemented-system
+  results belong in the later evaluation, not the opportunity study.
+- Every policy in one paired cell receives the same materialized trace, fault
+  root, dependency graph, token weights, and seed.
+- Do not remove unfavorable points, failed cells, or dense-dependency points.
+- A single extreme sparse case may be retained as an appendix regression test,
+  but it is not main-text evidence and is not a substitute for the sweep.
+- Crab is represented only by `turn_checkpoint_proxy`; do not describe its
+  numbers as measurements of the Crab artifact.
+
+## 4. Dependency Value
+
+For a single-root trace, let:
+
+- `r` be the faulty operation;
+- `S = {s | s occurs after r}` be the temporal suffix after the root;
+- `C` be the transitive causal closure of `r`, including `r`.
+
+Define:
+
+```text
+dependency_value = |(C - {r}) intersect S| / |S|
+```
+
+`dependency_value` is therefore the fraction of post-fault operations that
+really depend on the fault:
+
+- `0.0`: no later operation depends on the fault;
+- `1.0`: every later operation depends on the fault;
+- intermediate values: dependent and independent work coexist.
+
+This definition is independent of branch length and does not move the fault root
+to make a requested closure size feasible. The generator first fixes the total
+operation count and `fault_position`, then rounds
+`dependency_value * post_fault_operations` to obtain the dependent count.
+Both requested and realized values must be written to every result row.
+
+The old `closure_ratio = |C| / |E|` remains a compatibility field only. It
+mixes fault position with dependency density and must not be used as the main
+x-axis.
+
+## 5. Recovery Policies
+
+| canonical ID | figure label | rollback boundary | expected role |
+|---|---|---|---|
+| `no_recovery` | No recovery | none | negative correctness control |
+| `root_only` | Root only | fault producer only | dependency-propagation ablation |
+| `turn_checkpoint_proxy` | Turn checkpoint | every complete turn containing invalid effects | favorable turn-boundary baseline |
+| `temporal_step` | Temporal step | fault root through end of the branch | temporal-suffix baseline |
+| `whole_branch` | Whole branch | complete uncommitted branch | coarsest baseline |
+| `ideal_oracle` | Ideal oracle | exact invalid closure | analytical upper bound |
+
+These identifiers and labels are defined once in
+`experiments/motivation_strategies.py`. Motivation figures plot all six
+policies. End-to-end model experiments use a separate
+namespace (`clean_recovery`, `crash_no_rollback`, `temporal_checkpoint`,
+`whole_branch_abort`, and `causal`) and must not silently rename those modes
+to microbenchmark policies.
+
+`no_recovery` and `root_only` may be cheap but incorrect. Token or work
+savings are compared only between policies that remove the complete invalid
+closure and pass all correctness checks.
+
+## 6. Primary Sweep
+
+The headline experiment is a one-factor sweep over dependency density:
+
+| factor | primary value(s) |
+|---|---|
+| turn count | 5 |
+| operations per turn | 16 |
+| fault position | 25% |
+| dependency value | 0.00 through 1.00 in increments of 0.05 (21 points) |
+| graph shape | layered |
+| interleaving | alternating |
+| seeds/cases per gradient | 0 through 9 (10 cases) |
+
+These 21 dependency points are preregistered. Report all points, including
+points where the ideal ties a coarse baseline.
+
+Primary plots:
+
+1. `dependency_value` versus useful valid operations wasted.
+2. `dependency_value` versus valid-token retention.
+3. `dependency_value` versus ideal savings relative to temporal and turn
+   checkpoint rollback.
+
+Use one consistent line-chart style. Each policy is one line; show means with
+95% paired bootstrap confidence intervals and retain the raw points.
+
+## 7. Sensitivity Sweeps
+
+Change one factor at a time from the primary configuration:
+
+| sweep | values |
+|---|---|
+| turn count (task length) | 1 through 10 |
+| fault position | 0.10, 0.25, 0.50, 0.75, 0.90 |
+| graph shape | chain, fan-out, layered |
+| interleaving | independent-before, alternating, independent-after |
+
+Every sensitivity sweep retains the same 21 dependency values from `0.00`
+through `1.00` in increments of `0.05`. Use 10 seeds/cases per gradient. Do
+not form an unnecessary full Cartesian product of
+all nuisance factors; the primary sweep and one-factor sensitivity sweeps are
+the intended design.
+
+## 8. Metrics
+
+For all operations `E`, invalid closure `C`, valid operations `V = E - C`, and
+policy rollback set `R_p`, record:
+
+```text
+valid_retention        = 1 - |R_p intersect V| / |V|
+invalid_removal        = |R_p intersect C| / |C|
+useful_steps_wasted    = |R_p intersect V|
+useful_tokens_wasted   = sum(token_weight(s), s in R_p intersect V)
+invalid_steps_retained = |C - R_p|
+```
+
+Also record requested and actual dependency value, fault position, closure
+size and legacy closure ratio, exact rollback set, manifest hash, rollback
+time, and all four correctness views: merged overlay, conversation, committed
+host, and verifier.
+
+Tokenizer-attributed work is not billed model usage. Any later model replay
+must report prompt, completion, and total usage separately.
+
+## 9. Correctness Gates
+
+Before accepting the analytical sweep:
+
+1. For every requested dependency value, assert the realized dependent count
+   equals `round(dependency_value * suffix_size)` and the reported actual value
+   equals that count divided by the suffix size.
+2. Assert the generator realizes the requested dependency value exactly after
+   documented discrete rounding.
+3. Run physical-overlay cells across all five registered turn-count groups and
+   representative dependency values. The physical gate uses six distinct
+   manifests per group because it validates execution semantics rather than
+   estimating a population mean.
+4. For every physically executed policy, check the merged overlay,
+   conversation active calls, committed host state, and verifier result.
+5. Assert policies in a paired cell share the same manifest hash.
+
+The fixed 128-operation sparse trace remains an appendix regression test. It
+must not appear as a standalone main-text motivation result.
+
+## 10. Breakdown
+
+For each non-ideal policy, decompose the gap to `ideal_oracle` into invalid
+work retained and additional valid work discarded. This is a policy-granularity
+breakdown, not an AgentTX component breakdown.
+
+## 11. Microbenchmark Scope Boundary
+
+AgentTX causal effectiveness, ledger/query overhead, compact-context cost,
+commit latency, RSS, and model usage belong in the later system evaluation.
+They must not be mixed into this motivation dataset.
+
+## 12. Execution
+
+Run focused tests first:
 
 ```bash
 cd /home/bfq/agenttx
-export AGENTTX_PYTHON=/home/bfq/miniconda3/envs/agenttx/bin/python3.11
 export PYTHONPATH=/home/bfq/agenttx/src:/home/bfq/agenttx
-export AGENTTX_SWE_VERIFY=docker
-export AGENTTX_KEEP_EVAL_IMAGES=1
-export AGENTTX_RECOVERY_CONTEXT=full
-export AGENTTX_RANDOMIZE_CRASH=1
-export AGENTTX_AUTO_LOCALIZE=1
-export AGENTTX_FAULT_SEED=0
+PY=/home/bfq/miniconda3/envs/agenttx/bin/python3.11
+
+"$PY" -m pytest -q tests/test_intra_turn_recovery.py
 ```
 
-不要打印 API key。不要关闭或杀死其他用户、其他对话或无关实验进程。若资源不足，
-等待资源释放；只能按准确 PID 停止本实验自己的 supervisor。
-
-先执行定向测试：
+Run the deterministic dependency sweep:
 
 ```bash
-"$AGENTTX_PYTHON" -m pytest -q \
-  tests/test_fault_localization.py \
-  tests/test_recovery_state_consistency.py \
-  tests/test_parallel_official_tasks.py \
-  tests/test_official_tasks.py
+"$PY" experiments/scripts/bench_intra_turn_recovery.py \
+  --phase m1 \
+  --dependency-values 0 0.05 0.10 0.15 0.20 0.25 0.30 0.35 0.40 0.45 \
+    0.50 0.55 0.60 0.65 0.70 0.75 0.80 0.85 0.90 0.95 1.0 \
+  --turn-counts 5 --widths 16 \
+  --fault-positions 0.25 \
+  --shapes layered \
+  --interleavings alternating \
+  --repeats 10 \
+  --m1-execution analytical \
+  --output-dir experiments/results/motivation/microbenchmark
 ```
 
-确认完整 catalog 数量，不要手工重排、删减或替换：
+Run MB1--MB2 with:
 
 ```bash
-"$AGENTTX_PYTHON" - <<'PY'
-from pathlib import Path
-from experiments.workloads import swe_bench_suite as swe
-from experiments.workloads import terminal_bench_suite as tb
-root = Path("experiments/cache")
-assert len(swe.load_tasks(root)) == 300
-assert len(tb.load_tasks(root)) == 241
-PY
+"$PY" experiments/scripts/bench_controlled_motivation.py \
+  --output-dir experiments/results/motivation/controlled_case
 ```
 
-使用完全相同的任务集完成无模型调用的环境检查。若失败，先修环境，不要启动模型：
+Then run the one-factor sensitivity sweeps:
 
 ```bash
-"$AGENTTX_PYTHON" experiments/scripts/check_experiment_environment.py \
-  --suite all --task-set full \
-  --output experiments/results/environment_check_random_crash_official541
-```
-
-## 5. 双 Suite Smoke Gate
-
-先选冻结任务集中跨 8 个仓库的 8 个 case，跑 2 repeats × 7 modes，共 112 cells。
-这是 SWE 子门禁，只验证实验管线，不进入正式统计。由于旧版本未对 Terminal-Bench
-随机化 crash，它不能单独放行正式全量。还必须在最新代码上运行下方 TB 子门禁。
-
-```bash
-SMOKE_RUN=codex_luna_max_random_crash_7mode_cleancompact_causalcompact_swe8_r2_smoke_v4_20260913
-SMOKE_LOG=experiments/logs/$SMOKE_RUN
-mkdir -p "$SMOKE_LOG"
-SMOKE_TASKS=(
-  swe:django__django-10924
-  swe:matplotlib__matplotlib-18869
-  swe:mwaskom__seaborn-2848
-  swe:pylint-dev__pylint-6506
-  swe:pytest-dev__pytest-7220
-  swe:scikit-learn__scikit-learn-10297
-  swe:sphinx-doc__sphinx-11445
-  swe:sympy__sympy-11400
+DEPENDENCY_VALUES=(
+  0 0.05 0.10 0.15 0.20 0.25 0.30 0.35 0.40 0.45 0.50
+  0.55 0.60 0.65 0.70 0.75 0.80 0.85 0.90 0.95 1.0
 )
 
-nohup setsid env \
-  PYTHONPATH="$PYTHONPATH" \
-  AGENTTX_SWE_VERIFY="$AGENTTX_SWE_VERIFY" \
-  AGENTTX_KEEP_EVAL_IMAGES="$AGENTTX_KEEP_EVAL_IMAGES" \
-  AGENTTX_RECOVERY_CONTEXT="$AGENTTX_RECOVERY_CONTEXT" \
-  AGENTTX_RANDOMIZE_CRASH="$AGENTTX_RANDOMIZE_CRASH" \
-  AGENTTX_AUTO_LOCALIZE="$AGENTTX_AUTO_LOCALIZE" \
-  AGENTTX_FAULT_SEED="$AGENTTX_FAULT_SEED" \
-  "$AGENTTX_PYTHON" -u experiments/scripts/run_parallel_official_tasks.py \
-  --run-name "$SMOKE_RUN" \
-  --workers 4 --max-requests 4 --mode-parallel \
-  --clean-recovery-context compact \
-  --causal-recovery-context compact \
-  --repeats 2 \
-  --modes no_fault crash_direct clean_recovery crash_no_rollback \
-          causal temporal_checkpoint whole_branch_abort \
-  --model gpt-5.6-luna --reasoning-effort max \
-  --harness-timeout 1800 --python "$AGENTTX_PYTHON" \
-  --tasks "${SMOKE_TASKS[@]}" \
-  >> "$SMOKE_LOG/supervisor.log" 2>&1 &
-SMOKE_PID=$!
-printf '%s\n' "$SMOKE_PID" > "$SMOKE_LOG/supervisor.pid"
+"$PY" experiments/scripts/bench_intra_turn_recovery.py \
+  --phase m1 --dependency-values "${DEPENDENCY_VALUES[@]}" \
+  --turn-counts 1 2 3 4 5 6 7 8 9 10 --widths 16 --fault-positions 0.25 \
+  --shapes layered --interleavings alternating --repeats 10 \
+  --m1-execution analytical \
+  --output-dir experiments/results/motivation/microbenchmark/sensitivity/turn_count
+
+"$PY" experiments/scripts/bench_intra_turn_recovery.py \
+  --phase m1 --dependency-values "${DEPENDENCY_VALUES[@]}" \
+  --turn-counts 5 --widths 16 --fault-positions 0.10 0.25 0.50 0.75 0.90 \
+  --shapes layered --interleavings alternating --repeats 10 \
+  --m1-execution analytical \
+  --output-dir experiments/results/motivation/microbenchmark/sensitivity/fault_position
+
+"$PY" experiments/scripts/bench_intra_turn_recovery.py \
+  --phase m1 --dependency-values "${DEPENDENCY_VALUES[@]}" \
+  --turn-counts 5 --widths 16 --fault-positions 0.25 \
+  --shapes chain fan-out layered --interleavings alternating --repeats 10 \
+  --m1-execution analytical \
+  --output-dir experiments/results/motivation/microbenchmark/sensitivity/shape
+
+"$PY" experiments/scripts/bench_intra_turn_recovery.py \
+  --phase m1 --dependency-values "${DEPENDENCY_VALUES[@]}" \
+  --turn-counts 5 --widths 16 --fault-positions 0.25 --shapes layered \
+  --interleavings independent-before alternating independent-after \
+  --repeats 10 --m1-execution analytical \
+  --output-dir experiments/results/motivation/microbenchmark/sensitivity/interleaving
 ```
 
-Smoke 放行条件：
+Never merge rows from an incompatible schema or an older closure-ratio-only
+run.
 
-- 112 个预期 key 全部有记录，且没有重复 key；
-- `environment_error=0`；
-- `no_fault`、`clean_recovery` 为 `fault_injected=False`，其随机 crash 字段为空；
-- 另外五组均为 `fault_injected=True`、`fault_origin=harness_injected_crash`；
-- `no_fault`、`crash_direct` 的 `recovery_context_variant=none`，`clean_recovery` 与
-  `causal` 为 `compact`，其余三个 recovery-shaped 组为 `full`；
-- 同一 `(task, repeat)` 的 `crash_trial_seed`、`fault_after_independent_steps`、
-  `docs_before`、`docs_after`、`faulty_path` 和 `derived_paths` 在五个 crash mode 间一致；
-- causal 的 `localization_validation=passed`、
-  `localization_matches_injected_root=True`；
-- `crash_no_rollback` 的 `rollback_targets=[]`；
-- causal、temporal、whole 的 rollback 结果符合各自策略；
-- supervisor 最终为 `failed_shards=[]` 且 `stop_reason=""`。
-
-随机采样允许少量位置碰撞，不要求 2 次 repeat 必须落在两个不同位置。但必须输出
-`fault_after_independent_steps` 的直方图，确认不是所有任务都固定在步骤 1。
-
-Terminal-Bench 子门禁使用三个官方任务、2 repeats、7 modes，共 42 cells：
-
-```bash
-TB_SMOKE_RUN=codex_luna_max_random_crash_7mode_cleancompact_causalcompact_tb3_r2_smoke_v1_20260913
-TB_SMOKE_TASKS=(tb:hello-world tb:csv-to-parquet tb:log-summary)
-
-"$AGENTTX_PYTHON" -u experiments/scripts/run_parallel_official_tasks.py \
-  --run-name "$TB_SMOKE_RUN" \
-  --workers 4 --max-requests 4 --mode-parallel \
-  --clean-recovery-context compact \
-  --causal-recovery-context compact \
-  --repeats 2 \
-  --modes no_fault crash_direct clean_recovery crash_no_rollback \
-          causal temporal_checkpoint whole_branch_abort \
-  --model gpt-5.6-luna --reasoning-effort max \
-  --harness-timeout 1800 --python "$AGENTTX_PYTHON" \
-  --tasks "${TB_SMOKE_TASKS[@]}"
-```
-
-TB 子门禁执行与 SWE 相同的字段、配对和 rollback 检查。尤其要断言五个 crash mode
-共享 `crash_trial_seed` 和随机位置，且 causal 的自动定位命中 injected root。两个
-suite 的 smoke 都通过、环境错误补跑清零后，才能启动正式全量。
-
-## 6. 主实验
-
-只有 smoke 全部满足放行条件后才能启动。主实验必须使用新的空 run name：
-
-```bash
-MAIN_RUN=codex_luna_max_random_crash_7mode_cleancompact_causalcompact_official541_r1_20260913
-MAIN_LOG=experiments/logs/$MAIN_RUN
-mkdir -p "$MAIN_LOG"
-
-nohup setsid env \
-  PYTHONPATH="$PYTHONPATH" \
-  AGENTTX_SWE_VERIFY="$AGENTTX_SWE_VERIFY" \
-  AGENTTX_KEEP_EVAL_IMAGES="$AGENTTX_KEEP_EVAL_IMAGES" \
-  AGENTTX_RECOVERY_CONTEXT="$AGENTTX_RECOVERY_CONTEXT" \
-  AGENTTX_RANDOMIZE_CRASH="$AGENTTX_RANDOMIZE_CRASH" \
-  AGENTTX_AUTO_LOCALIZE="$AGENTTX_AUTO_LOCALIZE" \
-  AGENTTX_FAULT_SEED="$AGENTTX_FAULT_SEED" \
-  "$AGENTTX_PYTHON" -u experiments/scripts/run_parallel_official_tasks.py \
-  --run-name "$MAIN_RUN" \
-  --workers 4 --max-requests 4 --mode-parallel \
-  --clean-recovery-context compact \
-  --causal-recovery-context compact \
-  --repeats 1 \
-  --modes no_fault crash_direct clean_recovery crash_no_rollback \
-          causal temporal_checkpoint whole_branch_abort \
-  --model gpt-5.6-luna --reasoning-effort max \
-  --harness-timeout 1800 --python "$AGENTTX_PYTHON" \
-  >> "$MAIN_LOG/supervisor.log" 2>&1 &
-MAIN_PID=$!
-printf '%s\n' "$MAIN_PID" > "$MAIN_LOG/supervisor.pid"
-```
-
-用 `$MAIN_LOG/supervisor.pid` 记录并核对 supervisor PID。每 5 分钟报告一次进展，
-至少包含：正常完成数/3787、按 suite 和 mode 分组的成功数与成功率、环境错误数、
-活跃 worker 数、累计总 token。不要用高频轮询影响实验。
-
-## 7. 中断与续跑
-
-先确认原 supervisor 已退出，不允许同一 run name 同时存在两个 supervisor。续跑必须
-使用与首次启动完全相同的环境变量、任务顺序、worker 数、mode 顺序和参数，再增加
-`--resume-mode-subset`。runner 会跳过所有 `_completed_attempt=True` 的 cell，并重跑
-环境错误或中断项。
-
-有效的 `tests_ok=False` 或 `success=False` 是策略结果，不得为了提高成功率重跑。
-外部 session 未启动、timeout、Docker/verifier 未执行等 `environment_error=True` 才是
-可重试项。补跑结束后执行一次规范合并：
-
-```bash
-"$AGENTTX_PYTHON" experiments/scripts/run_parallel_official_tasks.py \
-  --run-name "$MAIN_RUN" --workers 4 \
-  --modes no_fault crash_direct clean_recovery crash_no_rollback \
-          causal temporal_checkpoint whole_branch_abort \
-  --merge-only
-```
-
-merged 输出必须按冻结 task 顺序、mode 顺序和 repeat 排列。用
-`(suite, task, mode, repeat, harness_backend)` 检查唯一性，不能按 CSV 行号配对。
-
-## 8. 指标口径
-
-主正确性指标：
-
-- `success`：完整结束、提交成功、官方 verifier 通过且恢复不变量成立；
-- `tests_ok`：官方修复是否通过；
-- `independent_retained` / `independent_unchanged`：独立有效工作是否保留且未被修改；
-- `derived_removed`：故障派生物是否清除；
-- `recovery_manifest_authoritative` / `recovery_manifest_intact`：恢复证书是否有效；
-- causal 定位准确率：`localization_matches_injected_root` 的均值；
-- `environment_error`：基础设施无效 cell，单列并从策略成功率分母中排除，补跑后应为 0。
-
-主成本定义必须是：
+## 13. Required Artifacts
 
 ```text
-combined_tokens = total_tokens + doc_replay_tokens
+experiments/results/motivation/microbenchmark/config.json
+experiments/results/motivation/microbenchmark/motivation_recovery_raw.csv
+experiments/results/motivation/microbenchmark/motivation_recovery_summary.csv
+experiments/results/motivation/microbenchmark/REPORT.md
+experiments/results/motivation/controlled_case/config.json
+experiments/results/motivation/controlled_case/controlled_recovery_raw.csv
+experiments/results/motivation/controlled_case/controlled_recovery_summary.csv
+motivation/FIG-Motivation-Dependency.pdf
+motivation/FIG-Motivation-Dependency.png
+motivation/FIG-Motivation-Coarse-Waste.pdf
+motivation/FIG-Motivation-Coarse-Waste.png
+motivation/FIG-Motivation-Suite.pdf
+motivation/FIG-Motivation-Suite.png
+motivation/FIG-Motivation-Boundary-Crossover.pdf
+motivation/FIG-Motivation-Boundary-Crossover.png
+motivation/FIG-Motivation-Sensitivity.pdf
+motivation/FIG-Motivation-Sensitivity.png
 ```
 
-其中 `total_tokens` 是主 agent session，`doc_replay_tokens` 是粗粒度回滚后恢复独立
-文档的额外 agent 成本。不得只报 `total_tokens`，也不得把 replay 忽略为 0。每个 mode
-至少报告：
+The report must state the complete sweep grid, planned and completed paired
+cells, correctness-gate status, all exclusions with reasons, and the Git commit
+or dirty-worktree fingerprint used for the run.
 
-- 有效 cell 数、成功数、成功率和 tests pass rate；
-- combined token 总和、mean、P50、P95、P99；
-- 主 session token mean 与 replay token mean，分开列出；
-- wall time mean、P50、P95；
-- independent retention rate、derived removed rate；
-- crash 位置直方图和 causal 定位准确率。
+## 14. External Artifact Baselines
 
-同时报告两套 token 统计：
+The paper's recovery comparison must include real external artifacts where they
+are available. Table 1 classifies semantics; it does not imply that every row is
+runnable. Keep author-reported numbers separate from measurements produced on
+our host.
 
-1. **所有有效 cell**：反映实际预算消耗，失败也消耗 token；
-2. **成功 cell**：仅用于比较成功解题的条件成本，必须与成功率并列展示。
+| system | native boundary | artifact status | experiment status |
+|---|---|---|---|
+| try | one opaque command effect set | MIT; pinned locally | run now |
+| Sandlock | one sandboxed process run | Apache-2.0; builds locally, but host kernel has Landlock disabled | run later on a Landlock-enabled host as a process-boundary/overhead baseline |
+| YoloFS | session snapshot | GPL-2.0; pinned and mounted locally | run now |
+| BranchFS | leaf branch | MIT; pinned and mounted locally | run now |
+| Waypoint | filesystem + process checkpoint | Apache-2.0; pinned; CRIU 4.2.1 passes in the privileged evaluation container | run now, but report container results separately from bare-host latency |
+| Crab | sandbox checkpoint | no official artifact located | qualitative only; never label a proxy as Crab |
+| DeltaBox | sandbox checkpoint | authors state artifact is not public | qualitative only |
 
-策略差异使用同一 `(task, repeat)` 配对。额外报告：
+The common artifact-native experiment reuses the microbenchmark's materialized
+multi-turn manifests. Every system receives the same initial workspace, turn
+boundaries, dependency value, fault location, and crash notification. It then
+uses only its native recovery operation: command/process discard for try and
+Sandlock, `snapshot`/`travel` for YoloFS, leaf `abort` for BranchFS, checkpoint
+`fork` for Waypoint, and dependency-selected recovery for AgentTX. Do not graft
+AgentTX's dependency scheduler onto an external artifact.
 
-- 七组都有效时的 paired success rate；
-- 两组都成功时，`combined_tokens` 的均值差、中位数差、bootstrap 95% CI 和胜率；
-- causal 相对每个对照的 token ratio；
-- 不允许拿不同 case 数的总体均值直接宣称优劣。
+Validate every recovered workspace with one shared oracle. Report invalid-state
+removal, valid-state retention, recovery latency, end-to-end latency, setup
+cost, storage amplification, and privilege/kernel requirements. A baseline that
+cannot represent a selective survivor state should use its native coarse
+boundary and record the valid work it discards. Environment failures are
+reported separately and excluded from performance aggregates.
 
-至少给出以下成对因果对照：
+The immediate matched run set on this host is AgentTX, try, YoloFS, BranchFS,
+and Waypoint. Waypoint runs in a privileged, network-disabled container whose
+runtime directories are bind-mounted from host ext4; do not combine its latency
+with bare-host latency without an explicitly matched container run. Sandlock
+joins on a Landlock-enabled kernel. The adapter and raw results must record
+the upstream Git commit, local patches, command line, host fingerprint, and
+whether each cell exercised the external artifact rather than a policy proxy.
 
-- `no_fault` vs `crash_direct`：相同原始提示下的 crash 污染成本；
-- `no_fault` vs `clean_recovery`：无 crash 时 recovery-shaped prompt 与 compact 投影的
-  联合影响；不能据此单独归因 compact 或提示词；
-- `crash_direct` vs `crash_no_rollback`：同一 crash、同为不回滚时提示条件的影响；
-- `crash_no_rollback` vs causal/temporal/whole：回滚相对 agent 自行修复的效果；
-- causal vs temporal vs whole：不同回滚粒度的核心比较。
+Paper results must use the complete 400-manifest Motivation population: all
+100 MB1 task-length cases, 90 MB2 fault-position cases, and 210 MB3 dependency
+cases. Smoke tests and favorable subsets are validation only. The artifact
+runner reconstructs these cases with `--suite motivation400` and refuses to run
+if any `trace_id`/`manifest_hash` differs from the registered Motivation CSVs.
+The full command is:
 
-## 9. 最终完整性检查
-
-正式结果目录：
-
-```text
-experiments/results/<MAIN_RUN>/merged/official_tasks_raw.csv
+```bash
+PYTHONPATH=src:. /home/bfq/miniconda3/envs/agenttx/bin/python3.11 \
+  experiments/scripts/bench_external_recovery_artifacts.py \
+  --suite motivation400 \
+  --backends agenttx session_try yolofs branchfs waypoint \
+  --workers 6 --resume \
+  --output-dir experiments/results/external_recovery_motivation400_20260922
 ```
 
-发布前必须满足：
+# Part II: System Evaluation
 
-- 唯一 cell 数为 3,787；
-- SWE-Bench Lite 恰好 300 tasks，Terminal-Bench 恰好 241 tasks；
-- 七个 mode 各恰好 541 个 cell；
-- 每个 `(task, repeat)` 恰好有七个 mode；
-- `environment_error=0`；
-- 所有行模型均为 `gpt-5.6-luna`；两个 direct-prompt 组上下文为 `none`，
-  `clean_recovery` 与 `causal` 为 `compact`，其余三个 recovery-shaped 组为 `full`；
-- 两个无 crash 组没有伪造注入字段；五个 crash 组真实注入同一 crash 计划；
-- causal 的定位字段完整，定位失败不得静默改用 injected root；
-- token 的 `usage_source` 不为 `none`；
-- combined token 由原始两列逐行相加后再聚合；
-- run config、supervisor log、原始 CSV 和代码版本信息一并保留。
+## 15. System Microbenchmark: End-to-End Execution of Motivation Cases
 
-最终在结果目录写 `REPORT.md`。先给事实表，再写结论；明确区分策略效果、compact
-上下文优化和 agent 随机探索方差。不要因为 causal 偶然比 clean/no-fault 更省 token
-就声称 crash 会降低成本；这种现象只能解释为提示信息改变了 agent 的探索路径。
+This full-system microbenchmark executes the exact cases used by the analytical
+Motivation sweep. It is not a new workload and is not a substitute for the
+official real-world suites. It exercises a model, tool runner, dependency
+capture, recovery, context reconstruction, repair, and task verification in
+one run while retaining the same controlled dependency structures.
 
-## 10. 停止条件
+### 15.1 Workload
 
-只在以下情况停止并向用户报告：
+Use the canonical 400 MB1--MB3 manifest IDs without changing their turn count,
+operation order, graph shape, dependency value, interleaving, fault root, or
+expected survivor set. Materialize each manifest as an executable repository
+task with a generated task description and verifier. The generated task must
+preserve the manifest's semantics exactly; it may not add dependencies merely
+to make the result more favorable.
 
-1. smoke 不满足放行条件；
-2. 正式 run 出现真实 runner 崩溃或配置漂移；
-3. 需要修改会改变实验语义的代码，此时废弃当前 run，等待确认后换名重跑；
-4. 3,787 个有效 cell 全部完成、环境错误清零、最终合并和 `REPORT.md` 完成。
+Every policy receives the same initial snapshot, task text, model
+configuration, fault schedule, and token budget for a given case ID. A pilot
+may execute a preregistered subset for protocol debugging, but subset results
+do not appear in the paper and cannot replace the complete 400-case
+Microbenchmark.
 
-50-task SWE 实验只能作为成本 pilot 或调试数据；不得替代、拼入或冒充上述双 catalog
-正式全量结果。
+### 15.2 Policies and repetitions
 
-## 11. Paper Motivation：Loop 内粗粒度回滚浪费
+Run `clean_recovery`, `crash_no_rollback`, `turn_checkpoint`,
+`temporal_checkpoint`, `whole_branch_abort`, `causal`, and `ideal_oracle`.
+`ideal_oracle` may receive the exact faulty step and closure; every other crash
+policy receives only the same crash notification and policy-specific recovery
+boundary. `causal` must localize the fault through AgentTX's own evidence.
 
-本节是论文 motivation 实验的执行规格，不与前面的七组随机 crash 主实验混合统计。
-它只回答一个问题：**故障发生在一个 agent interaction loop 内时，以整个 loop、时间
-后缀或整个分支为恢复单位，会额外丢弃多少本来仍然有效的工作？** 所有策略必须接收
-完全相同的执行轨迹、故障根和依赖图；不得让不同策略重新采样 crash 位置。
+Use three repeats per case and policy for the complete 400-case system
+microbenchmark.
+The primary model and reasoning configuration must match the real-world
+workload. Prompt templates must be token-matched apart from unavoidable policy
+payloads; report those payload tokens separately.
 
-### 11.1 术语和当前代码边界
+### 15.3 Metrics and acceptance
 
-这里把一个 loop 严格定义为一次模型 action turn，而不是整个 agent session。在当前
-原生 SWE-agent 接入中，一次 `agent.step()` 产生的环境调用由
-`SWEAgentNativeAdapter._record_swe_step()` 合并为一个 `TurnRecord`；每个环境调用仍是
-一个独立 ledger step。`ConversationLog._messages_for_turn()` 可以从同一 turn 的
-assistant `tool_calls` 中删除失效 call、保留 active call，所以当前 causal recovery
-确实支持 **turn 内、tool-call 级** 的非连续恢复。
+Report task success, invalid-effect removal, valid-effect retention,
+workspace--context agreement, total model tokens including replay, tool calls,
+recovery latency, and end-to-end wall time. Efficiency comparisons use paired
+successful cells; all-attempt success and cost remain visible beside them.
 
-边界必须在论文中写清楚：一个 shell command 即使产生很多 syscall/effect，在当前
-ledger 中仍是一个 step。AgentTX 目前不能保留该 command 内的部分 syscall 效果，
-因此下面实验的最小恢复单位是 tool call/ledger step，不能把 syscall 数当成可选择性
-恢复的 step 数。
+The system microbenchmark is complete only when all 400 Motivation manifest IDs
+have full-system results, every policy has the required three repeats, no
+environment failure is silently excluded, and each paired cell has an
+identical manifest and crash schedule.
 
-Crab 的[论文](https://arxiv.org/abs/2604.28138)语义是根据 turn 的 OS effects 决定
-是否以及保存哪类 checkpoint，并在 turn 边界建立/恢复 checkpoint。本文只能实现一个
-`turn_checkpoint_proxy` 来复现这种恢复边界；本地没有 Crab 官方 artifact，严禁把
-proxy 数字写成“Crab 实测性能”。该 proxy 假定目标 turn 之前恰好有可用 checkpoint，
-是对 turn-boundary 方法有利的 best case；真实系统若最近 checkpoint 更早，只会丢失
-更多工作。当前
-代码的 `tx.rollback(fault_step)` 是更细的 step-suffix temporal baseline，甚至比按 turn
-恢复更乐观；`tx.rollback(0)` 是 whole-branch baseline；
-`tx.rollback_causal_many(roots)` 是 AgentTX 的实际 causal policy。
+## 16. Real-World Workloads: SWE-Bench Lite and Terminal-Bench
 
-### 11.2 统一恢复策略
+SWE-Bench Lite and Terminal-Bench are the paper's real-world workloads. Do not
+describe them as a synthetic microbenchmark and do not add a separate toy
+"real-world" scenario.
 
-Motivation 图表统一包含以下策略。前六项执行真实恢复，第七项是解析上界：
+### 16.1 Scope
 
-| policy | rollback set | 作用 |
+Run the complete available suites: 300 SWE-Bench Lite instances and 241
+Terminal-Bench instances. The primary paper run uses one repeat per task and
+policy; five repeated full-suite runs are not required. A stratified pilot may
+be repeated to estimate variance, but it cannot replace the complete run.
+
+The primary path uses a live agent and each suite's official verifier. Gold
+patches and oracle solutions are permitted only for environment validation or
+an explicitly labeled oracle upper bound; they are not task-success results.
+
+### 16.2 Recovery protocol
+
+Each crash-enabled task must inject the same registered failure schedule across
+policies without disclosing the faulty step. The agent is told only that a
+crash has occurred. Coarse policies apply their declared boundary; AgentTX may
+write its inferred localization to the recovery handoff after searching its
+ledger; only `ideal_oracle` may directly disclose the exact failed step.
+
+Primary modes are `clean_recovery`, `crash_no_rollback`,
+`temporal_checkpoint`, `whole_branch_abort`, and `causal` with compact context.
+Add `turn_checkpoint` when the runner exposes a distinct multi-turn boundary.
+All crash modes use the same fault count and positions. `clean_recovery` has no
+injected crash and defines the unavoidable task cost, not the recovery saving.
+
+### 16.3 Metrics
+
+Report official success, crash-recovery success, workspace--context agreement,
+total tokens (`main + replay`), wall time, recovery time, tool calls, and
+environment failures. Present SWE-Bench and Terminal-Bench separately before
+their aggregate. Token comparisons must include success rate and paired-success
+sample count; a failed low-token run is not a saving.
+
+## 17. System Breakdown
+
+Run the Breakdown on the same 400 Motivation manifests so every component sees
+the same complete trajectory. Compare:
+
+| configuration | removed mechanism | expected observable failure/cost |
 |---|---|---|
-| `no_recovery` | 空集 | 展示污染未清除，不能作为正确方案参与节约比例 |
-| `root_only` | 只撤销故障 producer | command undo 消融；可能留下 invalid descendants |
-| `turn_checkpoint_proxy` | 故障所在 loop 的所有 step | Crab 风格 turn-boundary 语义代理，不是 Crab artifact |
-| `temporal_step` | 从故障 step 到当前末尾 | 当前 `tx.rollback(fault_step)`；粗粒度方法的乐观下界 |
-| `whole_branch` | 全部未提交 step | 当前 `tx.rollback(0)` |
-| `agenttx_causal` | 故障根与真实 causal descendants | 运行当前源码的实际实现，不使用预先计算的 target 代替运行结果 |
-| `ideal_oracle` | 精确的真实 invalid closure | 理想系统，只消除可避免浪费；不计实现开销，不作为已实现系统 |
+| Full AgentTX | none | reference |
+| No READ/NEGATIVE capture | automatic producer--consumer discovery | invalid descendants survive |
+| Path-only identity | alias/object tracking | alias-related corruption survives or recovery fails closed |
+| Temporal history only | object-aware selective reconstruction | valid interleaved versions are lost |
+| Workspace-only rollback | unified context closure and rewind | stale tool results disagree with files |
+| One-shot worker | persistent execution | same semantics, higher per-step latency |
+| Full context handoff | compact recovery handoff | same semantics, larger prompt/token cost |
 
-`ideal_oracle` 的“解决所有浪费”只指不误删任何有效工作。故障根及其真正依赖项必须
-被撤销和修复，这是不可避免的恢复成本，不能算成粗粒度浪费。若 AgentTX 捕获的依赖
-完整且无路径冲突，它应接近 ideal；实验不能预设二者相等。
+The first four rows explain correctness and retention. The final two explain
+engineering cost. Do not combine a semantically incorrect ablation with latency
+averages as if it were a performance optimization. Report success, invalid
+removal, valid retention, context agreement, tokens, and wall time for every
+row.
 
-### 11.3 统一指标
+## 18. Appendix Correctness and Interrupted-Recovery Tests
 
-对目标 loop 的全部 step 记为 `E`，ground-truth invalid causal closure 为 `C`，有效
-集合为 `V = E - C`，策略实际撤销集合为 `R_p`。`C` 是 effect read/write edges 与
-conversation copied-result edges 的联合传递闭包，不能只看文件名或时间顺序。每个 step
-同时记录单位权重、原始生成 token 权重和实际 replay token。至少输出：
+Correctness evidence belongs in the appendix and artifact, with a compact
+summary in the main text.
 
-- `valid_retention = 1 - |R_p intersect V| / |V|`；
-- `invalid_removal = |R_p intersect C| / |C|`；
-- `useful_steps_wasted = |R_p intersect V|`；
-- `useful_tokens_wasted = sum(token_weight(s), s in R_p intersect V)`；
-- `invalid_steps_retained = |C - R_p|`；
-- `replay_prompt_tokens`、`replay_completion_tokens`、`replay_total_tokens`；
-- `final_correct`：invalid closure 全部移除、有效效果全部存在且 verifier 通过；
-- `rollback_ms` 和 `recovery_wall_ms`，但不能用理想系统的零实现开销做性能比较。
+### 18.1 Semantic matrix
 
-相对每个现有策略 `p` 分别报告绝对值和比例：
+Cover ordinary reads/writes/deletes, negative lookup followed by creation,
+same-path multi-version updates, directory ancestry, rename, symlink, supported
+hard-link groups, fd-relative operations, multiple fault roots, repeated
+rollback, reload, and the fail-closed identity boundary. For each case assert:
 
-```text
-saved_replay_tokens(ideal, p) = replay_total_tokens(p) - replay_total_tokens(ideal)
-saved_replay_pct(ideal, p) = saved_replay_tokens(ideal, p) / replay_total_tokens(p)
-saved_replay_tokens(causal, p) = replay_total_tokens(p) - replay_total_tokens(causal)
-saved_replay_pct(causal, p) = saved_replay_tokens(causal, p) / replay_total_tokens(p)
-```
+1. every selected filesystem effect disappears;
+2. every supported independent effect remains;
+3. every invalid tool-result span disappears;
+4. surviving messages and files refer to the same active step set;
+5. a second identical recovery is a no-op.
 
-仅当 `p` 与 causal/ideal 都满足 `final_correct` 时计算 token 节约比例。`root_only` 或
-`no_recovery` 若保留污染，只展示 correctness，不得用“低 replay token”宣称更省。
-若分母为零，比例记为 `N/A`，不得记成 0% 或 100%。
-除 replay 外，再报告无需模型的 `useful_tokens_wasted`，避免模型随机性掩盖恢复边界。
-主表给 mean、P50、P95、P99 和 95% bootstrap CI，并保留 paired seed 的逐行差值。
+### 18.2 Interrupted-recovery experiment
 
-一次模型响应中的多个 tool call 共用 prompt token，不能把整轮 API usage 任意均摊到
-step。这里的 `token_weight(s)` 固定定义为用实验模型 tokenizer 对该 call 的 function
-name、arguments 和 agent 生成的 artifact payload 序列化后计数；它是工作量归因，不是
-账单 token。真实成本只使用 M3 返回的逐次 API prompt/completion usage。
+This experiment targets interruption during rollback, not publication to the
+user workspace. Inject `SIGKILL` at the following recovery phases:
 
-### 11.4 M0：真实 Loop 宽度和可保留空间审计
+1. after the unified recovery plan is recorded but before reconstruction;
+2. after a fresh upper generation is built but before it becomes active;
+3. immediately after workspace generation swap but before context rewrite;
+4. after context rewrite but before metadata persistence;
+5. after persistence but before the recovery response reaches the agent.
 
-这是后续实验的前置 gate。用最新 `SWEAgentNativeAdapter` 对成功的无故障 SWE-Bench
-轨迹落盘 `TurnRecord`、`CallSpan.step_id`、ledger parents 和每次模型调用 token。至少
-取冻结 50-task 集中 20 个成功 case；不足 20 个时继续取 case，而不是混入失败轨迹。
+After each interruption, reload the same session and resume recovery. The only
+acceptable observable states are the complete pre-recovery pair or the complete
+post-recovery pair. A workspace/context mixture, resurrected invalid message,
+lost independent effect, or duplicated recovery action is a failure. Run at
+least 20 injections per phase and publish every phase result. This test is a
+required gate before claiming crash-safe synchronized rollback.
 
-每个 loop 统计：
+## 19. Other Overheads
 
-- tool-call/ledger-step 数、write/delete step 数和总 effect 数；
-- loop 内 weakly connected causal component 数；
-- 随机选择一个 state-mutating root 后，`|C|`、`|V|` 以及 turn checkpoint 相比
-  causal 多撤销的 step/token；
-- 多调用 loop 占比，以及存在至少两个互不依赖 stateful component 的 loop 占比；
-- 每 case 和全局的 P50/P95/P99，不只报平均值。
+Measure costs not captured by task success or total wall time:
 
-只对同一 loop 内的 `V` 计数，之前和之后 loop 的工作都不进入本图。若真实轨迹大多数
-loop 只有一个 ledger step，论文必须如实报告，并把后续 controlled experiment 表述为
-“系统能力和压力场景”，不能声称它代表该 agent 的常态。也不能把一个 command 内的
-多个文件 effect 拆成多个可保留 step。
+1. dependency tracing overhead by command class and trace volume;
+2. history storage amplification versus repository size, changed bytes, and
+   trajectory length;
+3. ledger and message-index memory growth versus tool-step count;
+4. closure planning and reconstruction latency versus closure size, affected
+   path count, alias-group size, and number of fault roots;
+5. context reconstruction time and prompt tokens for full versus compact
+   handoff;
+6. startup, teardown, reload, and persistent-worker fallback costs.
 
-建议输出：`motivation_turn_audit_raw.csv`、`motivation_turn_audit_summary.csv` 和一张
-CDF，横轴为每个 loop 在 turn checkpoint 下可避免丢弃的有效 token。
+Report mean, p50, p95, and p99 where repeated measurements exist. Include RSS,
+bytes written, snapshot bytes, metadata bytes, and recovery latency rather than
+reporting only normalized percentages. Unsupported cells and environment
+failures remain visible.
 
-已完成的原生 SWEAgent M0 位于
-`experiments/results/paper_motivation_intra_turn_causalcompact_20260913/`。20 个公开成功
-轨迹均通过当前 `SWEAgentNativeAdapter` 重放，三个 replay 分片失败数均为 0；共记录
-638 个 turn。M0 报告显示多调用 turn 占比为 100%，但包含至少两个独立 stateful
-component 的 turn 仅占 0.94%，因此后续 controlled experiment 必须按压力场景表述。
+## 20. Global Execution Rules
 
-### 11.5 M1：Loop 内恢复粒度参数扫描
-
-扩展 `causal_retention_dag.py` 和 `bench_causal_retention.py`，但新建 motivation 专用
-入口，避免改变论文现有结果。每条轨迹通过真实 AgentTX overlay 执行，并把目标 steps
-记录进同一个 `TurnRecord`。参数为：
-
-| 因子 | 取值 |
-|---|---|
-| loop width | 8, 16, 32, 64, 128 tool calls |
-| fault position | 5%, 25%, 50%, 75% |
-| invalid-closure ratio | 3%, 10%, 25%, 50% |
-| graph shape | chain, fan-out, layered |
-| interleaving | independent-before, independent-after, alternating |
-
-每个配置至少 5 repeats；恢复策略共享同一个 materialized trace 和 fault root。主要图是
-两张 heatmap：`valid_retention` 和 `invalid_removal`，横轴 fault position，纵轴
-invalid-closure ratio，分别按 loop width 分面。另画 `useful_tokens_wasted` 随 loop
-width 的增长曲线，并把 `ideal_oracle` 画成上界虚线。
-
-本实验应直接回答三个问题：turn 粗粒度在什么结构下最浪费；乐观的 step-temporal
-仍会浪费多少 suffix 中的独立工作；root-only 为什么虽然保留多却不正确。若
-`agenttx_causal` 未达到 ideal，必须把差值分成漏依赖、conversation copy edge 扩张和
-path-overlap 安全拒绝三类，不能隐藏为均值。
-
-### 11.6 M2：必须包含的极端 Case
-
-构造一个 **单 loop、128 个 tool-call step** 的固定 layered trace：
-
-- step 0 是有效且独立的前缀工作；
-- step 1 是 faulty producer；
-- 只有 step 32、64、127 依赖该 producer，故 `|C| = 4`；
-- 其余 124 个 step 全部有效且彼此独立；
-- 四个 invalid step 和有效 step 使用不同路径，排除人为 path conflict；
-- 所有策略使用相同 trace、相同 fault root 和相同 replay 内容。
-
-这个构造的无需运行即可验证的期望值是：
-
-| policy | 有效 step 被浪费 | valid retention | invalid removal | 是否可能正确 |
-|---|---:|---:|---:|---:|
-| `no_recovery` | 0/124 | 100% | 0% | 否 |
-| `root_only` | 0/124 | 100% | 25% | 否 |
-| `turn_checkpoint_proxy` | 124/124 | 0% | 100% | 是，需重放 |
-| `temporal_step` | 123/124 | 0.8% | 100% | 是，需重放 |
-| `whole_branch` | 124/124（只计该 loop） | 0% | 100% | 是，需重放 |
-| `ideal_oracle` | 0/124 | 100% | 100% | 是 |
-
-`agenttx_causal` 不预填结果，必须运行最新代码后填写；预期 rollback set 为
-`{1, 32, 64, 127}`。实验先断言实际 targets，再检查 overlay、conversation active
-tool calls、commit 后 host 和 verifier 四者一致。任何一项不一致都算失败。
-
-论文用这个 case 解释上界：turn/whole 粗粒度丢失当前 loop 的全部 124 份有效工作，
-乐观 temporal 仍丢失 123/124，即 99.2%；ideal 消除全部可避免的有效工作损失。
-这只是构造给出的 effect 数，实际节约多少 token 必须由 M3 测量后填写，不能用
-124:4 的比例替代 token 结果。
-
-### 11.7 M3：从丢失工作换算成真实 Replay Token
-
-在 M1 的代表配置和 M2 极端 case 上进行固定协议的模型 replay。每个策略恢复后，给
-同一模型一份只描述通用 artifact contract 的 opaque manifest。模型、reasoning、
-timeout 和 seed 固定；每个 cell 5 repeats。不得让 coarse policy 获得额外解题提示，
-也不得让 causal policy 跳过所有策略都必须完成的 faulty closure 修复。
-
-必须额外运行同一 `(trace, repeat)` 的 `clean_recovery compact` 对照：不注入故障、
-不回滚、所有 artifact 已正确保留，使用相同 compact manifest schema。
-所有故障策略必须从完全相同的未知位置条件开始：manifest 只给通用 artifact contract，
-必须保持 `missing=[]`、`repair=[]`、`fault_step_id=null`，且不得包含 retained count、
-oracle closure、污染路径、目标内容或编码 fault position/closure ratio 的内部 trace id。
-通用 contract 必须明确索引范围为 `[0, count)`。每个 artifact 对应一个原始 tool call；
-v8 固定采用 one-artifact-per-completed-write-event 协议，不允许用 loop、批量命令、生成
-脚本或 multi-file patch 在一个写事件中恢复多个 artifact。所有策略使用相同权限和审计。
-最终成功由 harness 正常退出、token usage 有效、写事件协议和完整 workspace verifier
-共同决定。
-恢复控制器也不得直接读取 `fault_step_id` 或 `oracle_closure` 来选择回滚目标：它先为
-所有策略运行相同的通用 contract 扫描并记录 `localized_fault_steps`，再把该定位结果交给
-不同粒度的 rollback 策略。随后 agent 必须检查策略产生的 workspace，自行发现缺失或
-污染 artifact 并按通用 contract 恢复。所有 fault arm 的 crash 通知必须逐字相同，且
-都不知道 fault step/path。恢复策略使用删掉 invalid history 的 compact post-rollback
-上下文；`crash_no_rollback` 则必须保留污染 workspace 和仍活动的完整 pre-crash tool
-history，只要求继续原任务，不得额外提供“扫描并修复全部异常”的 repair plan。这里的
-上下文差异是策略本身的结果，不是 fault-location 提示差异。外部黑盒 agent 无法恢复
-注入的原生 session 时，允许投影完整 tool arguments/result，但投影不得包含 fault id、
-oracle closure 或 evaluator 的污染标记。故障真值只用于注入和最终 verifier，以及事后计算
-`localization_matches_injected_faults`，不得作为恢复定位或 agent prompt 的输入。
-真实恢复额外开销定义为
-`recovery_overhead(p) = actual_replay_tokens(p) - actual_replay_tokens(clean_recovery)`。
-causal 相对粗粒度策略的节约比例必须以该 paired recovery overhead 为分母；不能直接
-用包含 clean 基础调用成本的整体 token 作为分母。原始整体 token 仍需保留供审计。
-
-同时记录成本和效果：
-
-1. `attributed_lost_tokens`：原轨迹中被错误撤销的有效 call 对应 token，确定性指标；
-2. `actual_replay_tokens`：恢复后真实额外模型调用的 prompt + completion token。
-3. `success_rate`、所有 attempt 的 observed token 总和/均值，以及
-   `observed_tokens_per_success = sum(tokens across all attempts) / successful cells`。
-
-成功样本的 P50/P95/P99 仍需报告，但不得只用成功样本均值评价 no-rollback；否则超时或
-失败会被从成本中删除，反而奖励更不可靠的策略。`no rollback 最差` 的可检验含义是固定
-预算下的总体恢复效用最低（成功率更低和/或每次成功的总成本更高），不是要求它在每个
-成功样本的 token 上都高于会重放整个 loop 的 turn/whole 策略。
-
-从 M1 选择 12 个代表 cell：三种 loop width（16/64/128）乘两种 fault position
-（5%/50%）乘两种 closure ratio（3%/25%），固定 layered + alternating；再加入 M2。
-最终逐一列出 ideal 和 AgentTX 相对 `turn_checkpoint_proxy`、`temporal_step`、
-`whole_branch` 的绝对节约 token、百分比和 paired bootstrap CI。正文只使用
-`actual_replay_tokens`，attributed 指标用于解释方差。
-
-当前正式 M3 固定采用 v8 协议。所有策略使用相同 opaque artifact contract 和相同未知故障
-条件；故障位置、影响路径、retained count 与 path-specific repair 均不进入 prompt。
-`crash_no_rollback` 保留无标签 stale artifact、完整 active history 和 agent 已接受成功
-observation 的上下文；其余恢复策略删除 invalid history 并使用 compact context。每个完成
-的写事件最多恢复一个 artifact，最终成功由 harness 状态、有效 usage、严格写事件审计和
-完整 workspace verifier 判断。当前代码语义由 Git commit 追踪，并与已有 v8 数据目录的
-schema、prompt 和 CSV 字段保持兼容；其他实验目录不得与 v8 正式结果混合。
-
-SWEAgent M3 必须复用上述完全相同的 plan、policy、manifest、pairing、verifier 和
-统计代码；统一 runner 只把每个 cell 的 workload backend 从 `CodexHarness` 替换成原生
-`SWEAgentNativeAdapter`。SWEAgent 不能参与选择、安排或解释实验，也不能使用
-Codex 黑盒任务流程。结果必须写入独立目录，且每行包含
-`harness_backend=sweagent_native`、SWEAgent model/config hash、真实 model usage 和
-`native_adapter=SWEAgentNativeAdapter`。
-SWEAgent workload 必须显式使用本文件第 3 节规定的 Codex 实验配置：
-`gpt-5.6-luna`、reasoning effort `max`；不得从当前用户 Codex 配置隐式继承其他模型或
-reasoning 值。API endpoint、Responses 协议和鉴权仍复用该用户的 Codex provider 配置。
-
-模型配置必须与本文件第 3 节的 Codex 实验口径一致。runner 从
-`/home/bfq/.codex/config.toml` 和 `/home/bfq/.codex/auth.json` 读取 provider、base URL、
-response storage 开关和凭据，但正式运行显式覆盖为 `gpt-5.6-luna`、
-`reasoning_effort=max`，并在结果中记录非敏感配置快照。SWEAgent/LiteLLM 对 GPT-5 的协议兼容映射为
-`temperature=1` 且不传 `top_p`，这不是改变模型口径。凭据不得写入日志、hash 或结果。
-运行入口为：
-
-```bash
-experiments/scripts/run_sweagent_m3_bwrap.sh \
-  --output-dir experiments/results/motivation_sweagent_full_20260915 \
-  --sweagent-config /home/bfq/SWE-agent/config/bash_only.yaml \
-  --model gpt-5.6-luna \
-  --reasoning-effort max \
-  --repeats 5
-```
-
-正式启动前先用 `--max-plans 1 --repeats 1 --policies temporal_step` 做一个真实模型
-gate，要求实际创建缺失 artifact 后仍能 `submitted`、verifier 通过，且 model calls 和
-token usage 均大于 0。clean-only gate 不覆盖 AgentTX commit 路径。当前
-M0/M4 的无模型 replay 不能替代 SWEAgent M3。
-
-### 11.8 M4：真实轨迹上的反事实恢复
-
-从 M0 的成功轨迹中只选择 `calls_per_turn >= 2` 且 loop 内存在两个以上独立 causal
-component 的 turns。每个反事实样本先将可重放 session 裁到目标 turn 的结束边界，
-再对该 turn 中每个可变更状态的 step 轮流作为故障根，不重新调用 agent；随后在相同
-session prefix 的 fork 上分别执行 `turn_checkpoint_proxy`、`temporal_step`、
-`whole_branch` 和 `agenttx_causal`，以原 ledger/conversation 联合闭包作为 correctness
-oracle。这样 checkpoint rollback 不会把真实轨迹中尚未发生的后续 turns 混入结果。
-
-该实验报告真实代码任务中 loop 内的 **可挽回空间**，而不是端到端成功率：每个故障点
-的有效 step/token 损失、invalid removal 和 AgentTX-to-ideal gap。对每个原始 turn
-等权聚合，避免宽 turn 因含有更多候选 fault 而支配结果。主结果报告 median、P95、P99
-及“至少可避免 25% / 50% / 75% loop 内有效 token”的 turn 比例。
-
-反事实 fork 只能用于计算恢复边界。如果要声称最终 SWE-Bench 成功率或实际 replay
-token，必须另做真实恢复后的 agent continuation；不得把 offline oracle 结果冒充
-端到端 agent 运行。
-
-已完成的原生 SWEAgent M4 与 M0 位于同一结果目录。20 条 native trace 中有 3 条轨迹
-的 6 个 turn 满足独立 component gate，共产生 18 个 fault point、90 个成对
-fault-policy rows；每个策略 18 行，`agenttx_causal` 全部使用 compact context。该批
-反事实中 causal 与 ideal 均保留全部有效工作并移除全部 invalid closure，但该结论只
-适用于 recovery boundary，不能作为端到端成功率或 billed replay token 结果。
-
-### 11.9 公平性、实现和论文改写要求
-
-1. 所有策略以 `(trace_id, turn_id, fault_step_id, seed)` 成对；注入清单 hash 必须一致。
-2. `C` 只用于计分和 ideal，`agenttx_causal` 必须使用实际 ledger parents、
-   conversation copy edges 和当前 rollback API，不能读取 oracle target。
-3. `turn_checkpoint_proxy` 从目标 `TurnRecord.step_ids` 的最小 active step 开始恢复；不能
-   偷换成 fault step suffix，否则低估 loop-boundary 浪费。
-4. whole-branch 的主表只统计目标 loop 内浪费；额外丢掉的早期 loop 工作放附录，满足
-   “只讲 loop 内”的范围。
-5. 每个正确性结论同时验证 merged view、conversation view、commit 后 host 和 verifier。
-6. Crab 和 DeltaBox 只作恢复边界的定性映射。没有官方 artifact 的系统不进入本地
-   性能排名，不再把 `temporal_step` 的结果直接标成 Crab/DeltaBox 数字。
-7. M0 是外部有效性 gate，M1/M2 是机制因果证据，M3 是 token 成本，M4 是真实轨迹
-   分布；四类证据不得互相替代。
-
-建议新增文件而不是覆盖旧结果：
-
-```text
-experiments/scripts/bench_intra_turn_recovery.py
-experiments/scripts/analyze_intra_turn_traces.py
-experiments/workloads/intra_turn_recovery_dag.py
-experiments/results/paper_motivation_intra_turn_<date>/
-```
-
-论文 motivation 的推荐叙事顺序是：M0 证明真实 loop 中是否存在可保留空间；M1 展示
-粗粒度浪费随结构增长；M2 用极端 case 直观说明 turn checkpoint 会丢掉什么；M3 把
-effect 损失换算为真实 replay token；M4 给出真实任务 trace 上的分布。正文主张限定为
-“在 tool-call 可分且依赖可观测的 loop 内，因果恢复消除粗粒度边界造成的有效工作
-误删”，不扩展到单个 command 内的 syscall 级选择性恢复。
+- Freeze code, prompts, model, reasoning effort, task versions, and verifiers
+  before a canonical run.
+- Use at most six concurrent model requests; deterministic microbenchmarks may
+  run separately without consuming model concurrency.
+- Run order is analytical microbenchmark, system-microbenchmark pilot,
+  complete system microbenchmark, real-world environment check, full
+  SWE-Bench/Terminal-Bench, Breakdown,
+  appendix correctness/interruption matrix, then Other Overheads.
+- Every result records the Git revision and dirty diff hash, environment,
+  manifest hash, model configuration, prompt hash, usage source, and exclusion
+  reason.
+- Environment failures are excluded from task-success denominators only when
+  reported separately and rerun under the identical frozen configuration.
+- Never select only favorable cases or combine results from incompatible code,
+  prompt, or result schemas.

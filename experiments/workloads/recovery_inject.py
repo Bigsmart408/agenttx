@@ -24,8 +24,15 @@ from agenttx.conversation import record_tool_record
 RECOVERY_MANIFEST_PATH = ".agenttx/recovery_manifest.json"
 
 
-def recovery_context_variant() -> str:
-    """Return the external-agent recovery handoff projection."""
+def recovery_context_variant(policy: Optional[str] = None) -> str:
+    """Return the configured handoff projection for every recovery arm.
+
+    The old implementation silently forced the coarse policies and the
+    no-rollback control to ``full`` even when the experiment runner selected
+    compact context.  That made the policy comparison include an unrelated
+    prompt-size treatment.  Direct no-fault/crash controls still report
+    ``none`` at the result layer and do not call this helper.
+    """
     value = os.environ.get("AGENTTX_RECOVERY_CONTEXT", "full").strip().lower()
     return "compact" if value in {"1", "true", "yes", "on", "compact"} else "full"
 
@@ -165,6 +172,7 @@ def inject_recovery_dag(
     derived_cmd: str,
     test_cmd: str,
     bind_conversation: bool = True,
+    fault_after_docs: Optional[int] = None,
 ) -> dict:
     """Inject a crash in the middle of independent work.
 
@@ -174,7 +182,17 @@ def inject_recovery_dag(
     ``bind_conversation`` records each injected tool call on the native
     conversation log so rollback can rewind logical state with the overlay.
     """
-    before_specs, after_specs = midcrash_docs(docs)
+    if fault_after_docs is None:
+        before_specs, after_specs = midcrash_docs(docs)
+    else:
+        ordered_docs = tuple(docs)
+        if not 0 < fault_after_docs < len(ordered_docs):
+            raise ValueError(
+                "fault_after_docs must leave at least one independent document "
+                "on each side of the fault"
+            )
+        before_specs = ordered_docs[:fault_after_docs]
+        after_specs = ordered_docs[fault_after_docs:]
     prefix_steps = []
     for path, content in prefix_writes:
         args = {"path": path, "content": content}
@@ -319,6 +337,11 @@ def build_recovery_manifest(
     workdir: Path,
     rollback_targets: Sequence[int],
     path_exists: Mapping[str, bool],
+    oracle_fault_step_id: Optional[int] = None,
+    localized_fault_step_ids: Sequence[int] = (),
+    fault_location_source: str = "hidden",
+    oracle_post_recovery_verified: bool = False,
+    post_recovery_verified: bool = False,
 ) -> dict:
     """Build the machine-verifiable handoff state for a fresh agent session."""
     independent_steps = list(injected.get("independent_steps") or ())
@@ -405,6 +428,12 @@ def build_recovery_manifest(
         not item["must_stay_absent"] or item["current_state"] == "absent"
         for item in invalidated
     )
+    # No-rollback intentionally hands the still-polluted state to the agent.
+    # The certificate is authoritative about that state without claiming the
+    # invalid effects have already been removed.
+    invalid_state_matches_policy = (
+        policy == "crash_no_rollback" or invalid_absent
+    )
     authoritative = bool(
         (retained or recreate_required)
         and not manifest_mismatch
@@ -415,7 +444,7 @@ def build_recovery_manifest(
             in {"retained_by_causal_recovery", "regenerated_after_recovery"}
             for item in retained
         )
-        and invalid_absent
+        and invalid_state_matches_policy
         and no_overlap
     )
     payload = {
@@ -431,7 +460,15 @@ def build_recovery_manifest(
         "recreate_required": recreate_required,
         "invalidated": invalidated,
         "pending": ["implement the official task", "run the official verifier"],
+        "fault_location_source": fault_location_source,
+        "localized_fault_step_ids": sorted(
+            int(item) for item in localized_fault_step_ids
+        ),
+        "oracle_post_recovery_verified": bool(oracle_post_recovery_verified),
+        "post_recovery_verified": bool(post_recovery_verified),
     }
+    if oracle_fault_step_id is not None:
+        payload["oracle_fault_step_id"] = int(oracle_fault_step_id)
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return {
         **payload,
@@ -452,7 +489,9 @@ def render_recovery_manifest_prompt(manifest: Mapping[str, object]) -> str:
             "The runtime could not verify a context/workspace-aligned recovery state. "
             "Report `AGENTTX_STATE_MISMATCH` and stop; do not repair recovery artifacts."
         )
-    if recovery_context_variant() == "compact":
+    if recovery_context_variant(str(manifest.get("policy") or "")) == "compact":
+        policy = str(manifest.get("policy") or "")
+        location_visible = policy in {"causal", "ideal_oracle"}
         retained_paths = [
             f"- {item['path']} (complete-protected; verified; do not inspect or rewrite)"
             for item in manifest.get("retained", [])
@@ -461,16 +500,34 @@ def render_recovery_manifest_prompt(manifest: Mapping[str, object]) -> str:
             f"- {item['path']}: recreate only when absent; contract={item['contract']}"
             for item in manifest.get("recreate_required", [])
         ]
-        invalidated_paths = [
-            f"- {item['path']}: {item['reason']}"
-            for item in manifest.get("invalidated", [])
-        ]
+        invalidated_paths = (
+            [
+                f"- {item['path']}: {item['reason']}"
+                for item in manifest.get("invalidated", [])
+            ]
+            if location_visible
+            else [
+                "- hidden: a crash was detected, but no fault step or source path is disclosed"
+            ]
+        )
+        location_lines = []
+        if policy == "causal":
+            roots = manifest.get("localized_fault_step_ids") or []
+            location_lines.append(
+                "AgentTX-localized root step(s): "
+                + (", ".join(str(item) for item in roots) if roots else "none")
+            )
+        elif policy == "ideal_oracle":
+            location_lines.append(
+                f"Oracle fault step: {manifest['oracle_fault_step_id']}"
+            )
         return "\n".join(
             [
                 "## AgentTX recovery handoff (compact; authoritative)",
                 f"State ID: {manifest.get('state_id', 'unknown')}",
                 f"Policy: {manifest.get('policy', 'unknown')}",
-                "Runtime verified this causal state; the certificate is authoritative.",
+                *location_lines,
+                "Runtime verified this recovered state; the certificate is authoritative.",
                 "",
                 "COMPLETE-PROTECTED (do not inspect):",
                 *(retained_paths or ["- none"]),
@@ -478,15 +535,21 @@ def render_recovery_manifest_prompt(manifest: Mapping[str, object]) -> str:
                 "RECREATE-REQUIRED (only if absent):",
                 *(recreate_paths or ["- none"]),
                 "",
-                "INVALIDATED (the only task paths to inspect or edit):",
+                "RECOVERY-INVALIDATED (repair or keep absent as specified):",
                 *(invalidated_paths or ["- none"]),
                 "",
                 "PENDING:",
                 *[f"- {item}" for item in manifest.get("pending", [])],
                 "",
-                "Three-step fast path: inspect only the invalidated source and named verifier; "
-                "make one focused edit; run the named verifier once and stop at the first pass. "
-                "Do not inventory, diagnose, rerun successful commands, or touch protected paths. "
+                "Fast path: run the named verifier first. When a localized source is disclosed, "
+                "start there; otherwise use only the verifier's concrete diagnostics. "
+                "After that, follow only issue-relevant symbols or tests needed to understand a failure. "
+                "Make focused edits; run the named verifier and stop at the first pass. "
+                "After a real test failure, use that failure to make a focused correction and "
+                "rerun the same verifier. Continue only while each rerun follows a concrete "
+                "issue-relevant edit; stop if there is no justified next edit. An environment "
+                "failure before test execution does not count as a task-code failure. "
+                "Do not inventory unrelated files, rerun successful commands, or touch protected paths. "
                 "On a protected-path mismatch, report AGENTTX_STATE_MISMATCH and stop.",
             ]
         )
@@ -502,11 +565,17 @@ def render_recovery_manifest_prompt(manifest: Mapping[str, object]) -> str:
             f"- `{item['path']}`: intentionally discarded by recovery; "
             f"contract={item['contract']}; recreate only if absent"
         )
+    policy = str(manifest.get("policy") or "")
     invalidated_lines = []
-    for item in manifest.get("invalidated", []):
-        suffix = "; must stay absent" if item.get("must_stay_absent") else ""
+    if policy in {"causal", "ideal_oracle"}:
+        for item in manifest.get("invalidated", []):
+            suffix = "; must stay absent" if item.get("must_stay_absent") else ""
+            invalidated_lines.append(
+                f"- `{item['path']}`: {item['reason']}; current_state={item['current_state']}{suffix}"
+            )
+    else:
         invalidated_lines.append(
-            f"- `{item['path']}`: {item['reason']}; current_state={item['current_state']}{suffix}"
+            "- hidden: a crash was detected, but no fault step or source path is disclosed"
         )
     return "\n".join(
         [
@@ -643,40 +712,92 @@ def recovery_prompt(
     instruction: str,
     docs: Sequence[DocSpec],
     test_cmd: str,
+    focus_path: Optional[str] = None,
     extra_rules: Iterable[str] = (),
     mode: str = "causal",
     recovery_manifest: Optional[Mapping[str, object]] = None,
+    oracle_fault_step_id: Optional[int] = None,
+    reference_progress_verified: bool = False,
 ) -> str:
     if recovery_manifest is not None:
+        manifest_policy = str(recovery_manifest.get("policy") or mode)
         policy = (
-            "AgentTX completed the selected recovery policy and generated a "
+            "The runtime completed the selected recovery policy and generated a "
             "context-aligned state certificate for this fresh session. Treat "
             "the certificate as authoritative: do not reopen, verify, or "
             "rewrite any retained path listed as complete-protected."
         )
-        if recovery_context_variant() == "compact":
+        if recovery_context_variant(mode) == "compact":
             policy = (
-                "AgentTX verified the recovery state in the control plane. "
+                "The runtime verified the recovery state in the control plane. "
                 "Use the compact handoff below; do not inspect retained paths."
             )
-        if recovery_manifest.get("policy") == "causal":
+        if manifest_policy == "causal":
             policy += (
-                " This is the causal fast path: the retained work is already "
-                "complete, so spend the remaining context only on the pending "
-                "official fix."
+                " AgentTX found the disclosed location with its verifier-guided "
+                "localizer and applied the causal rollback."
+            )
+        elif manifest_policy == "ideal_oracle":
+            disclosed = recovery_manifest.get("oracle_fault_step_id")
+            policy += (
+                f" The ideal oracle identified transaction step {disclosed} as "
+                "the exact faulty producer; its causal closure has already been rolled back."
+            )
+            if recovery_manifest.get("oracle_post_recovery_verified"):
+                policy += (
+                    " The oracle also ran the exact verifier on the recovered state and "
+                    "certified that it passed; make no edits and return the final summary."
+                )
+        elif manifest_policy == "crash_no_rollback":
+            policy += (
+                " No rollback was applied, and no fault step or source path is "
+                "disclosed; diagnose only from the named verifier and workspace evidence."
+            )
+        else:
+            policy += (
+                " This coarse policy used only its configured rollback boundary; "
+                "no fault step or source path is disclosed."
             )
         note_step = render_recovery_manifest_prompt(recovery_manifest)
-        work_step = (
-            "Implement the pending official task using one focused edit. Inspect only the "
-            "invalidated source path and the named verifier; if the invalidated path is the "
-            "requested output, create it directly from the official instruction. Run the exact "
-            f"verifier once with `{test_cmd}` and stop immediately when it passes."
+        disclosed_location = manifest_policy in {"causal", "ideal_oracle"}
+        recovery_verified = bool(
+            recovery_manifest.get("post_recovery_verified")
+            or recovery_manifest.get("oracle_post_recovery_verified")
         )
-    elif mode == "causal":
+        starting_point = (
+            "Start with the disclosed invalidated source and the named verifier, then "
+            if disclosed_location
+            else "Start by running the named verifier; use only its concrete diagnostics, then "
+        )
+        work_step = (
+            "The recovery control plane has already run the exact verifier successfully. "
+            "Make no edits, "
+            "do not rerun it, and return the final summary."
+            if recovery_verified
+            else
+            "Run the exact named verifier before making any edit because retained pre-crash "
+            "work may already satisfy the official task. If it passes, stop immediately. "
+            "Otherwise continue the pending official task with focused edits. "
+            + starting_point
+            + "follow only issue-relevant symbols or tests needed to understand a concrete "
+            f"failure. Use `{test_cmd}` and stop immediately when it passes. After a real test "
+            "failure, use that failure to make a focused correction and rerun the same verifier. "
+            "Continue only while each rerun follows a concrete issue-relevant edit; stop when "
+            "there is no justified next edit. An environment failure before tests start does "
+            "not count as a task-code failure."
+        )
+    elif mode in {"causal", "ideal_oracle"}:
+        if mode == "ideal_oracle" and oracle_fault_step_id is None:
+            raise ValueError("ideal_oracle requires oracle_fault_step_id")
         policy = (
             "The causal recovery policy retained the independent recovery notes. "
             "They are already complete and valid."
         )
+        if mode == "ideal_oracle":
+            policy += (
+                f" The ideal oracle identified transaction step {oracle_fault_step_id} "
+                "as the exact faulty producer; its causal closure was rolled back."
+            )
         doc_lines = "\n".join(
             f"- `{spec.path}` is already complete. Do not open, verify, or rewrite it."
             for spec in docs
@@ -740,33 +861,48 @@ def recovery_prompt(
             f"`{test_cmd}`."
         )
     elif mode == "clean_recovery":
-        policy = (
-            "This is a clean recovery-context control. No crash was injected and "
-            "no rollback was performed; the recovery-shaped prompt is present only "
-            "to measure prompt/context overhead."
-        )
+        if reference_progress_verified:
+            policy = (
+                "This is a clean recovery-context control. No crash was injected and "
+                "no rollback was performed. The benchmark reference solution is already "
+                "materialized and passed the exact verifier before this handoff; the "
+                "recovery-shaped prompt is present only to measure prompt/context overhead."
+            )
+        else:
+            policy = (
+                "This is a clean recovery-context control. No crash was injected and "
+                "no rollback was performed. The workspace is a clean unsolved benchmark "
+                "checkout; complete the official task normally."
+            )
         note_step = (
             "There are no retained, invalidated, or recreate-required recovery "
             "artifacts. Do not create recovery notes or generated build artifacts."
         )
         work_step = (
-            "Complete the official task in repository sources and run the official verifier with "
-            f"`{test_cmd}`."
+            f"Run the official verifier once with `{test_cmd}` before inspecting any "
+            "source. If it passes, make no edits and finish immediately. Only if it "
+            "fails may you inspect the named task source and make one focused correction."
+            if reference_progress_verified
+            else
+            "Complete the official task in repository sources and run the official "
+            f"verifier with `{test_cmd}`."
         )
     elif mode == "crash_no_rollback":
         policy = (
             "A synthetic crash was injected before this fresh session. This control "
             "intentionally performs no rollback, so the injected workspace state is "
-            "still present and must be handled as actual task state."
+            "still present. Repair the official task from that polluted state and "
+            "remove invalid fault-dependent artifacts before finishing."
         )
         note_step = (
-            "Do not create unrelated recovery notes or generated artifacts. Inspect "
-            "only task-relevant paths and preserve the injected state unless changing "
-            "it is necessary to complete the official task."
+            "The independent recovery notes are completed work: do not inspect, "
+            "rewrite, or delete them. Do not create unrelated recovery notes."
         )
         work_step = (
-            "Complete the official task in the current workspace and run the official verifier with "
-            f"`{test_cmd}`."
+            f"Run the official verifier with `{test_cmd}` first. Use its observed failure "
+            "to search for the faulty producer; its step and path are not disclosed. "
+            "Repair the polluted state without discarding unrelated pre-crash work, then "
+            "complete the official task."
         )
     elif mode == "no_fault":
         policy = (
@@ -783,6 +919,19 @@ def recovery_prompt(
         )
     else:
         raise ValueError(mode)
+
+    if (
+        mode == "clean_recovery"
+        and reference_progress_verified
+        and recovery_context_variant(mode) == "compact"
+    ):
+        return f"""This is the clean compact recovery baseline. No crash was injected and no rollback was required.
+
+Task: {title}
+{context}
+
+The benchmark reference solution was materialized before this handoff and the control plane's exact verifier certificate passed. Make no tool calls, inspect no files, and make no edits. Return one concise sentence acknowledging the verified clean state, then stop.
+"""
 
     common_step = (
         "Use the direct workspace tools provided by this session (especially the shell "
@@ -806,13 +955,32 @@ def recovery_prompt(
             " Do not inventory `.dsh`, `.agents`, `.sessions`, or `.agenttx`; those are "
             "harness metadata, not task sources."
         )
-    if recovery_context_variant() == "compact" and recovery_manifest is not None:
+    if recovery_context_variant(mode) == "compact" and (
+        recovery_manifest is not None or mode == "clean_recovery"
+    ):
+        compact_state = (
+            "This clean compact control has no recovery certificate or protected "
+            "recovery artifacts. The reference solution was prevalidated; run the "
+            "named verifier first and finish immediately if it passes, without source "
+            "inspection or edits; "
+            if mode == "clean_recovery" and reference_progress_verified
+            else "This clean compact control has no recovery certificate or protected "
+            "recovery artifacts. The workspace is an unsolved clean checkout; complete "
+            "the official task and run the named verifier; "
+            if mode == "clean_recovery"
+            else "The compact recovery certificate is authoritative: never inspect or "
+            "modify protected recovery artifacts. Follow the policy-specific starting "
+            "point and named verifier; "
+        )
         common_step = (
-            "Use direct workspace tools. The compact recovery certificate is authoritative: "
-            "never inspect or modify protected recovery artifacts. Use one bounded inspection "
-            "of the invalidated task source, one focused edit, and one run of the named verifier; "
-            "stop at the first pass. Do not inventory files, run diagnostics, repeat successful "
-            "commands, or delegate."
+            "Use direct workspace tools. "
+            + compact_state
+            + "follow only issue-relevant symbols "
+            "or tests when a concrete failure requires it. After a real test failure, make a "
+            "focused correction and rerun the same verifier. Continue only while each rerun follows "
+            "a concrete issue-relevant edit, and stop at the first pass or when no justified next "
+            "edit remains. Failures before test execution are environment failures, not task-code "
+            "failures. Do not inventory unrelated files, repeat successful commands, or delegate."
         )
     if mode == "no_fault":
         steps = [common_step, work_step, *list(extra_rules)]
@@ -832,8 +1000,16 @@ Stay inside the workspace.
 """
     artifact_step = (
         "Ensure `recovery_build/derived.txt` is absent before finishing."
-        if mode in {"clean_recovery", "causal", "temporal_checkpoint", "whole_branch_abort"}
-        else "Do not create unrelated build artifacts; this no-rollback control intentionally preserves the injected workspace state."
+        if mode
+        in {
+            "clean_recovery",
+            "crash_no_rollback",
+            "causal",
+            "ideal_oracle",
+            "temporal_checkpoint",
+            "whole_branch_abort",
+        }
+        else "Do not create unrelated build artifacts."
     )
     steps = [
         common_step,

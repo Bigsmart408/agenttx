@@ -8,6 +8,35 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_paper_motivation_reports_all_multiturn_boundaries() -> None:
+    from experiments.motivation_strategies import (
+        MOTIVATION_CORRECT_RECOVERY_POLICIES,
+        MOTIVATION_POLICIES,
+        POLICY_LABELS,
+    )
+
+    assert "turn_checkpoint_proxy" in MOTIVATION_POLICIES
+    assert "whole_branch" in MOTIVATION_POLICIES
+    assert "whole_branch" in MOTIVATION_CORRECT_RECOVERY_POLICIES
+    assert POLICY_LABELS["turn_checkpoint_proxy"] == "Turn checkpoint"
+
+
+def test_paper_motivation_names_artifact_backends() -> None:
+    source = (ROOT / "motivation" / "plot_motivation_four.py").read_text(
+        encoding="utf-8"
+    )
+    assert '"session_try": "try"' in source
+    assert '"yolofs": "YoloFS"' in source
+    assert '"branchfs": "BranchFS"' in source
+    assert '"waypoint": "Waypoint"' in source
+    artifact_labels = source.split("ARTIFACT_LABELS = {", 1)[1].split("}", 1)[0]
+    assert "agenttx" not in artifact_labels
+    assert "external_recovery_raw.csv" in source
+    assert 'suite_slice="mb4_dependency"' in source
+    assert '"artifact_checkpoint"' not in source
+    assert '"YoloFS / Waypoint"' not in source
+
+
 def _code(nb_path: Path) -> str:
     notebook = json.loads(nb_path.read_text(encoding="utf-8"))
     assert notebook["nbformat"] == 4
@@ -21,49 +50,43 @@ def _code(nb_path: Path) -> str:
     return "\n".join(sources)
 
 
-def test_motivation_notebooks_are_valid_and_use_agenttx_results() -> None:
-    plot = _code(ROOT / "motivation" / "plot.ipynb")
-    tail = _code(ROOT / "motivation" / "plot_tail.ipynb")
-    report = _code(ROOT / "motivation" / "report.ipynb")
+def test_intra_turn_motivation_notebook_uses_canonical_bundle() -> None:
+    source = _code(ROOT / "motivation" / "plot_intra_turn_evidence.ipynb")
+    assert "motivation.plot_intra_turn_evidence import render_all" in source
+    assert "render_all()" in source
 
-    for source in (plot, tail, report):
-        assert "experiments" in source
-        assert "results" in source
-        assert "Path.cwd()" in source
-
-    assert "motivation_optimization_history.csv" in plot
-    assert "motivation_runtime_comparison.csv" in plot
-    assert "robustness.json" in tail
-    assert "real_agent_robustness.json" in tail
-    assert "chain:" in plot
-    assert "Real-agent refactor" in tail
-
-
-def test_report_notebook_has_narrative_cells() -> None:
-    notebook = json.loads(
-        (ROOT / "motivation" / "report.ipynb").read_text(encoding="utf-8")
+    module = (ROOT / "motivation" / "plot_intra_turn_evidence.py").read_text(
+        encoding="utf-8"
     )
-    markdown = "\n".join(
-        "".join(cell["source"])
-        for cell in notebook["cells"]
-        if cell["cell_type"] == "markdown"
-    )
-    assert "Problem" in markdown
-    assert "Motivation" in markdown
-    assert "Correctness" in markdown
-
-
-def test_fast_style_scaling_notebooks_use_line_plots() -> None:
-    scaling = _code(ROOT / "motivation" / "plot_scaling.ipynb")
-    tail = _code(ROOT / "motivation" / "plot_tail_scaling.ipynb")
-    assert "motivation_scaling.csv" in scaling
-    assert "motivation_tail_scaling.csv" in tail
-    assert "ax.plot" in scaling
-    assert "ax.plot" in tail
-    assert "Trajectory length (# calls)" in scaling
-    assert "Trajectory length (# calls)" in tail
-    assert "ax.bar" not in scaling
-    assert "ax.bar" not in tail
+    assert "experiments" in module
+    assert "results" in module
+    assert "motivation_turn_audit" in module
+    assert "motivation_recovery_raw.csv" in module
+    assert "motivation_real_counterfactual_turns.csv" in module
+    assert "FIG-M0-Turn-Audit-CDF" in module
+    assert "FIG-M1-Strategy-Outcomes" in module
+    assert "add_gridspec" not in module
+    assert "FIG-M2-Extreme-Tradeoff" in module
+    assert "FIG-M3-Strategy-Comparison" in module
+    assert "FIG-M4-Real-Turn-Distribution" in module
+    assert '"legacy_v7"' in module
+    assert "common_cells" in module
+    assert "motivation_replay_combined_summary.csv" in module
+    assert ".imshow(" not in module
+    assert ".bar(" not in module
+    assert "fill_between" not in module
+    assert "AgentTX" not in module
+    assert "(ours)" not in module
+    assert '"Causal"' not in module
+    for label in (
+        "No recovery",
+        "Root only",
+        "Turn checkpoint",
+        "Temporal step",
+        "Whole branch",
+        "Ideal oracle",
+    ):
+        assert label in module
 
 
 def test_causal_retention_notebook_uses_controlled_dag_results() -> None:
