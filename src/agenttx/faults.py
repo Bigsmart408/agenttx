@@ -97,5 +97,46 @@ class RecoveryPlan:
         )
 
 
+@dataclass
+class VerifierSpec:
+    """A caller-approved check that can be rerun after a failure signal."""
+
+    command: Tuple[str, ...]
+    read_paths: Tuple[str, ...] = ()
+    trace_reads: Optional[bool] = None
+    timeout_s: Optional[float] = None
+    last_passing_step: Optional[int] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "command": list(self.command),
+            "read_paths": list(self.read_paths),
+            "trace_reads": self.trace_reads,
+            "timeout_s": self.timeout_s,
+            "last_passing_step": self.last_passing_step,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "VerifierSpec":
+        return cls(
+            command=tuple(str(item) for item in data["command"]),
+            read_paths=tuple(str(item) for item in data.get("read_paths", ())),
+            trace_reads=data.get("trace_reads"),
+            timeout_s=data.get("timeout_s"),
+            last_passing_step=data.get("last_passing_step"),
+        )
+
+
+@dataclass
+class RecoveryOutcome:
+    """Result of checking a failure signal and applying a verified plan."""
+
+    plan: RecoveryPlan
+    verifier_step: int
+    rollback_targets: Tuple[int, ...] = ()
+    post_verifier_step: Optional[int] = None
+    status: str = "inconclusive"
+
+
 def normalize_roots(step_ids: Sequence[int]) -> Tuple[int, ...]:
     return tuple(sorted({int(step_id) for step_id in step_ids}))

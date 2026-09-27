@@ -42,3 +42,21 @@ fails closed when neither is available; the backend is selectable with
 the host can attach BPF programs and falls back to strace. Experiments that
 intentionally measure the untraced mode can start a session with
 agenttx begin --no-trace-reads.
+
+## Recovery from a failure signal
+
+Register a trusted check before the agent works. The recovery caller then
+reports only that the current state is suspect; it does not supply a fault
+step or path:
+
+```python
+tx.register_verifier(["python", "-m", "pytest", "-q"], name="tests")
+outcome = tx.recover_from_failure_signal(verifier_name="tests")
+```
+
+The runtime records the check's file dependencies, probes causal rollback
+candidates in isolated branches, and applies a plan only if the same check
+passes there. `outcome.status` is `recovered`, `not_needed`, `inconclusive`,
+or `verification_failed` (the final live-state recheck failed). The registered
+check and its last passing step survive session reloads. Without a trusted
+verifier, a crash signal alone is insufficient to identify a faulty step.

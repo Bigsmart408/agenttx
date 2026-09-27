@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from pathlib import Path
-from typing import Iterable, List, Sequence
+from typing import Iterable, List, Optional, Sequence
 
 from .faults import FailureObservation, FaultCandidate, normalize_roots
 from .ledger import EffectKind, Ledger, Step
@@ -48,10 +48,10 @@ def _diagnostic_mentions(step: Step, observation: FailureObservation) -> bool:
 class FaultLocalizer:
     """Produce ranked, filesystem-backed roots for a failed verifier step."""
 
-    def __init__(self, *, max_candidates: int = 8) -> None:
-        if max_candidates <= 0:
+    def __init__(self, *, max_candidates: Optional[int] = 8) -> None:
+        if max_candidates is not None and max_candidates <= 0:
             raise ValueError("max_candidates must be positive")
-        self.max_candidates = int(max_candidates)
+        self.max_candidates = None if max_candidates is None else int(max_candidates)
 
     def candidates(
         self,

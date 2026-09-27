@@ -1069,13 +1069,9 @@ class SharedSemisolate:
         effects = trace_effects + [
             effects_by_path[path] for path in sorted(effects_by_path)
         ]
-        self._pending_snapshot_changes = sorted(
-            {
-                effect.path
-                for effect in effects
-                if effect.kind in (EffectKind.WRITE, EffectKind.DELETE)
-            }
-        )
+        # A transient write still belongs in the ledger, but only the net
+        # upperdir difference needs a distinct pre-step filesystem snapshot.
+        self._pending_snapshot_changes = sorted(effects_by_path)
         # Keep cached summary lazily empty; refresh only on explicit commit/status.
         after = dict(self._cached_summary)
         idx = self._step_count
@@ -1486,11 +1482,7 @@ class SharedSemisolate:
         """
         self._stop_worker()
         assert self.sandbox_dir is not None and self.layers is not None
-        snapshot = self.layers.root / f"before_{before_step_id:04d}"
-        if not snapshot.exists():
-            raise FileNotFoundError(
-                f"historical commit snapshot is missing: {snapshot}"
-            )
+        snapshot = self.layers.resolve_before(before_step_id)
         upper = self.sandbox_dir / "upperdir"
         temporary = Path(
             tempfile.mkdtemp(prefix=".agenttx-historical-", dir=str(self.sandbox_dir))

@@ -217,6 +217,23 @@ def test_partial_commit_reconstructs_historical_same_path_version(
         tx.close(destroy=True)
 
 
+def test_historical_commit_uses_shared_read_only_snapshot(tmp_path: Path) -> None:
+    ws, tx = _begin(tmp_path, "historical-shared")
+    try:
+        first = tx.run_tool("first", ["bash", "-c", "echo old > same.txt"])
+        inspected = tx.run_tool("inspect", ["bash", "-c", "cat same.txt"])
+        tx.run_tool("second", ["bash", "-c", "echo new > same.txt"])
+
+        snapshot = tx.pool.layers.root / "before_0002"
+        assert snapshot.is_symlink()
+        assert tx.commit(inspected.step_id) == inspected.step_id
+        assert (ws / "same.txt").read_text(encoding="utf-8") == "old\n"
+        tx.commit()
+        assert (ws / "same.txt").read_text(encoding="utf-8") == "new\n"
+    finally:
+        tx.close(destroy=True)
+
+
 def test_temporal_rollback_keeps_host_clean_then_allows_new_commit(tmp_path: Path) -> None:
     ws, tx = _begin(tmp_path, "rollback")
     try:
@@ -255,6 +272,45 @@ def test_causal_rollback_preserves_independent_later_step(tmp_path: Path) -> Non
         assert tx.commit(independent.step_id) == independent.step_id
         assert not (ws / "a.txt").exists()
         assert (ws / "b.txt").read_text(encoding="utf-8") == "two\n"
+    finally:
+        tx.close(destroy=True)
+
+
+def test_causal_rollback_keeps_later_shared_snapshot_valid(tmp_path: Path) -> None:
+    _ws, tx = _begin(tmp_path, "causal-shared")
+    try:
+        tx.run_tool("producer", ["bash", "-c", "echo old > a.txt"])
+        discard = tx.run_tool("no-op", ["bash", "-c", "true"])
+        later = tx.run_tool("later-no-op", ["bash", "-c", "true"])
+        independent = tx.run_tool("independent", ["bash", "-c", "echo keep > b.txt"])
+
+        before_later = tx.pool.layers.root / "before_0002"
+        before_independent = tx.pool.layers.root / "before_0003"
+        assert before_later.is_symlink()
+        assert before_independent.is_symlink()
+
+        assert tx.rollback_causal(discard.step_id) == [discard.step_id]
+        assert before_later.is_symlink()
+        assert before_independent.resolve() == tx.pool.layers.root / "before_0001"
+        assert tx.rollback_causal(independent.step_id) == [independent.step_id]
+        assert tx.path_exists(tx.workspace / "a.txt")
+        assert not tx.path_exists(tx.workspace / "b.txt")
+        assert tx.rollback_causal(later.step_id) == [later.step_id]
+        assert not (tx.pool.layers.root / "before_0001").exists()
+    finally:
+        tx.close(destroy=True)
+
+
+def test_transient_write_shares_next_filesystem_snapshot(tmp_path: Path) -> None:
+    _ws, tx = _begin(tmp_path, "transient-shared")
+    try:
+        tx.run_tool(
+            "transient",
+            ["bash", "-c", "echo temporary > scratch.txt; rm scratch.txt"],
+        )
+        assert tx.pool._pending_snapshot_changes == []
+        tx.run_tool("next", ["bash", "-c", "true"])
+        assert (tx.pool.layers.root / "before_0001").is_symlink()
     finally:
         tx.close(destroy=True)
 

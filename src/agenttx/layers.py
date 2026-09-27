@@ -431,6 +431,14 @@ class LayerStore:
         self.root = Path(self.root)
         self.root.mkdir(parents=True, exist_ok=True)
 
+    def resolve_before(self, step_id: int) -> Path:
+        """Resolve a logical recovery point to an owned, materialized snapshot."""
+        snapshot = self.root / f"before_{step_id:04d}"
+        resolved = snapshot.resolve(strict=True)
+        if resolved.parent != self.root.resolve() or not resolved.is_dir():
+            raise ValueError(f"invalid snapshot reference: {snapshot}")
+        return resolved
+
     def snapshot_before(
         self,
         step_id: int,
@@ -447,9 +455,14 @@ class LayerStore:
         """
         dest = self.root / f"before_{step_id:04d}"
         _remove_overlay_tree(dest)
+        previous = self.root / f"before_{step_id - 1:04d}"
+        if previous.is_symlink() and not previous.exists():
+            raise FileNotFoundError(previous)
+        if step_id > 0 and changed_paths == [] and previous.exists():
+            dest.symlink_to(self.resolve_before(step_id - 1).name, target_is_directory=True)
+            return dest
         blob_root = self.root / "blobs"
         blob_root.mkdir(parents=True, exist_ok=True)
-        previous = self.root / f"before_{step_id - 1:04d}"
         if (
             upperdir.exists()
             and changed_paths is not None
@@ -457,7 +470,12 @@ class LayerStore:
             and previous.exists()
         ):
             _incremental_snapshot_tree(
-                previous, dest, upperdir, blob_root, changed_paths, fingerprints
+                self.resolve_before(step_id - 1),
+                dest,
+                upperdir,
+                blob_root,
+                changed_paths,
+                fingerprints,
             )
         elif upperdir.exists():
             _copy_snapshot_tree(
@@ -484,9 +502,7 @@ class LayerStore:
         The operation is safe only when later retained steps do not overlap the
         selected paths; the runtime performs that fail-closed check.
         """
-        source_root = self.root / f"before_{before_step_id:04d}"
-        if not source_root.exists():
-            raise FileNotFoundError(source_root)
+        source_root = self.resolve_before(before_step_id)
 
         logical_paths = sorted(
             {Path(path) for path in paths},
@@ -521,15 +537,36 @@ class LayerStore:
 
     def restore_before(self, step_id: int, upperdir: Path) -> None:
         src = self.root / f"before_{step_id:04d}"
+        resolved = self.resolve_before(step_id) if src.exists() else None
+        if resolved is None and src.is_symlink():
+            raise FileNotFoundError(src)
         _remove_overlay_tree(upperdir)
-        if src.exists():
-            _copy_overlay_tree(src, upperdir)
+        if resolved is not None:
+            _copy_overlay_tree(resolved, upperdir)
         else:
             upperdir.mkdir(parents=True, exist_ok=True)
 
     def drop_from(self, step_ids: List[int]) -> None:
+        dropping = {self.root / f"before_{step_id:04d}" for step_id in step_ids}
+        retained_references = {
+            self.resolve_before(int(entry.name.removeprefix("before_")))
+            for entry in self.root.iterdir()
+            if entry not in dropping
+            and entry.name.startswith("before_")
+            and entry.name.removeprefix("before_").isdigit()
+            and entry.is_symlink()
+        }
         for step_id in step_ids:
-            _remove_overlay_tree(self.root / f"before_{step_id:04d}")
+            snapshot = self.root / f"before_{step_id:04d}"
+            if snapshot in retained_references:
+                (self.root / f".retained_before_{step_id:04d}").touch()
+            else:
+                _remove_overlay_tree(snapshot)
+        for marker in self.root.glob(".retained_before_*"):
+            snapshot = self.root / marker.name.removeprefix(".retained_")
+            if snapshot not in retained_references:
+                _remove_overlay_tree(snapshot)
+                marker.unlink()
         self._gc_blobs()
 
     def gc_blobs(self) -> None:

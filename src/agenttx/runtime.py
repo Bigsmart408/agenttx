@@ -14,6 +14,7 @@ from typing import List, Optional, Sequence
 from .commit_wal import CommitWAL
 from .conversation import ConversationLog, render_ledger_recovery_notice
 from .effects import effects_from_paths
+from .faults import RecoveryOutcome, VerifierSpec
 from .ledger import Effect, EffectKind, Ledger
 from .object_identity import (
     HardlinkCatalog,
@@ -97,6 +98,7 @@ class AgentTX:
     commit_policy: Optional[CommitPolicy] = None
     object_catalog: HardlinkCatalog = field(default_factory=HardlinkCatalog)
     conversation: ConversationLog = field(default_factory=ConversationLog)
+    verifiers: dict[str, VerifierSpec] = field(default_factory=dict)
     _catalog_initialized: bool = False
     _meta_path: Optional[Path] = None
 
@@ -170,6 +172,10 @@ class AgentTX:
             commit_policy=commit_policy,
             object_catalog=HardlinkCatalog.from_dict(data.get("object_catalog")),
             conversation=_load_conversation(session_dir, data),
+            verifiers={
+                name: VerifierSpec.from_dict(spec)
+                for name, spec in data.get("verifiers", {}).items()
+            },
         )
         tx.pool = SharedSemisolate(
             workspace=tx.workspace,
@@ -235,6 +241,9 @@ class AgentTX:
             "ledger": self.ledger.to_dict(),
             "object_catalog": self.object_catalog.to_dict(),
             "conversation": self.conversation.to_dict(),
+            "verifiers": {
+                name: spec.to_dict() for name, spec in self.verifiers.items()
+            },
         }
         _atomic_write_json(meta, payload)
         self._meta_path = meta
@@ -379,12 +388,101 @@ class AgentTX:
         trace_reads: Optional[bool] = None,
     ) -> ToolCallRecord:
         """Run a trusted verifier and record its dependencies in the ledger."""
-        return self.run_tool(
+        record = self.run_tool(
             f"verifier:{name}",
             argv,
             extra_reads=read_paths,
             trace_reads=trace_reads,
             timeout_s=timeout_s,
+        )
+        registered = self.verifiers.get(name)
+        if (
+            record.returncode == 0
+            and registered is not None
+            and tuple(argv) == registered.command
+        ):
+            registered.last_passing_step = record.step_id
+            self._persist()
+        return record
+
+    def register_verifier(
+        self,
+        argv: Sequence[str],
+        *,
+        name: str = "default",
+        read_paths: Sequence[str] = (),
+        trace_reads: Optional[bool] = None,
+        timeout_s: Optional[float] = None,
+    ) -> None:
+        """Persist a trusted recovery check before accepting failure signals."""
+        if not argv:
+            raise ValueError("verifier command cannot be empty")
+        if not name or name.startswith("counterfactual"):
+            raise ValueError("verifier name is empty or reserved")
+        if timeout_s is not None and timeout_s <= 0:
+            raise ValueError("verifier timeout must be positive")
+        self.start()
+        self.verifiers[name] = VerifierSpec(
+            command=tuple(str(item) for item in argv),
+            read_paths=tuple(str(path) for path in read_paths),
+            trace_reads=trace_reads,
+            timeout_s=timeout_s,
+        )
+        self._persist()
+
+    def recover_from_failure_signal(
+        self,
+        *,
+        verifier_name: str = "default",
+        max_candidates: Optional[int] = None,
+        max_probes: int = 24,
+        allow_multi_root: bool = True,
+        allow_fallback: bool = True,
+    ) -> RecoveryOutcome:
+        """Diagnose a bad state without receiving an injected fault location."""
+        spec = self.verifiers.get(verifier_name)
+        if spec is None:
+            raise ValueError(f"no trusted verifier registered as {verifier_name!r}")
+        failed = self.run_verifier(
+            spec.command,
+            name=verifier_name,
+            read_paths=spec.read_paths,
+            trace_reads=spec.trace_reads,
+            timeout_s=spec.timeout_s,
+        )
+        last_passing = spec.last_passing_step
+        if last_passing is not None and last_passing < self.ledger.committed_frontier:
+            last_passing = None
+        plan = self.plan_recovery(
+            failed,
+            last_passing_step=last_passing if failed.returncode != 0 else None,
+            max_candidates=max_candidates,
+            max_probes=max_probes,
+            allow_multi_root=allow_multi_root,
+            allow_fallback=allow_fallback,
+            verifier_timeout_s=spec.timeout_s,
+            verifier_trace_reads=spec.trace_reads,
+        )
+        if not plan.verified or plan.mode == "none":
+            return RecoveryOutcome(
+                plan=plan,
+                verifier_step=failed.step_id,
+                status="not_needed" if plan.verified else "inconclusive",
+            )
+        targets = tuple(self.apply_recovery_plan(plan))
+        checked = self.run_verifier(
+            spec.command,
+            name=verifier_name,
+            read_paths=spec.read_paths,
+            trace_reads=spec.trace_reads,
+            timeout_s=spec.timeout_s,
+        )
+        return RecoveryOutcome(
+            plan=plan,
+            verifier_step=failed.step_id,
+            rollback_targets=targets,
+            post_verifier_step=checked.step_id,
+            status="recovered" if checked.returncode == 0 else "verification_failed",
         )
 
     def fork(self, session_dir: Optional[Path] = None) -> "AgentTX":
@@ -571,13 +669,14 @@ class AgentTX:
         failed_verifier: ToolCallRecord,
         *,
         last_passing_step: Optional[int] = None,
-        max_candidates: int = 8,
-        max_probes: int = 12,
+        max_candidates: Optional[int] = None,
+        max_probes: int = 24,
         allow_multi_root: bool = True,
         allow_fallback: bool = True,
         verifier_timeout_s: Optional[float] = None,
+        verifier_trace_reads: Optional[bool] = None,
     ):
-        """Find the smallest counterfactually verified rollback plan."""
+        """Find a low-cost verified rollback plan within a probe budget."""
         from .faults import FailureObservation, RecoveryAttempt, RecoveryPlan
         from .localizer import FaultLocalizer, candidate_root_sets
 
@@ -619,32 +718,41 @@ class AgentTX:
 
         localizer = FaultLocalizer(max_candidates=max_candidates)
         candidates = localizer.candidates(self.ledger, observation)
-        roots_to_try = list(
-            candidate_root_sets(candidates, include_pairs=allow_multi_root)
-        )[:max_probes]
         attempts: List[RecoveryAttempt] = []
-        valid = []
+        valid: list[
+            tuple[tuple[int, int, float], tuple[int, ...], tuple[int, ...]]
+        ] = []
+        tried: set[tuple[int, ...]] = set()
+        scores = {
+            candidate.root_step_ids[0]: candidate.suspicion_score
+            for candidate in candidates
+        }
         read_paths = [
             effect.path
             for effect in observation.effects
             if effect.kind in (EffectKind.READ, EffectKind.NEGATIVE)
         ]
 
-        for roots in roots_to_try:
-            candidate = localizer.combined_candidate(self.ledger, roots)
+        def probe(roots: tuple[int, ...]) -> bool:
+            roots = tuple(sorted(set(roots)))
+            if not roots or roots in tried or len(attempts) >= max_probes:
+                return False
+            tried.add(roots)
+            estimated = localizer.combined_candidate(self.ledger, roots)
             try:
                 with self.fork() as branch:
-                    branch.rollback_causal_many(roots)
+                    targets = tuple(branch.rollback_causal_many(roots))
                     checked = branch.run_verifier(
                         observation.command,
                         name="counterfactual",
                         read_paths=read_paths,
                         timeout_s=verifier_timeout_s,
+                        trace_reads=verifier_trace_reads,
                     )
                 validation = "passed" if checked.returncode == 0 else "failed"
                 attempt = RecoveryAttempt(
                     root_step_ids=roots,
-                    rollback_targets=candidate.rollback_targets,
+                    rollback_targets=targets,
                     validation=validation,
                     mode="causal",
                     verifier_returncode=checked.returncode,
@@ -652,32 +760,99 @@ class AgentTX:
             except Exception as exc:
                 attempt = RecoveryAttempt(
                     root_step_ids=roots,
-                    rollback_targets=candidate.rollback_targets,
+                    rollback_targets=estimated.rollback_targets,
                     validation="inconclusive",
                     mode="causal",
                     error=f"{type(exc).__name__}: {exc}",
                 )
             attempts.append(attempt)
             if attempt.validation == "passed":
-                valid.append((candidate, attempt))
+                active_targets = {
+                    step_id
+                    for step_id in attempt.rollback_targets
+                    if self.ledger.steps[step_id].status != "rolled_back"
+                    and not self.ledger.steps[step_id].tool_name.startswith("verifier:")
+                }
+                context_chars = sum(
+                    len(span.arguments) + len(span.result)
+                    for turn in self.conversation.turns
+                    if turn.status == "active"
+                    for span in turn.calls
+                    if span.status == "active" and span.step_id in active_targets
+                )
+                score = sum(scores.get(root, 0.0) for root in roots)
+                valid.append((
+                    (len(active_targets), context_chars, -score),
+                    roots,
+                    attempt.rollback_targets,
+                ))
+            return attempt.validation == "passed"
+
+        def probe_and_shrink_group() -> None:
+            # A failed subset rules out nothing: separate faults can interact.
+            current = tuple(candidate.root_step_ids[0] for candidate in candidates)
+            if not probe(current):
+                return
+            granularity = 2
+            while len(current) > 1 and len(attempts) < max_probes:
+                width = (len(current) + granularity - 1) // granularity
+                parts = [
+                    current[i : i + width]
+                    for i in range(0, len(current), width)
+                ]
+                choices = [*parts]
+                choices.extend(
+                    tuple(root for root in current if root not in part)
+                    for part in parts
+                )
+                smaller = next(
+                    (
+                        choice
+                        for choice in choices
+                        if choice and len(choice) < len(current) and probe(choice)
+                    ),
+                    None,
+                )
+                if smaller is not None:
+                    current = smaller
+                    granularity = max(2, granularity - 1)
+                elif granularity < len(current):
+                    granularity = min(len(current), granularity * 2)
+                else:
+                    break
+
+        # Long histories need a group probe before the single-step budget is
+        # exhausted; short histories keep the cheap, existing single-root path.
+        if allow_multi_root and len(candidates) > max_probes:
+            probe_and_shrink_group()
+        single_limit = max_probes
+        if allow_multi_root and 2 < len(candidates) <= max_probes:
+            single_limit -= 1
+        for candidate in candidates:
+            if len(attempts) >= single_limit:
+                break
+            probe(candidate.root_step_ids)
+        if allow_multi_root and len(candidates) > 2 and not valid:
+            probe_and_shrink_group()
+        if allow_multi_root and not valid:
+            for roots in candidate_root_sets(candidates, include_pairs=True):
+                if len(attempts) >= max_probes:
+                    break
+                if len(roots) == 2:
+                    probe(roots)
 
         if valid:
-            candidate, _attempt = min(
-                valid,
-                key=lambda item: (
-                    item[0].discarded_steps,
-                    len(item[0].root_step_ids),
-                    -item[0].suspicion_score,
-                ),
+            _cost, roots, targets = min(
+                valid, key=lambda item: (*item[0][:2], len(item[1]), item[0][2])
             )
             return RecoveryPlan(
                 mode="causal",
-                root_step_ids=candidate.root_step_ids,
-                rollback_targets=candidate.rollback_targets,
+                root_step_ids=roots,
+                rollback_targets=targets,
                 validation="passed",
                 confidence="verified",
                 attempts=attempts,
-                reason="smallest causal plan that made the verifier pass",
+                reason="least discarded verified causal plan within the probe budget",
             )
 
         if allow_fallback:
@@ -710,6 +885,7 @@ class AgentTX:
                                 name="counterfactual-fallback",
                                 read_paths=read_paths,
                                 timeout_s=verifier_timeout_s,
+                                trace_reads=verifier_trace_reads,
                             )
                         validation = "passed" if checked.returncode == 0 else "failed"
                         error = ""

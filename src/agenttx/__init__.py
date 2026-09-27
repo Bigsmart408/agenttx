@@ -8,7 +8,9 @@ from .faults import (
     FailureObservation,
     FaultCandidate,
     RecoveryAttempt,
+    RecoveryOutcome,
     RecoveryPlan,
+    VerifierSpec,
 )
 from .harness import CodingAgentHarness, TrajectoryStep
 from .ledger import Effect, EffectKind, Ledger, Step
@@ -31,8 +33,10 @@ __all__ = [
     "FaultLocalizer",
     "Ledger",
     "RecoveryAttempt",
+    "RecoveryOutcome",
     "RecoveryPlan",
     "SharedSemisolate",
     "Step",
     "TrajectoryStep",
+    "VerifierSpec",
 ]
