@@ -139,30 +139,79 @@
   },
   "dual_harness_full_micro_target": 16800,
   "environment_preparation": {
-    "checked_at": "2026-10-17T07:56:26.550278+00:00",
+    "checked_at": "2026-10-17T08:15:27.642469+00:00",
     "host": "r760-ssd",
     "code_root": "/home/bfq/agenttx-recovery-20261016/project",
-    "docker_host": "unix:///run/agenttx-docker/docker.sock",
+    "data_root": "/mnt/data/agenttx-runtime",
     "docker_root": "/mnt/data/agenttx-runtime/docker",
-    "cache": "/mnt/data/agenttx-runtime/cache",
-    "results": "/mnt/data/agenttx-runtime/results",
+    "docker_host": "unix:///run/agenttx-docker/docker.sock",
+    "docker_reachable": true,
+    "coordinator_alive": true,
+    "image_stage_finished": false,
+    "stage": "preparing_local_images",
     "image_stage_counts": {
-      "image_ready": 121,
-      "preparing": 2,
-      "pending": 177
+      "image_ready": 125,
+      "pending": 173,
+      "preparing": 2
     },
-    "active_tasks": [
+    "image_errors": [],
+    "active_pulls": [
       {
-        "task": "matplotlib__matplotlib-22711",
-        "started_at": "2026-10-17T07:41:59.552228+00:00"
+        "task": "pydata__xarray-3364",
+        "wall_s": 420.78,
+        "idle_s": 1.001,
+        "downloaded_bytes": 581238816,
+        "extracted_bytes": 0,
+        "last_event": {
+          "status": "Downloading",
+          "layer": "d0e25e76b4c8"
+        },
+        "reason": null,
+        "error": null,
+        "mirror": "docker.1ms.run",
+        "observed_at": "2026-10-17T08:15:21.231510+00:00"
       },
       {
-        "task": "mwaskom__seaborn-2848",
-        "started_at": "2026-10-17T07:42:01.272959+00:00"
+        "task": "pylint-dev__pylint-5859",
+        "wall_s": 319.348,
+        "idle_s": 0.0,
+        "downloaded_bytes": 243236864,
+        "extracted_bytes": 0,
+        "last_event": {
+          "status": "Downloading",
+          "layer": "40a3ace33efe"
+        },
+        "reason": null,
+        "error": null,
+        "mirror": "docker.1ms.run",
+        "observed_at": "2026-10-17T08:15:23.021051+00:00"
       }
     ],
-    "image_errors": [],
-    "disk_free_gib": 1178.2,
+    "migration_complete": true,
+    "migration": {
+      "updated_at": "2026-10-17T03:47:27.804926+00:00",
+      "host": "r760-ssd",
+      "rows": [
+        {
+          "kind": "cache",
+          "state": "moved_and_content_verified",
+          "source": "/home/bfq/agenttx-recovery-20261016/project/experiments/cache",
+          "destination": "/mnt/data/agenttx-runtime/cache"
+        },
+        {
+          "kind": "logs",
+          "state": "moved_and_content_verified",
+          "source": "/home/bfq/agenttx-recovery-20261016/project/experiments/logs",
+          "destination": "/mnt/data/agenttx-runtime/logs"
+        },
+        {
+          "kind": "results",
+          "state": "moved_and_content_verified",
+          "source": "/home/bfq/agenttx-recovery-20261016/project/experiments/results",
+          "destination": "/mnt/data/agenttx-runtime/results"
+        }
+      ]
+    },
     "tb_source": {
       "status": "task_sources_hydrated",
       "host": "r760-ssd",
@@ -180,8 +229,11 @@
       "reused_from": "/mnt/data/agenttx-runtime/validation/environment-preparation-local-20261017-r2",
       "all_files_reverified": true
     },
+    "disk_free_gib": 1172.0,
+    "alerts": [],
+    "monitor_status": "healthy",
     "automatic_model_launch": false,
-    "model_experiments_started": 0,
+    "full_task_environments_ready": false,
     "previous_environment_cohort": "/mnt/data/agenttx-runtime/validation/environment-preparation-local-20261017-r2",
     "previous_state_counts": {
       "image_ready": 121,
@@ -189,7 +241,7 @@
       "preparing": 2,
       "pending": 168
     },
-    "full_task_environments_ready": false,
-    "image_stage_finished": false
+    "remote_execution_stopped": true,
+    "remote_results_counted_as_local": false
   }
 }
