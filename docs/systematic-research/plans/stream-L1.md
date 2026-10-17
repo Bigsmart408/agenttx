@@ -63,9 +63,13 @@ attempts and insight.
    artifact. Every boundary baseline receives oracle localization and selects
    the smallest native units covering affected effects. It therefore gives the
    maximum retention expressible at that granularity.
-2. Section 3.2 defines recovery completeness and collateral cost, then states
-   the unified microbenchmark methodology. The 30 physical cases validate the
-   benchmark; all three observations use the same 400 paired manifests.
+2. A standalone methodology subsection defines recovery completeness and
+   collateral cost on the 400 paired manifests. It separately defines the
+   native SWE-agent trace audit: all complete recorded attempts, including
+   verifier failures; each observed mutating step as a hypothetical root;
+   observed-path dependencies; and temporal-suffix collateral work. Report
+   zero-opportunity cases and distinguish this counterfactual from injected
+   failures and measured replay tokens.
 3. Observation 1 establishes the correctness--retention dilemma with
    `FIG-Motivation-Suite` and defines complete affected-set removal as the gate
    for all efficiency comparisons. The figure includes matched 400-case
@@ -77,10 +81,11 @@ attempts and insight.
    The same 210 dependency-sweep manifests include artifact-native try,
    BranchFS, YoloFS, and Waypoint recovery. Each artifact is named directly;
    coincident state selections use distinct markers.
-5. Observation 3 shows that no fixed coarse boundary dominates with
-   `FIG-Motivation-Boundary-Crossover`. Temporal-step recovery demonstrates
-   that recording a finer unit is insufficient while selection remains a
-   temporal suffix.
+5. Observation 3 uses `FIG-Motivation-Native-Opportunity` to separate common
+   cross-turn dependencies from rarer observed independent writes at risk in
+   native traces. The five-turn threshold describes long edges but does not
+   define recovery opportunity. The figure reports observed-path
+   counterfactuals, not certified independence or measured replay savings.
 6. Section 3.3 explains why incremental boundary changes remain insufficient,
    distinguishes step-level recording from temporal step rollback, states the
    speculation-unit/recovery-unit insight, and derives dependency discovery,
@@ -176,7 +181,7 @@ filesystem-scoped boundary without adding a future-work list.
 | Figure 1 | Controlled coarse-recovery scaling | ready, single-column |
 | Figure 2 | Correctness--retention tradeoff over 400 paired manifests | ready, single-column |
 | Figure 3 | Dependency-value sweep | ready, single-column |
-| Figure 4 | Coarse-boundary crossover | ready, single-column |
+| Figure 4 | Native-trace recovery opportunity | interim full-sweep snapshot, single-column |
 | Figure 5 | AET overview | ready, single-column |
 | Figure 6 | AgentTX per-call runtime path | ready, single-column |
 | Figure 7 | Analytical and full-system Microbenchmark on identical cases | analytical ready; 400-case system run missing |

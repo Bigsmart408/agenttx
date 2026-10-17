@@ -129,6 +129,20 @@ def test_external_commands_are_configurable_without_running_a_model(monkeypatch,
     assert "FONTCONFIG_FILE=/workspace/.agenttx-codex-" in codex_cmd[-1]
 
 
+def test_codex_harness_respects_direct_network_mode(monkeypatch):
+    monkeypatch.setenv("CODEX_BIN", "/bin/echo")
+    monkeypatch.setenv("AGENTTX_CLASH_COMMAND", "/bin/false")
+    monkeypatch.setenv("AGENTTX_NO_PROXY", "1")
+
+    harness = CodexHarness(model="gpt-test")
+
+    assert harness.proxy_command == []
+    assert harness.command("repair tests", Path("/workspace"))[0] != "/bin/false"
+    assert "unset HTTP_PROXY HTTPS_PROXY ALL_PROXY" in harness.command(
+        "repair tests", Path("/workspace")
+    )[-1]
+
+
 def test_codex_command_resolves_host_binary_before_isolated_login_shell(
     monkeypatch, tmp_path
 ):

@@ -36,6 +36,8 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+from experiments.scripts.experiment_storage import experiment_path
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / ".codex_tmp"))
@@ -180,7 +182,7 @@ def _create_workload_harness(
     harness_command: Optional[str],
     harness_timeout_s: float,
     output_dir: Path,
-    max_turns: int,
+    max_turns: Optional[int],
     reasoning_effort: str,
 ):
     if harness_backend != "sweagent":
@@ -192,19 +194,27 @@ def _create_workload_harness(
             timeout_s=harness_timeout_s,
         )
     from experiments.scripts.sweagent_native_workload import (
+        DEFAULT_CODEX_AUTH,
+        DEFAULT_CODEX_CONFIG,
+        DEFAULT_SWE_AGENT_ROOT,
         SWEAgentNativeWorkloadHarness,
         load_codex_gpt_profile,
     )
 
+    swe_agent_root = harness_root or Path(os.environ.get("AGENTTX_SWE_AGENT_ROOT", str(DEFAULT_SWE_AGENT_ROOT)))
     profile = load_codex_gpt_profile(
+        Path(os.environ.get("AGENTTX_SWE_PROFILE", os.environ.get("CODEX_CONFIG_FILE", str(DEFAULT_CODEX_CONFIG)))),
+        Path(os.environ.get("CODEX_AUTH_FILE", str(DEFAULT_CODEX_AUTH))),
         model_override=model,
         reasoning_effort_override=reasoning_effort,
     )
     return SWEAgentNativeWorkloadHarness(
         output_dir=output_dir,
         profile=profile,
+        config_path=swe_agent_root / "config/bash_only.yaml",
+        swe_agent_root=swe_agent_root,
         max_steps=max_turns,
-        max_model_calls=max_turns,
+        max_model_calls=max_turns or 0,
         timeout_s=harness_timeout_s,
     )
 
@@ -241,6 +251,7 @@ def _auto_localize_policy(
     """
     if mode != "causal":
         raise ValueError("automatic localization is exclusive to causal recovery")
+    localization_started = time.perf_counter()
     tx = agent.harness.tx
     test_step_id = int(injected["test_run_step"])
     original = next(
@@ -266,6 +277,7 @@ def _auto_localize_policy(
     )
     if failed.returncode == 0:
         raise RuntimeError("injected crash verifier unexpectedly passed")
+    probe_wall_s = time.perf_counter() - localization_started
     # Candidate ranking uses the real failed test's dependency parents. The
     # generic marker probe supplies only a path-agnostic counterfactual oracle.
     real_parents = set(getattr(original, "parents", ()) or ())
@@ -284,8 +296,14 @@ def _auto_localize_policy(
     )
     if not plan.verified:
         raise RuntimeError(f"automatic fault localization was inconclusive: {plan}")
+    plan_wall_s = time.perf_counter() - localization_started - probe_wall_s
     targets = tx.apply_recovery_plan(plan)
+    total_wall_s = time.perf_counter() - localization_started
     return targets, {
+        "localization_probe_wall_s": round(probe_wall_s, 6),
+        "localization_search_wall_s": round(plan_wall_s, 6),
+        "localization_apply_wall_s": round(total_wall_s - probe_wall_s - plan_wall_s, 6),
+        "localization_total_wall_s": round(total_wall_s, 6),
         "failed_verifier_step": failed.step_id,
         "localized_root_steps": list(plan.root_step_ids),
         "localization_matches_injected_root": list(plan.root_step_ids)
@@ -323,14 +341,29 @@ def _apply_blind_policy(agent, injected: dict, mode: str) -> tuple[List[int], di
     }
 
 
-def _apply_policy(agent, mode: str, root_step: int) -> List[int]:
+def _timed_call(timings: dict, phase: str, function, *args, **kwargs):
+    """Include failed calls in phase costs while preserving their exception."""
+    started = time.perf_counter()
+    try:
+        return function(*args, **kwargs)
+    finally:
+        timings[phase] = timings.get(phase, 0.0) + time.perf_counter() - started
+
+
+def _apply_policy(
+    agent, mode: str, root_step: int, *, oracle_targets: Optional[Sequence[int]] = None
+) -> List[int]:
     """Select which injected effects to keep before the live agent/oracle runs.
 
     - causal: drop the fault cone, keep independent documents
     - temporal_checkpoint: roll from the fault timestamp (later independent work goes too)
     - whole_branch_abort: drop the whole uncommitted overlay
     """
-    if mode in {"causal", IDEAL_ORACLE_MODE}:
+    if mode == IDEAL_ORACLE_MODE:
+        if oracle_targets is None or root_step not in oracle_targets:
+            raise ValueError("ideal_oracle requires the registered truth recovery set")
+        return agent.harness.tx.rollback_exact(oracle_targets)
+    if mode == "causal":
         return agent.harness.tx.rollback_causal(root_step)
     if mode == "temporal_checkpoint":
         return agent.harness.tx.rollback(root_step)
@@ -445,7 +478,11 @@ class _ExternalAgent:
         )
         self.adapter = adapter
 
-    def run(self, task: str) -> ExternalHarnessResult:
+    def run(self, task: str, *, native_context: Optional[dict] = None) -> ExternalHarnessResult:
+        if native_context is not None:
+            return self.adapter.run_in_transaction(
+                self.harness, task, native_context=native_context,
+            )
         return self.adapter.run_in_transaction(self.harness, task)
 
     def close(self, destroy: bool = True) -> None:
@@ -671,6 +708,7 @@ def run_once(
     workspace_tmp_env: Dict[str, Optional[str]] = {}
     started = time.perf_counter()
     recovery_started = 0.0
+    phase_timings = {}
     instance = None
     task = None
     extra_watch: List[str] = []
@@ -704,6 +742,7 @@ def run_once(
     oracle_post_recovery_verified = False
     post_recovery_verified = False
     localization: dict = {}
+    swe_precrash_conversation: Optional[dict] = None
     retained_paths_reopened: List[str] = []
     retained_read_effects = 0
     retained_paths_modified: List[str] = []
@@ -730,7 +769,10 @@ def run_once(
             )
             if docker_verify:
                 # Resolve verifier infrastructure before spending a model call.
-                swe.ensure_eval_image(task.instance_id)
+                instance = {
+                    **instance,
+                    "_agenttx_eval_runtime": swe.official_runtime_info(task.instance_id),
+                }
             # Docker is authoritative for the final published verdict, but the
             # injected trajectory and reference-prefix gate execute through the
             # transaction harness on the host.  They therefore still need the
@@ -765,11 +807,15 @@ def run_once(
         # writes are recorded as host leaks and the control arm cannot commit.
         workspace_tmp = workdir / ".tmp"
         workspace_tmp.mkdir(parents=True, exist_ok=True)
+        workspace_config = workspace_tmp / "config"
+        (workspace_config / "astropy").mkdir(parents=True, exist_ok=True)
         workspace_tmp_env = {
-            name: os.environ.get(name) for name in ("TMPDIR", "TEMP", "TMP")
+            name: os.environ.get(name)
+            for name in ("TMPDIR", "TEMP", "TMP", "XDG_CONFIG_HOME")
         }
-        for name in workspace_tmp_env:
+        for name in ("TMPDIR", "TEMP", "TMP"):
             os.environ[name] = str(workspace_tmp)
+        os.environ["XDG_CONFIG_HOME"] = str(workspace_config)
 
         host_baseline = _snapshot(workdir, extra_watch)
         if oracle and not replay_docs:
@@ -819,8 +865,8 @@ def run_once(
                 model=model,
                 harness_command=harness_command,
                 harness_timeout_s=harness_timeout_s,
-                output_dir=harness_output_dir or ROOT / "experiments" / "results" / harness_backend,
-                max_turns=turns,
+                output_dir=harness_output_dir or experiment_path("results", project_root=ROOT) / harness_backend,
+                max_turns=max_turns if harness_backend == "sweagent" else turns,
                 reasoning_effort=reasoning_effort,
             )
             agent = _DirectExternalAgent(workdir=workdir, adapter=adapter)
@@ -831,8 +877,8 @@ def run_once(
                 model=model,
                 harness_command=harness_command,
                 harness_timeout_s=harness_timeout_s,
-                output_dir=harness_output_dir or ROOT / "experiments" / "results" / harness_backend,
-                max_turns=turns,
+                output_dir=harness_output_dir or experiment_path("results", project_root=ROOT) / harness_backend,
+                max_turns=max_turns if harness_backend == "sweagent" else turns,
                 reasoning_effort=reasoning_effort,
             )
             agent = _ExternalAgent(
@@ -978,8 +1024,14 @@ def run_once(
                 )
             if not dag_is_valid(injected):
                 raise RuntimeError(f"invalid recovery DAG: {injected}")
+            if harness_backend == "sweagent" and mode in MANIFEST_MODES:
+                swe_precrash_conversation = agent.harness.tx.conversation.to_dict()
             if mode == IDEAL_ORACLE_MODE:
-                targets = _apply_policy(agent, mode, injected["root_step"])
+                targets = _timed_call(
+                    phase_timings, "policy_wall_s", _apply_policy,
+                    agent, mode, injected["root_step"],
+                    oracle_targets=injected["oracle_invalid_steps"],
+                )
                 localization = {
                     "localized_root_steps": [injected["root_step"]],
                     "localization_matches_injected_root": True,
@@ -989,15 +1041,21 @@ def run_once(
                     "fault_location_disclosed": True,
                 }
             elif mode == "causal":
-                targets, localization = _auto_localize_policy(agent, injected)
+                targets, localization = _timed_call(
+                    phase_timings, "policy_wall_s", _auto_localize_policy, agent, injected,
+                )
             elif mode in {
                 CRASH_NO_ROLLBACK_MODE,
                 "temporal_checkpoint",
                 "whole_branch_abort",
             }:
-                targets, localization = _apply_blind_policy(agent, injected, mode)
+                targets, localization = _timed_call(
+                    phase_timings, "policy_wall_s", _apply_blind_policy, agent, injected, mode,
+                )
             else:
-                targets = _apply_policy(agent, mode, injected["root_step"])
+                targets = _timed_call(
+                    phase_timings, "policy_wall_s", _apply_policy, agent, mode, injected["root_step"],
+                )
         # Official-task session is unchanged. Isolated replay runs only when
         # the policy discarded independent steps; those tokens are the savings.
         if not direct_runtime and independent_work_discarded(
@@ -1013,9 +1071,9 @@ def run_once(
             if (not oracle) and harness_backend != "legacy":
                 replay_prompt = _externalize_prompt(replay_prompt)
             if oracle or harness_backend == "legacy":
-                replay_result = agent.run(replay_prompt, commit=False)
+                replay_result = _timed_call(phase_timings, "doc_replay_wall_s", agent.run, replay_prompt, commit=False)
             else:
-                replay_result = agent.run(replay_prompt)
+                replay_result = _timed_call(phase_timings, "doc_replay_wall_s", agent.run, replay_prompt)
             doc_replay_prompt_tokens = int(replay_result.prompt_tokens)
             doc_replay_completion_tokens = int(replay_result.completion_tokens)
             doc_replay_tokens = int(replay_result.total_tokens)
@@ -1176,7 +1234,7 @@ def run_once(
             messages: list = []
         else:
             if harness_backend == "legacy":
-                result = agent.run(prompt, commit=False)
+                result = _timed_call(phase_timings, "official_model_wall_s", agent.run, prompt, commit=False)
                 finish_called = any(
                     call.get("function", {}).get("name") == "finish"
                     for message in result.messages
@@ -1187,12 +1245,25 @@ def run_once(
                     message.get("role") == "assistant" for message in result.messages
                 )
             else:
-                result = agent.run(prompt)
+                if harness_backend == "sweagent" and swe_precrash_conversation is not None:
+                    original_task = (
+                        swe.direct_task_prompt(task, instance)
+                        if suite == "swe" else tb.direct_task_prompt(task)
+                    )
+                    result = _timed_call(phase_timings, "official_model_wall_s", agent.run, prompt, native_context={
+                        "original_task": original_task,
+                        "precrash_conversation": swe_precrash_conversation,
+                        "context_variant": recovery_context_variant(mode),
+                    })
+                else:
+                    result = _timed_call(phase_timings, "official_model_wall_s", agent.run, prompt)
                 # External harnesses terminate after their own final answer;
                 # they do not expose AgentTX's synthetic finish tool.
                 finish_called = bool(result.finished)
                 messages = []
-                model_calls = 0
+                model_calls = int(
+                    getattr(result, "metadata", {}).get("sweagent_model_calls", 0)
+                )
             finished = bool(result.finished)
             total_tokens = int(result.total_tokens)
             prompt_tokens = int(result.prompt_tokens)
@@ -1268,7 +1339,7 @@ def run_once(
                         "refusing to commit its partial sandbox"
                     )
         if suite == "swe":
-            verdict = swe.verify(
+            verdict = _timed_call(phase_timings, "official_grade_wall_s", swe.verify,
                 workdir,
                 task,
                 instance,
@@ -1277,7 +1348,7 @@ def run_once(
                 recovery_docs=crash_docs if mode in MANIFEST_MODES else None,
             )
         else:
-            verdict = tb.verify(
+            verdict = _timed_call(phase_timings, "official_grade_wall_s", tb.verify,
                 workdir,
                 task,
                 python,
@@ -1344,7 +1415,9 @@ def run_once(
         harness_returncode = int(result.returncode) if result is not None else 127
         harness_stdout = str(result.stdout)[-2000:] if result is not None else ""
         harness_stderr = str(result.stderr)[-2000:] if result is not None else ""
-        model_calls = 0
+        model_calls = int(
+            getattr(result, "metadata", {}).get("sweagent_model_calls", 0)
+        ) if result is not None else 0
         success = False
         verdict = {
             "tests_rc": "error",
@@ -1435,12 +1508,18 @@ def run_once(
         ),
         "localization_validation": localization.get("localization_validation", ""),
         "localization_confidence": localization.get("localization_confidence", ""),
+        "localization_probe_wall_s": localization.get("localization_probe_wall_s"),
+        "localization_search_wall_s": localization.get("localization_search_wall_s"),
+        "localization_apply_wall_s": localization.get("localization_apply_wall_s"),
+        "localization_total_wall_s": localization.get("localization_total_wall_s"),
         "localization_failed_verifier_step": localization.get("failed_verifier_step"),
         "fault_location_source": localization.get("fault_location_source", "none"),
         "fault_location_disclosed": localization.get(
             "fault_location_disclosed", False
         ),
         "oracle_fault_step_disclosed": mode == IDEAL_ORACLE_MODE,
+        "registered_oracle_invalid_steps": injected.get("oracle_invalid_steps", []),
+        "missing_registered_invalid_steps": sorted(set(injected.get("oracle_invalid_steps", [])) - set(targets)),
         "oracle_post_recovery_verified": oracle_post_recovery_verified,
         "post_recovery_verified": post_recovery_verified,
         "repeat": repeat,
@@ -1460,6 +1539,9 @@ def run_once(
         "trace_backend": "none" if direct_runtime else trace_backend,
         "wall_s": round(wall_s, 6),
         "recovery_wall_s": round(recovery_wall_s, 6),
+        **{name: round(phase_timings.get(name, 0.0), 6) for name in (
+            "policy_wall_s", "doc_replay_wall_s", "official_model_wall_s", "official_grade_wall_s"
+        )},
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "total_tokens": total_tokens,
@@ -1472,6 +1554,12 @@ def run_once(
         "tool_calls": tool_calls,
         "usage_source": usage_source,
         "model_calls": model_calls,
+        "native_recovery_projection": bool(
+            getattr(result, "metadata", {}).get("native_recovery_projection", False)
+        ) if result is not None else False,
+        "projected_precrash_messages": int(
+            getattr(result, "metadata", {}).get("projected_precrash_messages", 0)
+        ) if result is not None else 0,
         "harness_returncode": harness_returncode,
         "harness_stdout": harness_stdout,
         "harness_stderr": harness_stderr,
@@ -1655,6 +1743,12 @@ def token_summaries(rows: Sequence[dict]) -> List[dict]:
             _combined_tokens(row) for row in mode_rows
         ]
         recovery = [float(r.get("recovery_wall_s", 0) or 0) for r in mode_rows]
+        full_wall = [float(r.get("wall_s", 0) or 0) for r in mode_rows]
+        localization_wall = [
+            float(r["localization_total_wall_s"])
+            for r in mode_rows
+            if r.get("localization_total_wall_s") not in (None, "")
+        ]
         usage_sources = sorted({str(r.get("usage_source", "none")) for r in mode_rows})
         item = {
             "suite": suite,
@@ -1676,6 +1770,17 @@ def token_summaries(rows: Sequence[dict]) -> List[dict]:
             "combined_tokens_p99": round(_percentile(combined_tokens, 0.99), 3),
             "recovery_wall_s_p50": round(_percentile(recovery, 0.50), 6),
             "recovery_wall_s_p95": round(_percentile(recovery, 0.95), 6),
+            "full_wall_s_p50": round(_percentile(full_wall, 0.50), 6),
+            "full_wall_s_p95": round(_percentile(full_wall, 0.95), 6),
+            "localization_wall_s_samples": len(localization_wall),
+            "localization_wall_s_p50": (
+                round(_percentile(localization_wall, 0.50), 6)
+                if localization_wall else None
+            ),
+            "localization_wall_s_p95": (
+                round(_percentile(localization_wall, 0.95), 6)
+                if localization_wall else None
+            ),
         }
         item.update(block)
         summaries.append(item)
@@ -1759,11 +1864,11 @@ def summarize(rows: Sequence[dict]) -> dict:
 
 def _result_dir(provider: Optional[str], oracle: bool, harness_backend: str, result_subdir: Optional[str] = None) -> Path:
     if result_subdir:
-        return ROOT / "experiments" / "results" / result_subdir
+        return experiment_path("results", project_root=ROOT) / result_subdir
     if oracle:
-        return ROOT / "experiments" / "results" / "official"
+        return experiment_path("results", project_root=ROOT) / "official"
     if harness_backend != "legacy":
-        return ROOT / "experiments" / "results" / harness_backend
+        return experiment_path("results", project_root=ROOT) / harness_backend
     return provider_result_dir(ROOT, provider)
 
 
@@ -1809,6 +1914,9 @@ def write_outputs(
         "total_tokens_mean", "total_tokens_p50", "total_tokens_p95", "total_tokens_p99",
         "combined_tokens_p50", "combined_tokens_p95", "combined_tokens_p99",
         "recovery_wall_s_p50", "recovery_wall_s_p95",
+        "full_wall_s_p50", "full_wall_s_p95",
+        "localization_wall_s_samples", "localization_wall_s_p50",
+        "localization_wall_s_p95",
     ]
     with (out / "official_token_summary.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(
@@ -1979,6 +2087,13 @@ def _result_exit_code(rows: Sequence[dict], *, oracle: bool, allow_failures: boo
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    for name in (
+        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+        "http_proxy", "https_proxy", "all_proxy",
+    ):
+        os.environ.pop(name, None)
+    os.environ.update({"NO_PROXY": "*", "no_proxy": "*"})
+    os.environ["AGENTTX_NO_PROXY"] = "1"
     parser = argparse.ArgumentParser()
     parser.add_argument("--suite", choices=("swe", "tb", "all"), default="all")
     parser.add_argument(
@@ -1988,6 +2103,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="full catalogs (default), representative smoke catalog, or only --tasks from the full catalogs",
     )
     parser.add_argument("--tasks", nargs="+", default=None)
+    parser.add_argument(
+        "--allow-host-projected-tb",
+        action="store_true",
+        help="diagnostic only: run a Terminal-Bench agent on the host and verify in Docker",
+    )
     parser.add_argument(
         "--modes",
         nargs="+",
@@ -2048,7 +2168,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="write under experiments/results/<name> instead of the harness folder",
     )
     parser.add_argument("--trace-backend", choices=("strace", "bpf_persistent"), default="strace")
-    parser.add_argument("--cache-dir", type=Path, default=ROOT / "experiments" / "cache")
+    parser.add_argument("--cache-dir", type=Path, default=experiment_path("cache", project_root=ROOT))
     parser.add_argument("--python", default=DEFAULT_PYTHON)
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--oracle", action="store_true", help="apply official gold/oracle after policy")
@@ -2131,6 +2251,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             name: task for name, task in tb_catalog.items()
             if name in requested or f"tb:{name}" in requested
         }
+    if ("tb" in suites and tb_catalog and not args.preflight_only
+            and not args.allow_host_projected_tb):
+        print(
+            "Terminal-Bench formal runs require an image-native agent; "
+            "host-projected execution is diagnostic only. Use "
+            "--allow-host-projected-tb only for diagnostics.",
+            file=sys.stderr,
+        )
+        return 2
     if args.preflight_only:
         prefetch(
             args.cache_dir,
@@ -2157,7 +2286,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     output_dir=_result_dir(
                         args.provider, args.oracle, args.harness, args.result_subdir
                     ),
-                    max_turns=args.max_turns or 30,
+                    max_turns=args.max_turns,
                     reasoning_effort=args.reasoning_effort,
                 )
                 probe = {"available": True, **adapter.public_config}

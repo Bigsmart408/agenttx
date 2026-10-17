@@ -7,6 +7,63 @@ from agenttx.layers import LayerStore
 from agenttx.semisolate import SharedSemisolate
 
 
+def test_inactive_view_cleanup_does_not_follow_symlinks(tmp_path):
+    pool = object.__new__(SharedSemisolate)
+    pool.sandbox_dir = tmp_path / "session"
+    view = pool.sandbox_dir / "temproot"
+    view.mkdir(parents=True)
+    outside = tmp_path / "keep"
+    outside.write_text("independent")
+    (view / "link").symlink_to(outside)
+    (view / "stale").write_text("disposable")
+    pool._clear_unmounted_temproot()
+    assert outside.read_text() == "independent"
+    assert not list(view.iterdir())
+
+
+def test_view_cleanup_refuses_attached_mount(tmp_path, monkeypatch):
+    pool = object.__new__(SharedSemisolate)
+    pool.sandbox_dir = tmp_path / "session"
+    view = pool.sandbox_dir / "temproot"
+    view.mkdir(parents=True)
+    sentinel = view / "keep"
+    sentinel.write_text("mounted state")
+    monkeypatch.setattr(Path, "read_text", lambda *args, **kwargs: f"1 0 0:1 / {view}/subtree rw - tmpfs tmpfs rw\n")
+    with pytest.raises(RuntimeError, match="mounted sandbox"):
+        pool._clear_unmounted_temproot()
+    with sentinel.open() as handle:
+        assert handle.read() == "mounted state"
+
+
+def test_view_cleanup_refuses_symlink_root(tmp_path):
+    pool = object.__new__(SharedSemisolate)
+    pool.sandbox_dir = tmp_path / "session"
+    pool.sandbox_dir.mkdir()
+    (pool.sandbox_dir / "temproot").symlink_to(tmp_path, target_is_directory=True)
+    with pytest.raises(RuntimeError, match="symlink sandbox"):
+        pool._clear_unmounted_temproot()
+
+
+def test_commit_cleans_stale_view_without_deleting_independent_state(tmp_path):
+    from agenttx.runtime import AgentTX
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "keep"
+    outside.write_text("independent")
+    tx = AgentTX.begin(workdir=workspace, session_dir=tmp_path / "session", trace_reads=False)
+    try:
+        tx.run_tool("write", ["bash", "-c", "printf valid > result.txt"])
+        view = tx.pool.session_dir / "temproot"
+        view.mkdir(exist_ok=True)
+        (view / "stale-link").symlink_to(outside)
+        tx.commit()
+        assert (workspace / "result.txt").read_text() == "valid"
+        assert outside.read_text() == "independent"
+    finally:
+        tx.close(destroy=True)
+
+
 def test_empty_filtered_commit_is_a_noop(tmp_path: Path) -> None:
     pool = SharedSemisolate(workspace=tmp_path, sandbox_dir=tmp_path / "session")
     result = pool.commit(paths=[])
@@ -119,3 +176,55 @@ def test_snapshots_deduplicate_unchanged_files_without_aliasing(
     layers.drop_from([0])
     assert snapshot_target.exists() is False
     assert len(list((tmp_path / "layers" / "blobs").glob("*/*"))) == 1
+
+
+def test_worker_startup_diagnostics_are_preserved(tmp_path, monkeypatch):
+    from agenttx.runtime import AgentTX
+    workspace = tmp_path/'workspace'; workspace.mkdir()
+    tx = AgentTX.begin(workdir=workspace, session_dir=tmp_path/'session', trace_reads=False)
+    monkeypatch.setenv('AGENTTX_WORKER_PYTHON', '/missing-agenttx-worker-python')
+    try:
+        with pytest.raises(RuntimeError, match='refusing automatic replay'):
+            tx.run_tool('must-not-run', ['bash','-c','touch unintended'])
+        assert 'missing-agenttx-worker-python' in (tmp_path/'session/worker.stderr.log').read_text()
+        assert not (workspace/'unintended').exists()
+    finally:
+        tx.close(destroy=True)
+
+
+def test_declared_readonly_infrastructure_survives_overlay_and_rejects_writes(tmp_path, monkeypatch):
+    from agenttx.runtime import AgentTX
+    workspace = tmp_path/'workspace'; workspace.mkdir()
+    infrastructure = tmp_path/'immutable-tool-config'
+    infrastructure.write_text('original')
+    monkeypatch.setenv('TRY_BIND_READONLY', str(infrastructure))
+    tx = AgentTX.begin(workdir=workspace, session_dir=tmp_path/'session', trace_reads=True)
+    try:
+        record = tx.run_tool('read', ['cat', str(infrastructure)])
+        assert record.returncode == 0 and record.stdout == 'original'
+        denied = tx.run_tool('write', ['bash','-c',f'printf changed > {infrastructure}'])
+        assert denied.returncode != 0
+        written = tx.run_tool('task-write', ['bash','-c','printf repair > task.txt'])
+        assert written.returncode == 0
+        tx.rollback(written.step_id)
+        assert infrastructure.read_text() == 'original'
+        assert not tx.path_exists(workspace/'task.txt')
+    finally:
+        tx.close(destroy=True)
+
+
+def test_worker_uses_current_command_after_reusable_script_is_copied_up(tmp_path):
+    from agenttx.runtime import AgentTX
+    workspace=tmp_path/'workspace';workspace.mkdir()
+    tx=AgentTX.begin(workdir=workspace,session_dir=tmp_path/'session',trace_reads=True)
+    try:
+        assert tx.run_tool('first',['bash','-c','printf initial']).stdout=='initial'
+        script=tx.pool._cmd_script
+        assert script is not None
+        copied=tx.run_tool('copyup-command-script',['bash','-c',f'touch {script}; printf copied'])
+        assert copied.returncode==0 and copied.stdout=='copied'
+        current=tx.run_tool('current-command',['bash','-c','printf current'])
+        assert current.returncode==0 and current.stdout=='current'
+        tx.rollback(current.step_id)
+        assert tx.run_tool('after-rollback',['bash','-c','printf next']).stdout=='next'
+    finally:tx.close(destroy=True)

@@ -1,0 +1,16 @@
+{
+  "schema": "agenttx.protocol-validation-cells/v1",
+  "status": "complete",
+  "model": "gpt-5.6-luna",
+  "reasoning_effort": "max",
+  "wall_timeout_s": 240,
+  "count_cap": null,
+  "token_cap": null,
+  "remote_root": "/home/bfq/agenttx-validation-20261017-p0",
+  "cells": 29,
+  "formal_eligible": false,
+  "note": "Implementation validation only; includes v2 clean/compact corrections and v3 worker command-copy-up regression. Earlier failures and the unchanged-budget Codex timeout are retained. No formal registrations are overwritten. V4 additionally redacts credentials from retained tool environment records and removes generated timeout auth scratch.",
+  "passed": 25,
+  "model_wall_timeouts": 1,
+  "harness_infrastructure_errors": 3
+}

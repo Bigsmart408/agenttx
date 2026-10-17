@@ -77,7 +77,7 @@ measurements with separate markers.
 work, and conclusion use the same abstraction--implementation hierarchy.
 The Introduction summarizes the Motivation's three qualitative findings but
 does not repeat its case counts, per-policy percentages, or figure-level data.
-Motivation introduces the ideal oracle as removing the failed step and its
+Motivation introduces the Ideal oracle as removing the failed step and its
 dependent steps without assuming the later AET terminology. Paragraphs use at
 most six sentences; substantive prose sentences use at most 30 words. Internal
 experiment labels and stale three-challenge wording are absent.

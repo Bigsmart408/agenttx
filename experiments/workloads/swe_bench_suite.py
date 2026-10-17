@@ -20,6 +20,7 @@ import time
 import urllib.request
 import uuid
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -250,6 +251,31 @@ REPO_PIP = {
 
 
 DOCKER_TESTBED_PYTHON = "/opt/miniconda3/envs/testbed/bin/python"
+
+
+@lru_cache(maxsize=None)
+def official_runtime_info(instance_id: str, image_id: Optional[str] = None) -> dict:
+    """Pin the official evaluator to a local image ID and actual interpreter."""
+    selected = image_id or ensure_eval_image(instance_id)
+    inspected_id = subprocess.check_output(
+        ["docker", "image", "inspect", "--format", "{{.Id}}", selected],
+        text=True, timeout=20,
+    ).strip()
+    if not inspected_id or (image_id and image_id != inspected_id):
+        raise RuntimeError("official evaluator image identity mismatch")
+    env = os.environ.copy()
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        env.pop(key, None)
+    output = subprocess.check_output(
+        ["docker", "run", "--rm", "--pull=never", "--network=none",
+         "--entrypoint", DOCKER_TESTBED_PYTHON, inspected_id, "-c",
+         "import json,sys; print(json.dumps({'python_version':sys.version.split()[0]}))"],
+        text=True, timeout=60, env=env,
+    )
+    runtime = json.loads(output)
+    if not isinstance(runtime.get("python_version"), str) or not runtime["python_version"]:
+        raise RuntimeError("official evaluator interpreter probe failed")
+    return {**runtime, "image_id": inspected_id, "image_tag": swe_eval_image(instance_id)}
 
 
 def swe_eval_image(instance_id: str) -> str:
@@ -860,6 +886,15 @@ def agent_test_command(
     )
     if reference_progress_verified:
         return marker
+    runtime = instance.get("_agenttx_eval_runtime")
+    if runtime:
+        verifier = script.with_name("verify_swe_workspace.py")
+        command = _quoted((
+            python, verifier, "--instance-id", task.instance_id,
+            "--workdir", ".", "--image-id", runtime["image_id"],
+            "--expected-python", runtime["python_version"],
+        ))
+        return f"{marker} && {command}"
     return f"{marker} && {test_command(task, instance, python)}"
 
 
@@ -980,6 +1015,16 @@ def task_prompt(
             "If a recovery note is missing, create it with lines after the title starting exactly "
             "DESIGN-001: / CHANGE-001: and no '1. ' numbering prefix. If it already exists, do not open or rewrite it."
         )
+    runtime = instance.get("_agenttx_eval_runtime")
+    runtime_rule = (
+        f"Official tests run inside the pinned evaluator image using Python "
+        f"{runtime['python_version']}. Keep source changes compatible with that "
+        "runtime. Use the exact verifier command for every validation; its host "
+        "Python only launches Docker and is not the project's test interpreter. "
+        "Do not run host pytest or install dependencies into the host."
+        if runtime else
+        "Use only the interpreter in the verifier command for tests and pip installs. Do not pip-install into a host conda or system Python."
+    )
     return recovery_prompt(
         title=task.instance_id,
         context=(
@@ -997,7 +1042,7 @@ def task_prompt(
         focus_path=task.faulty_relpath,
         extra_rules=(
             "Do not apply a hidden gold patch file; implement the issue in the repository sources.",
-            "Use only the interpreter in the verifier command for tests and pip installs. Do not pip-install into a host conda or system Python.",
+            runtime_rule,
             "Run as one direct agent. Do not invoke, queue, or wait for research or delegated subagents; they are unavailable in this benchmark.",
             "Use a bounded workflow: inspect only the issue-relevant implementation and FAIL_TO_PASS tests, make the smallest focused change, run the named verifier, and stop when it passes. After a real test failure, use that failure to make a focused correction and rerun the same verifier. Continue only while each rerun follows a concrete issue-relevant edit; stop if there is no justified next edit. A verifier that fails before test execution because of the environment does not count as a task-code failure. Do not inventory the repository or repeat successful commands.",
             "For repository inspection, use rg for one named symbol/path and sed -n for a bounded line range only. Do not use cat, find, ls -R, recursive directory listings, unscoped git diff/status, or a full test suite; run only the exact named verifier.",
@@ -1054,7 +1099,9 @@ def _verify_tests_host(workdir: Path, task: SWETask, instance: dict, python: str
     }
 
 
-def _verify_tests_docker(workdir: Path, task: SWETask, instance: dict) -> dict:
+def _verify_tests_docker(
+    workdir: Path, task: SWETask, instance: dict, *, apply_test_patch: bool = False,
+) -> dict:
     """Run FAIL_TO_PASS in the official eval image, overlaying the AgentTX workdir.
 
     Compiled extensions stay in the image; ``docker cp`` only overwrites files
@@ -1065,7 +1112,8 @@ def _verify_tests_docker(workdir: Path, task: SWETask, instance: dict) -> dict:
     cmd = test_command(task, instance, DOCKER_TESTBED_PYTHON)
     _strip_live_agent_scratch(workdir)
     try:
-        image = ensure_eval_image(task.instance_id)
+        runtime = instance.get("_agenttx_eval_runtime")
+        image = runtime["image_id"] if runtime else ensure_eval_image(task.instance_id)
         subprocess.run(
             ["docker", "rm", "-f", name],
             stdout=subprocess.DEVNULL,
@@ -1076,6 +1124,8 @@ def _verify_tests_docker(workdir: Path, task: SWETask, instance: dict) -> dict:
             [
                 "docker",
                 "create",
+                "--pull=never",
+                "--network=none",
                 "--name",
                 name,
                 "--workdir",
@@ -1132,6 +1182,27 @@ def _verify_tests_docker(workdir: Path, task: SWETask, instance: dict) -> dict:
         if archive_rc != 0 or copied.returncode != 0:
             detail = copied.stderr or copied.stdout or archive_stderr or b"workspace copy failed"
             raise RuntimeError(detail.decode(errors="replace")[-2000:])
+        if apply_test_patch:
+            patch = str(instance.get("test_patch") or "")
+            if patch:
+                already_applied = subprocess.run(
+                    ["docker", "exec", "-i", name, "git", "-C", "/testbed",
+                     "apply", "--reverse", "--check", "-"],
+                    input=patch, text=True, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, check=False,
+                )
+                if already_applied.returncode != 0:
+                    applied = subprocess.run(
+                        ["docker", "exec", "-i", name, "git", "-C", "/testbed",
+                         "apply", "--whitespace=nowarn", "-"],
+                        input=patch, text=True, stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE, check=False,
+                    )
+                    if applied.returncode != 0:
+                        raise RuntimeError(
+                            "SWE-Bench test_patch conflicts with agent workspace: "
+                            + (applied.stderr or applied.stdout or "unknown error")[-1500:]
+                        )
         result = subprocess.run(
             ["docker", "exec", "-w", "/testbed", name, "bash", "-lc", cmd],
             stdout=subprocess.PIPE,
@@ -1147,6 +1218,8 @@ def _verify_tests_docker(workdir: Path, task: SWETask, instance: dict) -> dict:
             "verifier_stderr": (result.stderr or "")[-2000:],
             "verifier_backend": "docker",
             "docker_image": image,
+            "test_patch_applied": bool(apply_test_patch and instance.get("test_patch")),
+            "verifier_runtime_python": (runtime or {}).get("python_version", ""),
         }
     except subprocess.TimeoutExpired:
         return {

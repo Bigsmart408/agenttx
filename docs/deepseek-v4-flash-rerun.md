@@ -1,5 +1,7 @@
 # DeepSeek v4 Flash 实验重跑记录
 
+中英文策略名称与 ID 对应关系见[术语表](terminology.md)；历史结果保留各自实验命名空间。
+
 本轮将所有需要真实大模型调用的实验统一切换为 `deepseek-v4-flash`。旧的
 `deepseek-chat` 汇总文件没有与新数据合并，而是移动到
 `experiments/results/legacy_deepseek_chat_20260817/`，仅作为历史归档。
@@ -22,15 +24,15 @@
 
 | scale | policy | total tokens | success | independent retained |
 |---|---|---:|:---:|:---:|
-| short | causal | 47,977 | yes | yes |
-| short | temporal checkpoint | 28,209 | yes | yes |
-| short | whole branch abort | 100,939 | no | no |
-| medium | causal | 41,393 | yes | yes |
-| medium | temporal checkpoint | 61,313 | no | yes |
-| medium | whole branch abort | 68,449 | no | no |
-| long | causal | 41,183 | yes | yes |
-| long | temporal checkpoint | 69,643 | no | yes |
-| long | whole branch abort | 65,505 | no | no |
+| short | AgentTX causal | 47,977 | yes | yes |
+| short | Temporal checkpoint | 28,209 | yes | yes |
+| short | Whole branch abort | 100,939 | no | no |
+| medium | AgentTX causal | 41,393 | yes | yes |
+| medium | Temporal checkpoint | 61,313 | no | yes |
+| medium | Whole branch abort | 68,449 | no | no |
+| long | AgentTX causal | 41,183 | yes | yes |
+| long | Temporal checkpoint | 69,643 | no | yes |
+| long | Whole branch abort | 65,505 | no | no |
 
 原始结果：`experiments/results/deepseek/github_token_tasks_raw.csv`；汇总：
 `experiments/results/deepseek/github_token_tasks.{json,md}`。
@@ -41,7 +43,7 @@
 12、24、48 lines/doc，三次重复；causal 不需要 replay，checkpoint 需要重放
 一个文档，whole-branch 需要重放两个文档。
 
-| lines/doc | causal | temporal checkpoint | whole branch abort |
+| lines/doc | AgentTX causal | Temporal checkpoint | Whole branch abort |
 |---:|---:|---:|---:|
 | 12 | 0 | 864.3 | 1,797.3 |
 | 24 | 0 | 1,060.3 | 2,231.7 |

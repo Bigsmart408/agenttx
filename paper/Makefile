@@ -5,7 +5,7 @@ TECTONIC ?= tectonic
 
 all: main.pdf
 
-main.pdf: main.tex references.bib usenix-2020-09.sty $(wildcard img/*.pdf)
+main.pdf: main.tex references.bib usenix-2020-09.sty $(wildcard img/*.pdf) $(wildcard img/*.png)
 	@if command -v "$(LATEXMK)" >/dev/null 2>&1; then \
 		"$(LATEXMK)" -pdf -interaction=nonstopmode -halt-on-error main.tex; \
 	elif command -v "$(TECTONIC)" >/dev/null 2>&1; then \

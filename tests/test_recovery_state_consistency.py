@@ -10,6 +10,8 @@ import json
 from copy import deepcopy
 from pathlib import Path
 
+import pytest
+
 from agenttx.conversation import ConversationLog
 from agenttx.harness import CodingAgentHarness
 from experiments.scripts.bench_official_tasks import _apply_policy
@@ -40,6 +42,37 @@ DOCS = (
     DocSpec("recovery_notes/design.md", "design", 4),
     DocSpec("recovery_notes/changelog.md", "change", 4),
 )
+
+
+def test_oracle_truth_restores_workspace_despite_incorrect_captured_edges(tmp_path):
+    agent, injected = _inject(tmp_path / "ws", tmp_path / "sess")
+    tx = agent.harness.tx
+    try:
+        tx.ledger.steps[injected["independent_after_steps"][0]].parents.add(injected["root_step"])
+        tx.ledger.steps[injected["derived_step"]].parents.clear()
+        def forbidden(*args):
+            raise AssertionError("oracle must not query captured closure")
+        tx._unified_causal_targets = forbidden
+        for turn in tx.conversation.turns:
+            for span in turn.calls:
+                if span.step_id == injected["independent_after_steps"][0]:
+                    span.parents = (injected["root_step"],)
+        tx.conversation.conversation_closure = forbidden
+        targets = _apply_policy(agent, "ideal_oracle", injected["root_step"],
+                                oracle_targets=injected["oracle_invalid_steps"])
+        assert set(targets) == set(injected["oracle_invalid_steps"])
+        assert set(injected["independent_steps"]) <= set(tx.conversation.active_step_ids())
+        assert not set(targets).intersection(tx.conversation.active_step_ids())
+        assert not tx.path_exists(agent.harness.workdir / "pkg/fault.py")
+        assert not tx.path_exists(agent.harness.workdir / "recovery_build/derived.txt")
+        for path in injected["docs_before"] + injected["docs_after"]:
+            assert tx.path_exists(agent.harness.workdir / path)
+        before = tx.ledger.to_dict(), tx.conversation.to_dict()
+        with pytest.raises(ValueError, match="inactive step"):
+            tx.rollback_exact(injected["oracle_invalid_steps"])
+        assert (tx.ledger.to_dict(), tx.conversation.to_dict()) == before
+    finally:
+        agent.harness.close(destroy=True)
 
 
 def _inject(
@@ -391,7 +424,10 @@ def test_control_prompts_distinguish_clean_recovery_and_no_rollback():
     assert "Recovery protocol:" in no_rollback
     assert "clean unsolved benchmark checkout" in clean
     assert "reference solution is already materialized" not in clean
-    assert "Complete the official task" in clean
+    assert "Run the exact named verifier before making any edit" in clean
+    assert "Start with the verifier's concrete diagnostics" in clean
+    assert "No faulty step, source path, or recovery certificate is available" in clean
+    assert "disclosed invalidated source" not in clean
     assert "step and path are not disclosed" in no_rollback
     assert "named verifier" in clean
     assert "named verifier" in no_rollback
@@ -489,7 +525,8 @@ def test_compact_handoff_information_is_policy_scoped(monkeypatch):
 def test_ideal_oracle_compact_handoff_discloses_exact_step(tmp_path, monkeypatch):
     agent, injected = _inject(tmp_path / "ws", tmp_path / "sess")
     try:
-        _apply_policy(agent, "ideal_oracle", injected["root_step"])
+        _apply_policy(agent, "ideal_oracle", injected["root_step"],
+                      oracle_targets=injected["oracle_invalid_steps"])
         manifest = _manifest_after_policy(agent, injected, "ideal_oracle")
         monkeypatch.setenv("AGENTTX_RECOVERY_CONTEXT", "compact")
         prompt = render_recovery_manifest_prompt(manifest)
@@ -513,7 +550,9 @@ def test_clean_recovery_can_use_compact_execution_constraints(monkeypatch):
     )
     assert recovery_context_variant("clean_recovery") == "compact"
     assert "unsolved clean checkout" in prompt
-    assert "complete the official task" in prompt
+    assert "verifier-guided task protocol" in prompt
+    assert "Run the exact named verifier before making any edit" in prompt
+    assert "No faulty step, source path, or recovery certificate is available" in prompt
     assert "Make no tool calls" not in prompt
     assert "compact recovery certificate is authoritative" not in prompt
     assert "No crash was injected" in prompt

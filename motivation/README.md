@@ -1,5 +1,7 @@
 # Intra-turn recovery motivation campaign
 
+Terminology / 中英文策略名称：[reference / 术语表](../docs/terminology.md).
+
 The canonical motivation campaign is the unified MB1--MB3 microbenchmark
 specified in Section 2 of `agent.md`. Its only result root is:
 

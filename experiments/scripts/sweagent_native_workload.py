@@ -17,13 +17,16 @@ import uuid
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Mapping, Optional
 
 import yaml
 from swerex.deployment.config import LocalDeploymentConfig, get_deployment
 
 from agenttx.agents.external import ExternalHarnessResult
 from agenttx.agents.swe_agent import (
+    PRECRASH_SEEDED_KEY,
+    RECOVERY_GENERATION_KEY,
+    STEP_IDS_KEY,
     SWEAgentIntegrationError,
     SWEAgentNativeAdapter,
     create_swe_agent_adapter,
@@ -312,6 +315,69 @@ def _native_active_history_messages(serialized: str, agent_name: str) -> list[di
     return messages
 
 
+def _official_recovery_history_messages(
+    snapshot: Mapping[str, object], agent_name: str,
+) -> list[dict]:
+    """Restore the scripted pre-crash prefix as SWE-agent action/observation pairs."""
+    if snapshot.get("schema") != "agenttx.conversation/v2":
+        raise ValueError("official recovery requires an AgentTX conversation snapshot")
+    turns = snapshot.get("turns")
+    if not isinstance(turns, list):
+        raise ValueError("official recovery conversation has no turns")
+    messages: list[dict] = []
+    for turn in turns:
+        if not isinstance(turn, dict) or turn.get("kind") != "effect":
+            continue
+        for call in turn.get("calls") or []:
+            if not isinstance(call, dict) or call.get("step_id") is None:
+                continue
+            step_id = int(call["step_id"])
+            tool_name = str(call.get("tool_name") or "tool")
+            try:
+                arguments = json.loads(str(call.get("arguments") or "{}"))
+            except json.JSONDecodeError:
+                arguments = str(call.get("arguments") or "")
+            try:
+                result = json.loads(str(call.get("result") or "{}"))
+            except json.JSONDecodeError:
+                result = {}
+            if not isinstance(result, dict):
+                result = {}
+            action = json.dumps(
+                {"tool": tool_name, "arguments": arguments},
+                ensure_ascii=False, sort_keys=True,
+            )
+            observation = json.dumps(
+                {
+                    "exit_code": result.get("returncode", result.get("exit_code", 0)),
+                    "stdout": result.get("stdout", ""),
+                    "stderr": result.get("stderr", ""),
+                },
+                ensure_ascii=False, sort_keys=True,
+            )
+            marker = {STEP_IDS_KEY: [step_id], PRECRASH_SEEDED_KEY: True}
+            messages.extend((
+                {
+                    "role": "assistant", "content": f"Recorded action: {action}",
+                    "agent": agent_name, "message_type": "action", **marker,
+                },
+                {
+                    "role": "user", "content": f"<observation>{observation}</observation>",
+                    "agent": agent_name, "message_type": "observation", **marker,
+                },
+            ))
+    if not messages:
+        raise ValueError("official recovery has no pre-crash tool history")
+    return messages
+
+
+def _append_tagged_history(agent, message: dict) -> None:
+    """Keep AgentTX tags in stored history, not SWE-agent's hook arguments."""
+    tags = (STEP_IDS_KEY, PRECRASH_SEEDED_KEY, RECOVERY_GENERATION_KEY)
+    agent._append_history({key: value for key, value in message.items() if key not in tags})
+    agent.history[-1].update({key: message[key] for key in tags if key in message})
+
+
 @dataclass(frozen=True)
 class SWEAgentHarnessResult(ExternalHarnessResult):
     metadata: dict = field(default_factory=dict)
@@ -329,7 +395,7 @@ class SWEAgentNativeWorkloadHarness:
         profile: CodexGPTProfile,
         config_path: Path = DEFAULT_SWE_AGENT_CONFIG,
         swe_agent_root: Path = DEFAULT_SWE_AGENT_ROOT,
-        max_steps: int = 192,
+        max_steps: Optional[int] = 192,
         max_model_calls: int = 192,
         timeout_s: Optional[float] = None,
     ) -> None:
@@ -368,7 +434,10 @@ class SWEAgentNativeWorkloadHarness:
     ) -> SWEAgentHarnessResult:
         return self._run(task, workdir, env=env, commit=True)
 
-    def run_in_transaction(self, transaction_harness, task: str) -> SWEAgentHarnessResult:
+    def run_in_transaction(
+        self, transaction_harness, task: str,
+        *, native_context: Optional[dict] = None,
+    ) -> SWEAgentHarnessResult:
         """Run native SWEAgent inside an official runner's existing transaction."""
         return self._run(
             task,
@@ -376,6 +445,7 @@ class SWEAgentNativeWorkloadHarness:
             env=None,
             transaction_harness=transaction_harness,
             commit=False,
+            native_context=native_context,
         )
 
     def _run(
@@ -386,6 +456,7 @@ class SWEAgentNativeWorkloadHarness:
         env: Optional[Dict[str, str]],
         transaction_harness=None,
         commit: bool,
+        native_context: Optional[dict] = None,
     ) -> SWEAgentHarnessResult:
         if os.environ.get("AGENTTX_MOTIVATION_BWRAP") != "1":
             raise RuntimeError(
@@ -399,6 +470,8 @@ class SWEAgentNativeWorkloadHarness:
         native_base_task = run_env.get("AGENTTX_NATIVE_BASE_TASK", "")
         native_crash_notice = run_env.get("AGENTTX_NATIVE_CRASH_NOTICE", "")
         native_resume = bool(native_active_history or native_base_task or native_crash_notice)
+        if native_context is not None and native_resume:
+            raise ValueError("official recovery context cannot mix with M3 replay history")
         if native_resume and not all(
             (native_active_history, native_base_task, native_crash_notice)
         ):
@@ -440,7 +513,10 @@ class SWEAgentNativeWorkloadHarness:
         _cleanup_sweagent_runtime()
         try:
             _initialize_workspace_repo(workdir)
-            base_prompt = native_base_task or task
+            base_prompt = (
+                str(native_context["original_task"])
+                if native_context is not None else native_base_task or task
+            )
             clean_baseline = base_prompt.startswith(
                 "This is the clean compact recovery baseline."
             )
@@ -483,7 +559,41 @@ class SWEAgentNativeWorkloadHarness:
                     agent=agent,
                     harness=transaction_harness,
                 )
-            if native_resume:
+            if native_context is not None:
+                if transaction_harness is None:
+                    raise ValueError("official native recovery requires a transaction")
+                adapter.recovery_context_variant = str(
+                    native_context.get("context_variant") or "full"
+                )
+                adapter.setup(swe_env, problem, cell_output)
+                native_messages = _official_recovery_history_messages(
+                    native_context["precrash_conversation"], agent.name,
+                )
+                for message in native_messages:
+                    _append_tagged_history(agent, message)
+                generation = transaction_harness.tx.conversation.generation
+                _append_tagged_history(agent, {
+                    "role": "user", "content": task, "agent": agent.name,
+                    "message_type": "observation",
+                    RECOVERY_GENERATION_KEY: generation,
+                })
+                projected_seeded = sum(
+                    bool(item.get(PRECRASH_SEEDED_KEY)) for item in agent.messages
+                )
+                completed = 0
+                step_output = None
+                while step_output is None or not bool(getattr(step_output, "done", False)):
+                    enforce_deadline()
+                    if self.max_steps is not None and completed >= self.max_steps:
+                        raise SWEAgentIntegrationError(
+                            f"SWE-agent exceeded AgentTX max_steps={self.max_steps}"
+                        )
+                    step_output = adapter.step()
+                    enforce_deadline()
+                    completed += 1
+                    agent.save_trajectory()
+                result = adapter.finish(commit=commit)
+            elif native_resume:
                 adapter.setup(swe_env, problem, cell_output)
                 native_messages = _native_active_history_messages(
                     native_active_history,
@@ -505,7 +615,7 @@ class SWEAgentNativeWorkloadHarness:
                     getattr(step_output, "done", False)
                 ):
                     enforce_deadline()
-                    if completed >= self.max_steps:
+                    if self.max_steps is not None and completed >= self.max_steps:
                         raise SWEAgentIntegrationError(
                             f"SWE-agent exceeded AgentTX max_steps={self.max_steps}"
                         )
@@ -523,7 +633,9 @@ class SWEAgentNativeWorkloadHarness:
                     max_steps=1 if clean_baseline else self.max_steps,
                     commit=commit,
                 )
-            submitted = str(result.summary).startswith("submitted")
+            # SWE-agent also auto-submits on internal errors and budget exits.
+            # Those preserve a patch for grading, but are not normal completion.
+            submitted = str(result.summary) == "submitted"
             events = []
             for index, step in enumerate(getattr(agent, "trajectory", []) or []):
                 if not isinstance(step, dict):
@@ -569,8 +681,12 @@ class SWEAgentNativeWorkloadHarness:
                     "sweagent_exit_status": result.summary,
                     "sweagent_model_calls": result.model_calls,
                     "native_adapter": "SWEAgentNativeAdapter",
-                    "native_active_history": native_resume,
+                    "native_active_history": native_resume or native_context is not None,
                     "native_active_history_turns": len(native_messages) // 2,
+                    "native_recovery_projection": native_context is not None,
+                    "projected_precrash_messages": (
+                        projected_seeded if native_context is not None else 0
+                    ),
                     "trajectory_dir": str(cell_output),
                 },
             )
@@ -600,7 +716,7 @@ class SWEAgentNativeWorkloadHarness:
                     "sweagent_exit_status": type(exc).__name__,
                     "sweagent_model_calls": model_calls,
                     "native_adapter": "SWEAgentNativeAdapter",
-                    "native_active_history": native_resume,
+                    "native_active_history": native_resume or native_context is not None,
                     "native_active_history_turns": (
                         len(native_messages) // 2 if "native_messages" in locals() else 0
                     ),

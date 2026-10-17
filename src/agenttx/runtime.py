@@ -522,7 +522,9 @@ class AgentTX:
 
     def _rewind_conversation(self, targets: Sequence[int], mode: str) -> dict:
         notice = render_ledger_recovery_notice(self.ledger, targets, mode=mode)
-        return self.conversation.rewind(targets, notice, mode=mode)
+        return self.conversation.rewind(
+            targets, notice, mode=mode, expand_dependencies=mode not in {"oracle", "turn_checkpoint"},
+        )
 
     def rollback_from(self, step_id: Optional[int] = None) -> List[int]:
         if not self.ledger.steps:
@@ -589,6 +591,48 @@ class AgentTX:
             raise ValueError("cannot roll back an invalid or inactive step")
 
         targets = self._unified_causal_targets(roots)
+        return self._rollback_selected_targets(targets, mode="causal")
+
+    def rollback_exact(self, step_ids: Sequence[int]) -> List[int]:
+        """Restore an evaluator-supplied truth set without consulting captured edges.
+
+        Normal agent recovery must use causal recovery and its own evidence.
+        This entry point lets evaluation oracles remain independent of the
+        dependency graph whose correctness is being measured.
+        """
+        targets = sorted({int(step_id) for step_id in step_ids})
+        if not targets:
+            return []
+        if any(step_id <= self.ledger.committed_frontier for step_id in targets):
+            raise ValueError("cannot roll back a committed step")
+        if any(
+            step_id < 0 or step_id >= len(self.ledger.steps)
+            or self.ledger.steps[step_id].status == "rolled_back"
+            for step_id in targets
+        ):
+            raise ValueError("cannot roll back an invalid or inactive step")
+        return self._rollback_selected_targets(targets, mode="oracle")
+
+    def rollback_turns(self, turn_ids: Sequence[int]) -> List[int]:
+        """Restore complete conversation turns selected by a checkpoint policy.
+
+        This boundary does not consult dependency edges. The caller is responsible
+        for selecting every invalid turn; surviving invalid effects remain visible
+        to verification rather than being silently repaired by causal expansion.
+        """
+        selected = set(turn_ids)
+        turns = [turn for turn in self.conversation.turns if turn.turn_id in selected]
+        if {turn.turn_id for turn in turns} != selected:
+            raise ValueError("unknown checkpoint turn")
+        targets = sorted({span.step_id for turn in turns for span in turn.calls
+                          if span.step_id is not None})
+        if any(i <= self.ledger.committed_frontier or i < 0
+               or i >= len(self.ledger.steps)
+               or self.ledger.steps[i].status == "rolled_back" for i in targets):
+            raise ValueError("checkpoint turn contains committed or inactive steps")
+        return self._rollback_selected_targets(targets, mode="turn_checkpoint") if targets else []
+
+    def _rollback_selected_targets(self, targets: List[int], *, mode: str) -> List[int]:
         if any(
             target <= self.ledger.committed_frontier for target in targets
         ):
@@ -657,7 +701,7 @@ class AgentTX:
         assert self.pool is not None
         self.pool.rollback_causal_groups(targets, sorted(path_groups))
         self.ledger.mark_rolled_back(targets)
-        self._rewind_conversation(targets, mode="causal")
+        self._rewind_conversation(targets, mode=mode)
         self._persist()
         return targets
 

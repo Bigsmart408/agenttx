@@ -16,6 +16,8 @@ from typing import Mapping, Sequence
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+from experiments.scripts.experiment_storage import experiment_path
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
@@ -74,12 +76,14 @@ def _check(name: str, ok: bool, detail: str) -> dict[str, object]:
 
 def global_checks(args: argparse.Namespace, suites: set[str]) -> list[dict[str, object]]:
     checks: list[dict[str, object]] = []
-    active_prefix = os.environ.get("CONDA_PREFIX", "")
+    active_prefix = os.environ.get("VIRTUAL_ENV") or os.environ.get("CONDA_PREFIX", "")
     resolved_python = shutil.which(args.python) or args.python
-    expected_prefix = str(Path(resolved_python).resolve().parent.parent)
+    # venv interpreters are commonly symlinks into a standalone/base Python.
+    # The environment prefix belongs to the invoked bin/, not that target.
+    expected_prefix = str(Path(resolved_python).absolute().parent.parent)
     checks.append(
         _check(
-            "conda_environment",
+            "python_environment",
             bool(active_prefix) and Path(active_prefix).resolve() == Path(expected_prefix),
             f"active={active_prefix or 'none'} expected={expected_prefix}",
         )
@@ -88,6 +92,12 @@ def global_checks(args: argparse.Namespace, suites: set[str]) -> list[dict[str, 
     if "tb" in suites:
         modules.extend(["pandas", "pyarrow", "yaml"])
     try:
+        probe_env = {**os.environ, "PYTHONPATH": f"{ROOT / 'src'}:{ROOT}"}
+        conda_lib = str(Path(expected_prefix) / "lib")
+        probe_env["LD_LIBRARY_PATH"] = conda_lib + (
+            os.pathsep + probe_env["LD_LIBRARY_PATH"]
+            if probe_env.get("LD_LIBRARY_PATH") else ""
+        )
         python_probe = subprocess.run(
             [
                 args.python,
@@ -95,7 +105,7 @@ def global_checks(args: argparse.Namespace, suites: set[str]) -> list[dict[str, 
                 "; ".join(f"import {module}" for module in modules) + "; print('imports ok')",
             ],
             cwd=ROOT,
-            env={**os.environ, "PYTHONPATH": f"{ROOT / 'src'}:{ROOT}"},
+            env=probe_env,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -331,10 +341,16 @@ def check_task(
             try:
                 details.append(f"docker: {validate_tb_docker(source)}")
                 task = tb_catalog[name]
-                if getattr(task, "container_verifier", False):
-                    image, image_workdir = tb.ensure_official_image(task, cache_dir)
-                    details.append(f"container verifier: {image} ({image_workdir})")
+                image, image_workdir = tb.ensure_official_image(task, cache_dir)
+                details.append(f"official task image: {image} ({image_workdir})")
                 docker_ok = True
+                image_user = tb.official_image_user(image)
+                if image_user not in {"root", "0", "0:0"}:
+                    failed_stages.append("image_native_runner_user")
+                    details.append(
+                        f"image user {image_user!r} is not supported by the current "
+                        "image-native agent runner; forcing root would change task semantics"
+                    )
             except Exception as exc:
                 failed_stages.append("docker_verifier")
                 details.append(f"docker: {type(exc).__name__}: {exc}")
@@ -411,14 +427,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--task-set", choices=("representative", "full", "selected"), default="representative"
     )
     parser.add_argument("--tasks", nargs="*", default=())
-    parser.add_argument("--cache-dir", type=Path, default=ROOT / "experiments" / "cache")
+    parser.add_argument("--cache-dir", type=Path, default=experiment_path("cache", project_root=ROOT))
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument(
         "--prepare-missing",
         action="store_true",
         help="build missing or stale SWE-Bench cached venvs before validating them",
     )
-    parser.add_argument("--output", type=Path, default=ROOT / "experiments" / "results" / "environment_check")
+    parser.add_argument("--output", type=Path, default=experiment_path("results", project_root=ROOT) / "environment_check")
     return parser.parse_args(argv)
 
 

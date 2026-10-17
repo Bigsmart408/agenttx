@@ -21,6 +21,39 @@ def test_select_tasks_uses_exact_prefixed_subset(monkeypatch, tmp_path):
     assert selected == [("swe", "one"), ("tb", "two")]
 
 
+def test_global_python_probe_uses_conda_libraries(monkeypatch, tmp_path):
+    python = tmp_path / "env" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    monkeypatch.setenv("CONDA_PREFIX", str(python.parent.parent))
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    observed = {}
+
+    def fake_run(*_args, **kwargs):
+        observed.update(kwargs["env"])
+        return SimpleNamespace(returncode=0, stdout="imports ok", stderr="")
+
+    monkeypatch.setattr(check_env.subprocess, "run", fake_run)
+    monkeypatch.setattr(check_env.swe, "docker_available", lambda: True)
+    checks = check_env.global_checks(SimpleNamespace(python=str(python)), {"tb"})
+    assert all(check["ok"] for check in checks)
+    assert observed["LD_LIBRARY_PATH"].split(":")[0] == str(python.parent.parent / "lib")
+
+
+def test_global_python_probe_preserves_activated_venv_prefix_through_symlink(monkeypatch, tmp_path):
+    base = tmp_path / "base/bin/python"
+    base.parent.mkdir(parents=True)
+    base.touch()
+    python = tmp_path / "venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(base)
+    monkeypatch.setenv("VIRTUAL_ENV", str(python.parent.parent))
+    monkeypatch.setenv("CONDA_PREFIX", str(base.parent.parent))
+    monkeypatch.setattr(check_env.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="imports ok", stderr=""))
+    monkeypatch.setattr(check_env.swe, "docker_available", lambda: True)
+    assert all(check["ok"] for check in check_env.global_checks(SimpleNamespace(python=str(python)), {"swe"}))
+
+
 def test_select_tasks_rejects_unknown_case(monkeypatch, tmp_path):
     monkeypatch.setattr(check_env.swe, "load_tasks", lambda _cache: {})
     monkeypatch.setattr(check_env.tb, "load_tasks", lambda _cache: {})
@@ -117,6 +150,12 @@ def test_check_tb_task_uses_embedded_run_tests_and_compose(monkeypatch, tmp_path
     (source / "docker-compose.yaml").write_text("services: {}\n", encoding="utf-8")
     monkeypatch.setattr(check_env.tb, "task_source", lambda *_args: source)
     monkeypatch.setattr(check_env, "validate_tb_docker", lambda value: str(value / "docker-compose.yaml"))
+    built = []
+    def fake_ensure_official_image(task, cache_dir):
+        built.append(task.task_id)
+        return "task-image", "/app"
+    monkeypatch.setattr(check_env.tb, "ensure_official_image", fake_ensure_official_image)
+    monkeypatch.setattr(check_env.tb, "official_image_user", lambda _image: "root")
 
     row = check_env.check_task(
         suite="tb",
@@ -131,3 +170,24 @@ def test_check_tb_task_uses_embedded_run_tests_and_compose(monkeypatch, tmp_path
     assert row["stage"] == "complete"
     assert row["dependencies_ok"] is True
     assert row["docker_ok"] is True
+    assert built == ["two"]
+
+
+def test_non_root_tb_image_fails_native_runner_preflight(monkeypatch, tmp_path):
+    task = SimpleNamespace(task_id="privilege-escalation")
+    source = tmp_path / task.task_id
+    source.mkdir()
+    for filename in ("task.yaml", "docker-compose.yaml", "run-tests.sh"):
+        (source / filename).write_text("test\n", encoding="utf-8")
+    monkeypatch.setattr(check_env.tb, "task_source", lambda *_args: source)
+    monkeypatch.setattr(check_env, "validate_tb_docker", lambda _source: "compose")
+    monkeypatch.setattr(check_env.tb, "ensure_official_image", lambda *_args: ("image", "/home/alice"))
+    monkeypatch.setattr(check_env.tb, "official_image_user", lambda _image: "alice")
+
+    row = check_env.check_task(
+        suite="tb", name=task.task_id, cache_dir=tmp_path,
+        swe_catalog={}, tb_catalog={task.task_id: task}, dependency_cache={},
+    )
+    assert row["docker_ok"]
+    assert not row["ok"]
+    assert row["stage"] == "image_native_runner_user"

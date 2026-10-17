@@ -292,7 +292,7 @@ suffix rollback 会同时删除 `s2`；whole-session abort 会删除全部状态
 
 - root-only recovery；
 - temporal suffix recovery；
-- whole-session/whole-branch abort。
+- Whole branch abort。
 
 同时报告 useful independent work retained 和 invalid descendants removed。当前
 41%/0%/4% 可以使用，但必须明确它们来自 controlled policy emulation，不是 external

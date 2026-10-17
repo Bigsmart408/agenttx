@@ -8,6 +8,7 @@ import csv
 import fcntl
 import hashlib
 import json
+import os
 import random
 import re
 import shutil
@@ -486,7 +487,7 @@ def _format_fault_points(points: list[dict]) -> str:
 def _balance_handoff_tokens(text: str, target: int = 72) -> str:
     """Keep policy instruction cost equal without adding semantic guidance."""
     encoding = tiktoken.get_encoding("o200k_base")
-    if len(encoding.encode(text)) > target:
+    if len(encoding.encode(text)) >= target:
         # Fault-location payloads are intrinsically variable-sized. The
         # experiment records their actual token count instead of truncating
         # detected effects or changing the recovery instruction.
@@ -496,7 +497,13 @@ def _balance_handoff_tokens(text: str, target: int = 72) -> str:
         candidate = text + suffix
         if len(encoding.encode(candidate)) == target:
             return candidate
-    raise ValueError("unable to balance policy handoff token count")
+    # A near-target instruction cannot fit the fixed comment wrapper. The
+    # neutral marker is one token in the common case; actual cost is recorded.
+    for count in range(1, target + 2):
+        candidate = text + " #" * count
+        if len(encoding.encode(candidate)) >= target:
+            return candidate
+    return text
 
 
 def policy_handoff(payload: dict, policy: str) -> str:
@@ -820,7 +827,7 @@ def completed_keys(path: Path) -> set[tuple[str, str, int]]:
 
 
 def terminal_keys(
-    path: Path, *, rerun_completed: bool = False
+    path: Path, *, rerun_completed: bool = False, skip_any_existing: bool = False
 ) -> set[tuple[str, str, int]]:
     """Return cells that resume must not run again.
 
@@ -836,7 +843,7 @@ def terminal_keys(
             key = (row["trace_id"], row["policy"], int(row["repeat"]))
             completed = row.get("completed") == "True"
             timed_out = row.get("harness_returncode") == "124"
-            if (completed and not rerun_completed) or (
+            if skip_any_existing or (completed and not rerun_completed) or (
                 timed_out and row.get("policy") in COARSE_POLICIES
             ):
                 terminal.add(key)
@@ -1349,6 +1356,13 @@ def summarize(raw_path: Path, output_dir: Path) -> None:
 
 
 def main() -> int:
+    for name in (
+        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+        "http_proxy", "https_proxy", "all_proxy",
+    ):
+        os.environ.pop(name, None)
+    os.environ.update({"NO_PROXY": "*", "no_proxy": "*"})
+    os.environ["AGENTTX_NO_PROXY"] = "1"
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument(
@@ -1374,6 +1388,11 @@ def main() -> int:
         "--rerun-completed",
         action="store_true",
         help="Append fresh attempts even when the selected cell already has a completed row.",
+    )
+    parser.add_argument(
+        "--skip-any-existing",
+        action="store_true",
+        help="Run only cells with no recorded attempt, including failed attempts.",
     )
     parser.add_argument(
         "--max-plans",
@@ -1428,6 +1447,8 @@ def main() -> int:
         parser.error("--plan-index and --max-plans are mutually exclusive")
     if args.max_steps < 1 or args.max_model_calls < 1:
         parser.error("step and model-call limits must be positive")
+    if args.skip_any_existing and args.rerun_completed:
+        parser.error("--skip-any-existing conflicts with --rerun-completed")
 
     if args.harness == "codex":
         model = args.model
@@ -1509,49 +1530,56 @@ def main() -> int:
         "prompt_cost_control": "minimum_72_tokens_variable_location_payload_reported_v2",
         **harness_config,
     }
-    if raw_path.exists() and raw_path.stat().st_size:
-        if not config_path.exists():
-            raise RuntimeError("refusing to resume M3 rows without their config")
-        prior_config = json.loads(config_path.read_text(encoding="utf-8"))
-        for key in (
-            "schema",
-            "suite",
-            "model",
-            "repeats",
-            "max_plans",
-            "plan_index",
-            "prompt_projection",
-            "fault_payload_encoding",
-            "fault_location_input",
-            "recovery_localization",
-            "replay_protocol",
-            "write_event_audit",
-            "crash_no_rollback_context",
-            "no_rollback_history_transport",
-            "fault_history_transport",
-            "causal_recovery_context",
-            "fault_policy_prompt_tokens",
-            "multiturn_history",
-            "diagnostic_protocol",
-            "fault_handoff",
-            "prompt_cost_control",
-            "harness_backend",
-            "reasoning_effort",
-        ):
-            prior_value = config_compat_value(prior_config, key)
-            current_value = config_compat_value(config_payload, key)
-            if prior_value != current_value:
-                raise RuntimeError(
-                    f"refusing to mix incompatible M3 semantics for {key}: "
-                    f"existing={prior_value!r}, current={current_value!r}"
-                )
-        selected = set(prior_config.get("policies") or ()) | set(args.policies)
-        config_payload["policies"] = [policy for policy in POLICIES if policy in selected]
-    config_path.write_text(
-        json.dumps(config_payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    config_lock = config_path.with_suffix(config_path.suffix + ".lock")
+    with config_lock.open("a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        if raw_path.exists() and raw_path.stat().st_size:
+            if not config_path.exists():
+                raise RuntimeError("refusing to resume M3 rows without their config")
+            prior_config = json.loads(config_path.read_text(encoding="utf-8"))
+            for key in (
+                "schema",
+                "suite",
+                "model",
+                "repeats",
+                "max_plans",
+                "plan_index",
+                "prompt_projection",
+                "fault_payload_encoding",
+                "fault_location_input",
+                "recovery_localization",
+                "replay_protocol",
+                "write_event_audit",
+                "crash_no_rollback_context",
+                "no_rollback_history_transport",
+                "fault_history_transport",
+                "causal_recovery_context",
+                "fault_policy_prompt_tokens",
+                "multiturn_history",
+                "diagnostic_protocol",
+                "fault_handoff",
+                "prompt_cost_control",
+                "harness_backend",
+                "reasoning_effort",
+            ):
+                prior_value = config_compat_value(prior_config, key)
+                current_value = config_compat_value(config_payload, key)
+                if prior_value != current_value:
+                    raise RuntimeError(
+                        f"refusing to mix incompatible M3 semantics for {key}: "
+                        f"existing={prior_value!r}, current={current_value!r}"
+                    )
+            selected = set(prior_config.get("policies") or ()) | set(args.policies)
+            config_payload["policies"] = [policy for policy in POLICIES if policy in selected]
+        config_path.write_text(
+            json.dumps(config_payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    existing = terminal_keys(
+        raw_path,
+        rerun_completed=args.rerun_completed,
+        skip_any_existing=args.skip_any_existing,
     )
-    existing = terminal_keys(raw_path, rerun_completed=args.rerun_completed)
     cases = replay_cases(args.suite)
     if args.plan_index is not None:
         if args.plan_index >= len(cases):

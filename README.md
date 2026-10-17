@@ -1,5 +1,7 @@
 # AgentTX
 
+Terminology / 中英文策略名称：[reference / 术语表](docs/terminology.md).
+
 Transactional side-effect control for multi-step agentic workflows.
 
 ## Problem
@@ -31,7 +33,8 @@ speculative execution, and cascade rollback / selective commit.
 
 Working v0 prototype for OSDI-oriented systems work (Problem A), including automatic read/negative-lookup dependencies, a shared semisolate, durable session resume, whiteout-safe rollback snapshots, explicit causal rollback, metadata-aware filesystem effects, crash-recoverable commits, historical same-path frontier commits, content-addressed snapshots, hierarchical causal dependencies, symlink-alias tracking, path-selective commit, a reproducible baseline comparison matrix, and a parameterized 64-call coding-agent workload with failing-CI recovery.
 
-See [`docs/STATUS.md`](docs/STATUS.md) for completed work, evidence artifacts, and remaining gaps.
+See [`agent.md`](agent.md) for the current research protocol and
+[`docs/STATUS.md`](docs/STATUS.md) for the present experiment status.
 
 ## Runtime requirement
 

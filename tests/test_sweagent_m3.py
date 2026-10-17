@@ -1,23 +1,34 @@
 import csv
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 import tiktoken
 
 from experiments.scripts import sweagent_native_workload
 from experiments.scripts.sweagent_native_workload import (
+    _append_tagged_history,
+    _official_recovery_history_messages,
     _native_active_history_messages,
     _initialize_workspace_repo,
     _workload_suffix,
     load_codex_gpt_profile,
     load_agent_config,
 )
+from agenttx.agents.swe_agent import (
+    PRECRASH_SEEDED_KEY,
+    RECOVERY_GENERATION_KEY,
+    STEP_IDS_KEY,
+    SWEAgentHistoryProjector,
+)
 from experiments.scripts.bench_intra_turn_replay import (
     FAULT_NOTICE,
     config_compat_value,
     make_manifest,
     make_prompt,
+    policy_handoff,
+    replay_cases,
     render_unrewound_history,
     terminal_keys,
 )
@@ -57,6 +68,69 @@ def test_codex_profile_matches_user_model_without_exposing_key(tmp_path: Path) -
     assert profile.disable_response_storage is True
     assert "test-secret" not in repr(profile)
     assert "test-secret" not in json.dumps(profile.public_dict())
+
+
+def test_official_swe_history_projects_rollback_without_disclosing_step_ids() -> None:
+    snapshot = {
+        "schema": "agenttx.conversation/v2",
+        "turns": [
+            {"kind": "effect", "calls": [{
+                "step_id": step_id,
+                "tool_name": "write_file",
+                "arguments": json.dumps({"path": f"file-{step_id}.txt"}),
+                "result": json.dumps({"step_id": step_id, "returncode": 0}),
+            }]}
+            for step_id in range(8)
+        ],
+    }
+    history = _official_recovery_history_messages(snapshot, "main")
+    conversation = SimpleNamespace(
+        active_step_ids=lambda: [0, 2, 3, 4, 5, 6, 7],
+        generation=1,
+        turns=[],
+    )
+    adapter = SimpleNamespace(
+        harness=SimpleNamespace(tx=SimpleNamespace(conversation=conversation)),
+        agent=SimpleNamespace(name="main"),
+        recovery_context_variant="full",
+    )
+    projector = SWEAgentHistoryProjector(adapter)
+
+    projected = projector(history + [{
+        "role": "user", "content": "Recovery handoff", "agent": "main",
+        RECOVERY_GENERATION_KEY: 1,
+    }])
+
+    assert len(history) == 16
+    assert [item[STEP_IDS_KEY][0] for item in projected if item.get(PRECRASH_SEEDED_KEY)] == [
+        step_id for step_id in range(8) if step_id != 1 for _ in range(2)
+    ]
+    assert projected[-1]["content"] == "Recovery handoff"
+    assert all("step_id" not in item["content"] for item in history)
+
+    adapter.recovery_context_variant = "compact"
+    compact = projector(history)
+    assert sum(bool(item.get(PRECRASH_SEEDED_KEY)) for item in compact) == 12
+    assert "compact view" in compact[0]["content"]
+
+
+def test_official_swe_history_tags_bypass_upstream_hook() -> None:
+    class HookCheckedAgent:
+        def __init__(self) -> None:
+            self.history = []
+
+        def _append_history(self, item: dict) -> None:
+            assert set(item) == {"role", "content", "agent", "message_type"}
+            self.history.append(item)
+
+    agent = HookCheckedAgent()
+    _append_tagged_history(agent, {
+        "role": "assistant", "content": "Recorded action",
+        "agent": "main", "message_type": "action",
+        STEP_IDS_KEY: [3], PRECRASH_SEEDED_KEY: True,
+    })
+    assert agent.history[0][STEP_IDS_KEY] == [3]
+    assert agent.history[0][PRECRASH_SEEDED_KEY] is True
 
 
 def test_codex_profile_accepts_documented_experiment_overrides(tmp_path: Path) -> None:
@@ -113,12 +187,18 @@ def test_coarse_timeout_is_terminal_but_causal_timeout_is_retryable(
     assert terminal_keys(raw_path, rerun_completed=True) == {
         ("trace", "temporal_step", 0)
     }
+    assert terminal_keys(raw_path, skip_any_existing=True) == {
+        ("trace", "temporal_step", 0),
+        ("trace", "agenttx_causal", 0),
+    }
 
 
 def test_load_agent_config_uses_codex_gpt_profile_and_absolute_bundles(
     tmp_path: Path,
 ) -> None:
-    swe_root = Path("/home/bfq/SWE-agent")
+    import sweagent
+
+    swe_root = Path(sweagent.__file__).resolve().parents[1]
     bundle = swe_root / "tools" / "submit"
     assert (bundle / "config.yaml").is_file()
     config_path = tmp_path / "agent.yaml"
@@ -161,6 +241,14 @@ def test_load_agent_config_uses_codex_gpt_profile_and_absolute_bundles(
     assert config.model.per_instance_call_limit == 7
     assert config.tools.bundles[0].path == bundle.resolve()
     assert len(config_hash) == 64
+
+    uncapped_config, _ = load_agent_config(
+        config_path,
+        profile=profile,
+        swe_agent_root=swe_root,
+        max_model_calls=0,
+    )
+    assert uncapped_config.model.per_instance_call_limit == 0
 
 
 def test_initialize_workspace_repo_creates_submit_compatible_baseline(tmp_path: Path) -> None:
@@ -483,3 +571,21 @@ def test_multiturn_fault_prompts_have_equal_cost_and_shared_receipts() -> None:
         point = f"t{step.turn_index}/o{step.turn_step_index}"
         assert point in prompts["agenttx_causal"]
         assert point in prompts["ideal_oracle"]
+
+
+def test_ideal_handoff_near_token_target_does_not_abort_shard() -> None:
+    plan = next(
+        plan for _, plan in replay_cases("motivation400")
+        if plan.trace_id == "t5x16-w80-f0.25-d0.15-layered-alternating-s0"
+    )
+    payload = make_manifest(
+        plan,
+        [],
+        fault_injected=True,
+        diagnosis_required=True,
+        oracle_fault_step_ids=list(plan.oracle_closure),
+    )
+
+    handoff = policy_handoff(payload, "ideal_oracle")
+
+    assert len(tiktoken.get_encoding("o200k_base").encode(handoff)) == 72

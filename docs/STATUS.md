@@ -1,173 +1,76 @@
-# AgentTX status — done vs remaining
+# Current status
 
-Last updated: 2026-08-18 (container `/home/pengpeng/agenttx`).
+**本机执行更新（2026-10-17）：** 代码修改、环境准备、核验和后续实验均在本机 `r760-ssd`；远程仅供参考代码，远程队列已停止。镜像及实验数据使用 `/mnt/data/agenttx-runtime`，模型实验继续暂停。此前远程环境就绪数量不计作本机进度。最新状态见 [本机环境准备](DOCKER_ENVIRONMENT_20261017.md)。
 
-## Completed
+**Latest instruction: prepare the environment before experiments.** The pilot
+is paused: 60 runtime cells passed, 8 interrupted, 16 deferred, and all 168
+model cells unstarted. No automatic restart. See [Docker/environment
+preparation](DOCKER_ENVIRONMENT_20261017.md); the earlier launch record below
+is historical.
 
-### Problem framing
-- Chose **Problem A: Agent Effect Transactions** (trajectory-level speculation / rollback / selective commit), not per-call `try` wrapping.
-- Design notes in `docs/problem.md`, `docs/architecture.md`; paper-facing systems obstacles in `docs/research-challenges.md`; experiment terminology and evidence chain in `docs/experiments-explained.md`.
+The [new stratified pilot](STRATIFIED_PILOT_20261017.md) is running remotely
+with 8 experiment workers: 84 model-free runtime gates precede 168 queued
+Codex/SWE-agent model cells. It uses frozen v5 sources and a common 900-second
+model wall budget, with no automatic retries. This diagnostic cohort does not
+fill the formal matrices; complete dual-harness micro scope is 16800 cells.
 
-### Runtime (v0)
-- **Effect ledger** with automatically captured workspace reads, negative lookups, writes, and deletes; parent/child path dependency edges; cascade / temporal rollback; and a commit frontier.
-- **Shared semisolate** pool (`try -N`) with upperdir digests + interactive `try commit` auto-confirm.
-- **Surgical rollback** via per-step upperdir snapshots (`layers.py`).
-- **Explicit causal rollback** reconstructs selected write/delete paths from a pre-step snapshot, retains independent later steps, and fails closed on retained-effect overlap; temporal rollback remains the backward-compatible default.
-- **True path-selective commit** from the ledger frontier using anchored `try -I` filters.
-- Historical same-path frontier commit reconstructs the pre-later-step upperdir, materializes the earlier version, and restores later speculative state.
-- OverlayFS character-device and `.wh.*` **whiteouts are recorded as delete effects**.
-- Metadata-aware fingerprints record repeated `chmod`/`chown`/`touch`, empty directories, renames, and symlink changes.
-- Session resume preserves monotonically increasing snapshot ids; `agenttx.json` uses same-directory atomic replace with file and directory `fsync`.
-- Rollback snapshots preserve native OverlayFS whiteouts via same-filesystem hard links, safely traverse mode-000 trees, and deduplicate regular-file states through immutable content-addressed blobs.
-- Commit restores selected file/directory metadata after materialization and converts upstream false-success error text into a failed commit.
-- Commit WAL snapshots selected host paths and the upperdir before materialization; reload restores interrupted partial commits or finalizes a durably persisted frontier.
-- Automatic strace-based dependency capture records successful workspace reads and ENOENT/ENOTDIR negative lookups, preserving both symlink request and resolved fd paths; tracing is default-on and fails closed unless explicitly disabled.
-- Runtime-enforced commit **policy** (allow/deny, ignore caches) shared by direct API, CLI, coding harness, and LLM agent; custom rules persist across session reload.
-- **LLM tool agent** (`scripts/agenttx-agent`) with OpenAI-compatible / DeepSeek config in `~/.agenttx_llm.env` (not in git).
-- **Object identity contract (P0/P1)**: `HardlinkCatalog` persists object ids and
-  alias sets; complete host-visible regular-file groups expand the selected and
-  retained paths, feed the ledger/WAL, and are materialized through one inode.
-  The indexed OverlayFS path preserves live copy-up visibility.  Tested
-  overlay-created hard-link groups and intentional rename-over replacement are
-  handled explicitly; unverified topology remains fail-closed.
-- **Retained-upper generation rebase**: after a partial frontier commit, the
-  speculative suffix is copied through the inode-memo snapshot path into a fresh
-  upper generation, with volatile OverlayFS origin/index xattrs removed before
-  remount.
+See the [current experiment inventory, including SWE-agent gaps](EXPERIMENT_STATUS_20261017.md)
+and the [Chinese specification](../agent.zh-CN.md). The new formal 5410-cell
+cohort remains registered but unexecuted; historical and validation cohorts
+are listed separately in the inventory.
 
-### Experiments / evidence
-| Claim | Evidence | Result artifact |
-|---|---|---|
-| Per-call `try` is expensive | Step 1 overhead | `experiments/results/try_overhead_n*.csv` |
-| Shared overlay + ledger works | Step 2 | `shared_overlay_n20.csv`, ledger JSON |
-| Surgical cascade rollback | Step 3 demo + suite | `demo_surgical_rollback.py`, `evidence_suite.*` |
-| Native frontier-selective commit | Step 5 + real-try integration | `test_runtime_integration.py`, `evidence_suite.*` |
-| Automatic read/negative dependencies | Step 7 + real-strace integration | `test_trace.py`, `trace_overhead.{csv,md}` |
-| Whiteout/mode-000 rollback durability | Step 8 + real-try integration | `test_filesystem_effects_integration.py` |
-| Non-contiguous causal rollback | Step 9 + real-try integration | `test_runtime_integration.py` |
-| Interrupted multi-path commit recovery | Step 10 + crash injection | `test_recovery.py`, `commit_wal.py` |
-| Historical same-path frontier commit | Step 11 + real-try integration | `test_runtime_integration.py`, `layers.py` |
-| Content-addressed snapshot storage | Step 12 benchmark | `bench_snapshot_storage.py`, `snapshot_storage.{csv,md}` |
-| Hierarchical causal dependencies | Step 13 + real-try integration | `test_ledger.py`, `test_runtime_integration.py` |
-| Symlink alias causal dependencies | Step 14 + trace/real-try integration | `test_trace.py`, `test_runtime_integration.py` |
-| Long coding traj under AgentTX | Step 4 | `long_trajectory.csv` |
-| Live DeepSeek speculative edit + policy commit | live demo | `live_agent_ledger.json` |
-| AgentTX-LLM vs Aider refactor | compare bench | `refactor_agent_compare.{csv,md}` |
-| Cascade / selective / pollution / recovery / policy | evidence suite (all ok) | `evidence_suite.{csv,md,json}` |
-| Scaling curve n=5..40 | scaling bench | `scaling_curve.{csv,md}` |
-| Baseline comparison matrix | Step 15 fixed causal-retention workload | `comparison_matrix.{csv,json,md}`, `step15-comparison-experiments.md` |
-| Longer 64-call Agent workload | Step 16 deterministic multi-file refactor, failing CI, independent edits, derived artifact | `long_workload_matrix.{csv,json,md}`, `step16-long-agent-workloads.md` |
-| Long workload scaling + variance | Step 17 lengths 54/64/96, two repeats; refreshed trace and snapshot measurements | `long_workload_scaling.{csv,json,md}`, `step17-evaluation-scaling.md` |
-| Optimization iteration history | P1 before/after source snapshots, known-tool tracing bypass, persistent command-script reuse, deferred blob GC, direct script execution, persistent try worker, and incremental upperdir snapshots | `src/agenttx/optimization_history/`, `step18-optimization-iterations.md` |
-| Robustness evaluation | Step 19 deterministic p50/p95 tails, worker crash injection/fallback, reloadable long session, concurrent isolated agents, and real LLM-agent repeats | `robustness.{csv,json,md}`, `real_agent_robustness.{csv,json,md}`, `step19-robustness-evaluation.md` |
-| Motivation optimization chain | Paper-oriented summary and rerunnable current baseline comparison for all hot-path iterations | `motivation/`, `motivation_optimization_history.{csv,json,md}`, `motivation_runtime_comparison.{csv,json,md}` |
-| tiao2 remote comparison refresh | ARM64 VM rerun of comparison, long-workload scaling, causal retention, tracing, snapshot, robustness, and external-baseline probes | `docs/tiao2-comparison-run.md`, refreshed `experiments/results/*` |
-| Quantitative causal retention | Step 20 controlled DAG sweep over size, shape, fault position, and independence; causal/temporal/whole-session plus dependency-capture ablation | `causal_retention.{csv,json,md}`, `causal_retention_raw.csv`, `step20-causal-retention-evaluation.md` |
-| Real-agent causal recovery | Step 21 DeepSeek ledger inspection, faulty-root selection, causal rollback, independent-work retention, and repaired commit over three fresh sessions | `real_agent_recovery.{csv,json,md}`, `step21-real-agent-causal-recovery.md` |
-| Uniform commit-policy enforcement | Step 22 direct runtime, CLI subprocess, and session-reload checks prove denied paths cannot bypass policy | `test_runtime_integration.py`, `test_recovery.py`, `step22-runtime-commit-policy.md` |
-| Hard-link alias boundary and repair | Step 23 records the historical `index=off` failure; Step 29 adds indexed-overlay, catalog, alias expansion, WAL, retained-upper rebase, and end-to-end identity probes | `hardlink_alias_probe.{json,md}`, `step23-hardlink-overlay-boundary.md`, `step29-hardlink-preserving-transactions.md` |
-| Avoided LLM replay tokens | Step 24 controlled real-DeepSeek replay sweep over 12/24/48-line artifacts and three recovery granularities | `token_recovery.{csv,json,md}`, `token_recovery_raw.csv`, `step24-token-replay-evaluation.md` |
-| Full autonomous recovery tokens | Step 26 complete post-policy LLM diagnosis/tool/validation/repair loop; root preflight and 102-test suite pass; credentialed sweep refreshed on DeepSeek | `bench_token_end_to_end.py`, `plot_token_end_to_end.ipynb`, `step26-end-to-end-token-comparison.md` |
-| eBPF dependency tracer (strace replacement) | Step 27 syscall-tracepoint capture with userspace pid-tree filtering (`/proc` snapshot + sched_process_fork), release-marker-held startup, strace-parity parser, `auto`/`strace`/`bpf` backend selection, CLI flag, persistent backend, and orchestration/parity tests | `src/agenttx/bpf_trace.py`, `src/agenttx/bpf_trace.bt` generation, `tests/test_bpf_trace.py`, `bench_bpf_trace.py`, `plot_bpf_trace.ipynb`, `step27-bpf-dependency-tracing.md` |
+The 2026-10-17 [reproducibility check](REPRODUCIBILITY_20261017.md) completed
+50 registered model attempts: 49 passed and one SWE-agent TB causal attempt
+failed the official task tests after a rejected multi-block response and
+premature submission. All 50 checked recovery states matched their prior
+records. Regenerating the historical 400 analytical cases also matched all
+24000 compared values. This small cohort does not complete the formal suite.
 
-**Evidence suite highlights (2026-08-07):**
-- Cascade rollback: host clean until commit; only intended files land.
-- Native path-selective `commit(up_to)` materializes only ledger paths through the frontier; later independent paths remain speculative.
-- A partial frontier that overlaps a later write is rejected instead of committing the wrong version.
-- Mistake recovery: buggy `mul` never hits host; after rollback + fix, pytest passes.
-- Policy blocks `*.pem` / secrets; selective commit of safe files works.
-- Isolation matrix: bare pollution rate 1.0 vs AgentTX 0.0 before commit (coding traj).
-- Baseline matrix: full AgentTX is the only supported mode that retains independent `c` while removing `a` and derived `b`; disabling read tracing retains `b`.
-- Baseline overhead (10 writes, 3 repeats): bare 3.1 ms/step, session try 25.0 ms/step, shared try 255.3 ms/step, AgentTX full 307.8 ms/step. These are VM-specific and not a universal speed claim.
-- Evidence suite rerun: all cascade rollback, selective/frontier commit, host-pollution, mistake-recovery, policy, and isolation checks passed.
-- Long workload: 64 deterministic tool calls, multi-file refactor plus failing CI and independent docs/config edits; full AgentTX retains the independent files and removes the faulty formatter plus derived report, while no-trace retains the report.
-- Scaling/variance: long workload lengths 54/64/96 with two repeats; full AgentTX is 456.5?495.8 ms/step and read tracing contributes 8.0% on a 20-step no-op trace.
-- Optimization history: every hot-path iteration now preserves its prior source under `src/agenttx/optimization_history`; iteration 05 reduced full 64-call cost from 393.6 to 151.5 ms/step with a persistent try worker, and iteration 06 reduced cumulative snapshot-stage time from 0.384 to 0.158 s with incremental upperdir replay (two-repeat VM-local measurements; no endpoint speedup claim for iteration 06).
-- Robustness evaluation: Step 19 records deterministic per-call/per-run p50 and p95 (no-trace 17.114/334.112 ms; full-trace 22.761/743.230 ms), verifies worker fallback plus restart after injected crash, reloads and commits a 256-step session, and runs 4 concurrent agents with no cross-contamination. The real-agent extension ran three `deepseek-v4-flash` refactors with wall p50/p95 16.564/18.465 s, 100% success, and zero pre-commit host leaks.
-- Motivation chain: `motivation/` now provides a one-command current baseline comparison and a paper-ready history summary joining all optimization iterations with deterministic and real-agent robustness results.
-- Quantitative causal retention: 144 real-overlay runs across 48 aggregated configurations all kept the host clean. Causal recovery retained 100% of independent work and removed 100% of invalid descendants; at 64 calls temporal rollback retained 41.0%, whole-session discard retained 0%, and causal rollback without dependency capture removed only 4.0% of invalid work. Causal rollback p95 at 64 calls was 272.7 ms.
-- Real-agent causal recovery: `deepseek-v4-flash` inspected the AgentTX ledger and selected the injected faulty root in all 3 fresh sessions. Full recovery, correct target selection, independent-note retention, invalid-artifact removal, and post-commit tests were 100%; host leak before commit was 0%, with wall p50/p95 42.939/44.430 s.
-- Commit policy invariant: direct runtime and CLI commits now fail closed on denied paths before WAL/materialization. Custom allow/deny globs are stored in `agenttx.json` and remain enforced after reload; blocked commits leave the host clean and frontier unchanged.
-- Hard-link boundary and repair: the historical Linux 5.15 `try` `index=off` path
-  split lower hard links before ledger analysis.  The maintained `index=on` path
-  now reports `new/new`, `same_inode=true`, and `nlink=2`; the catalog and P0/P1
-  commit path preserve complete host-visible groups, handle tested new-link and
-  rename-over cases, and rebase retained upper state.  Bind mounts, external
-  aliases, incomplete groups, and full arbitrary topology publication still fail
-  closed.
-- Token replay: 27/27 controlled `deepseek-v4-flash` recovery samples passed with zero pre-commit host leaks. Causal rollback retained both valid artifacts and required no LLM replay; optimistic temporal recovery replayed one document (864.3/1,060.3/1,424.7 mean tokens at 12/24/48 lines), while whole branch/session abort replayed two (1,797.3/2,231.7/3,340.3). These are avoided replay tokens, not total end-to-end recovery tokens or external-artifact results.
-- End-to-end token comparison: Step 26 charges the complete post-policy autonomous recovery loop and records prompt/completion/total usage, tool/model calls, regeneration, success, leakage, and latency. The x86 conda environment, root-compatible `try` substrate, root preflight, and 79-test suite are ready; the credentialed deepseek-v4 sweep is recorded under `experiments/results/deepseek/token_end_to_end.*` and must be read with the success predicate.
-- eBPF tracing: Step 27 introduced the tracepoint parser and kept the original per-step attach measurements as historical evidence only. The maintained runtime path is the session-persistent tracer selected by trace_backend=bpf; no benchmark or CLI entry point produces the removed per-step mode.
-- Persistent eBPF tracing: Step 28 now documents trace_backend=bpf as the single eBPF mode. The current indexed-overlay sweep (12 steps x 2 repeats) reports 61.39 ms/step mean (p50 26.29, p95 413.54) with 24/24 READ and 24/24 NEGATIVE captures; the old per-step attach numbers remain archival only.
-- Unprivileged overlay recovery: Ubuntu 5.4 kernels carry a SAUCE `clone_private_mount` check that rejects overlay lowerdirs whose subtree contains MNT_LOCKED child mounts (docker/snap/workspace mounts are all locked in this sandbox), which previously made the `try` backend unusable without root. `scripts/bootstrap.sh` now patches `try` with a recursive-overlay fallback that overlays each mount-free subtree and each child mount root individually; the full 102-test suite, evidence suite, comparison matrix, long-workload, scaling, robustness, causal-retention, token-replay, real-agent, and Aider comparison experiments all pass unprivileged on this host. The eBPF numeric sweep needs root (bpf syscall); it was measured on this host's root-capable session.
-- Workspace-start invariant: real-agent benchmark construction exposed stale inherited `$PWD` despite `subprocess cwd=`. One-shot and persistent-worker launches now synchronize `PWD` with the protected workspace, with a regression test for a different caller directory.
-- Current eBPF experiment policy: the high-latency per-step attach implementation is removed. `trace_backend=bpf` now means the session-persistent tracer only; the maintained comparison is no tracing vs strace vs persistent eBPF. The old per-step measurements remain historical evidence in the Step 27/28 notes and are no longer produced by the benchmark.
-- Updated persistent comparison after enabling indexed OverlayFS: 12 steps x 2 repeats measured no tracing 17.70 ms/step (p50 2.99, p95 178.93), strace 25.60 ms/step (p50 11.67, p95 183.29), and persistent eBPF 61.39 ms/step (p50 26.29, p95 413.54). Both traced modes captured 24/24 READ and 24/24 NEGATIVE effects. The indexed substrate adds correctness overhead but removes the former ~1.3 s per-step eBPF attach tax.
+For the research plan and current experiment protocol, see [agent.md](../agent.md)
+and [experiments/README.md](../experiments/README.md). This page replaces the
+obsolete 2026-08 step-by-step status list; historical raw results remain under
+`experiments/results/` and source history in Git.
 
-**Refactor compare (DeepSeek):**
-- AgentTX-LLM: ~19s, host clean before commit, tests pass.
-- Aider baseline: ~194s (with `--yes-always --no-git --no-check-update` and a writable cache HOME), host polluted immediately, tests pass (`tests_rc=0`).
+The controlled 400-manifest Motivation and system microbenchmark are distinct
+from the real-world SWE-Bench Lite and Terminal-Bench workloads. The native
+trajectory census uses fault-free agent steps to assess how often a coarse
+rollback would discard independent work. It does not directly measure replay
+tokens.
 
-### Process / repo hygiene
-- VM-only project writes (`docs/CONSTRAINTS.md`).
-- Temps under `/tmp/agenttx-*` deleted before commits.
-- Local commits only; **not pushed** unless requested.
-- Open-source agent notes: `docs/open-source-agents.md`.
+The current five-mode full-run directories are diagnostic, not yet a paired
+paper result. Codex has 2444/2705 recorded cells; Terminal-Bench clean has
+196/241 recorded tasks and 84 successes (84/196 among recorded rows, not a
+complete 84/241 success-rate measurement). Of those 196 rows, 48 report
+`PermissionError: commit blocked by policy` after the host-based agent tried
+to write outside its task workspace, commonly into the host Conda tree. The
+other 45 expected clean task cells are missing, not known failures. Some
+recorded verifier failures also lack task-image dependencies in the projected
+host workspace. The six Terminal-Bench tasks whose Compose `client` service
+builds from a nested `client/` context previously used the wrong Dockerfile;
+the image path is corrected. A local `hello-world` official solution passes
+both Docker verifier tests after this fix. Terminal-Bench preflight now checks
+every selected image; the two QEMU images build against a pinned Debian
+snapshot, and `llm-spec-decoding` uses verified local Hugging Face model
+files. An image-native Codex `hello-world` smoke run completed and passed
+both tests in the same task container. These repairs do not retroactively
+make the host-projected five-mode results valid. The image cache is 239/241;
+the two missing upstream inputs currently return 404. Two non-root image
+tasks are explicitly rejected by the current native runner instead of being
+run as root. The prior SWE-agent five-mode run was stopped after 451
+completed cells because it carried a workload-derived step/model-call cap
+that Codex did not; its result and log directories have been removed. The
+replacement SWE-agent runner seeds a new native agent object with the scripted
+pre-crash action/observation history, then uses the native history projector
+to remove invalidated steps before the model resumes. Codex uses a fresh CLI
+session and recovery handoff instead. A three-mode SWE-Bench smoke completed
+3/3 cells without environment errors; the replacement 300-task, five-mode
+SWE-Bench run is active in `sweagent_luna_max_swe_fair_20261012`. The
+Terminal-Bench formal runner
+also executes the agent
+on the host while verifying in Docker. Image-native agent execution is
+required before a new Terminal-Bench policy cohort can be called comparable.
 
-## Remaining / open
-
-### High priority (systems)
-1. **Causal rollback as the default API** - explicit rollback_causal now retains independent work, hierarchical paths, symlink aliases, and the supported complete hard-link contract.  The default remains conservative for bind mounts, external/incomplete aliases, and arbitrary topology because those semantics are not yet verified end-to-end.
-2. **Scalable snapshots** - content-addressed blobs reduce repeated file storage (9.0% physical/logical bytes in the Step 12 workload), but directory traversal and historical/WAL copies still grow with speculative state.
-3. **Crash-atomic filesystem commit** - a durable WAL now restores interrupted host materialization on reload; an in-flight external observer can still see partial paths, so kernel-level atomicity remains out of scope.
-4. **Lower overlay overhead** - known-tool tracing bypass, a longer-lived try worker, and incremental snapshots are measured and preserved in iteration history; shared pool remains substantially slower than bare execution, so ledger and overlay traversal costs remain open.
-5. **Trace portability and completeness** - capture now has two backends: the original Linux strace path and a session-persistent eBPF tracepoint tracer (Step 27/28); `auto`/`strace`/`bpf` is selectable per session.  Unsupported syscalls and non-`AT_FDCWD` descriptor paths without a kernel-resolved path still need a formal coverage gate; the runtime must fail closed rather than infer a path from the caller cwd.
-6. **Non-filesystem effects** - network/cloud side effects (currently coarse hide_network only).
-
-### Evaluation gaps
-Closed 2026-08-18: coverage matrix, WAL fault matrix, and credentialed Step 26 full-loop tokens are in-tree and reflected in `paper/main.tex` (Tables `tab:coverage`/`tab:wal`, Fig `fig:token-e2e`).
-
-Still open:
-8. Harder / longer agent workloads: deterministic 54/64/96-call scaling, a reloadable 256-step session, controlled 16/32/64-call causal DAGs, and real-agent requested recovery are covered by Steps 16-21; real multi-package LLM agents remain.
-9. External baselines: BranchFS and YoloFS are now built, installed, mounted, and smoke-benchmarked artifact-natively on the current x86/Linux 6.15.7 host. BranchFS passes its full 13-suite mounted test runner; YoloFS passes 295 unit tests and 585/586 mounted e2e tests, with one reproducible busy-unmount test failure. Their first common-harness result is recorded in `docs/current-host-external-baselines.md`; the paper's mixed-trajectory adapter and repeated measurements remain open. Waypoint remains blocked by CRIU, DeltaBox does not publish its implementation, and no official Crab artifact was found. The older ARM64 blockers remain documented in `docs/tiao2-comparison-run.md`.
-10. Stronger Aider (or other agents) bakeoff with fair timeouts and success criteria.
-11. Statistical repeats / variance reporting for real LLM runs (cost-aware) remains open; deterministic runtime tails now have p50/p95 coverage.
-    Step 24 adds three repeats and p50/p95 for controlled LLM replay cost. Step 26 defines the paired full autonomous recovery sweep; its credentialed numeric run is blocked only on API credentials on x86, while broader multi-model repeats remain open.
-
-### Product / paper
-12. OSDI paper draft (HLS: problem → root cause → AET → design points → eval).
-13. Problem B (adversarial mediation) — explicitly deferred.
-14. Push `main` to GitHub when approved (currently ahead of `origin/main`).
-15. Rotate DeepSeek API key if it was exposed in chat; keep secrets out of git.
-
-## How to re-run evidence
-
-```bash
-source ~/.agenttx_llm.env
-export PATH="$HOME/miniconda3/envs/agenttx/bin:$PATH"
-export PYTHONPATH=/home/pengpeng/agenttx/src:/home/pengpeng/agenttx
-cd /home/pengpeng/agenttx
-
-python -m pytest -q
-python experiments/scripts/bench_evidence_suite.py
-python experiments/scripts/bench_scaling.py
-python experiments/scripts/bench_comparison_matrix.py --repeats 3 --n 10
-python experiments/scripts/bench_long_trajectory.py --length 64 --repeats 1
-python experiments/scripts/bench_long_scaling.py --lengths 54 64 96 --repeats 2
-python experiments/scripts/bench_robustness.py --tail-length 64 --tail-repeats 3 --long-steps 256 --long-resume-at 128 --agents 4 --concurrent-steps 16
-python experiments/scripts/bench_causal_retention.py --repeats 3
-python experiments/scripts/probe_hardlink_alias.py
-PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python experiments/scripts/bench_token_recovery.py --document-lines 12 24 48 --repeats 3
-PYTHONPATH=src:. python3 experiments/scripts/bench_token_end_to_end.py --document-lines 12 24 48 --repeats 3 --max-turns 20
-PYTHONPATH=src:. python3 experiments/scripts/bench_bpf_trace.py --steps 20 --repeats 3 --workload read
-PYTHONPATH=src:. python3 motivation/plot_bpf_trace.py
-PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python experiments/scripts/bench_real_agent.py --repeats 3 --max-turns 35
-PYTHONPATH=src:. /home/pengpeng/miniconda3/envs/agenttx/bin/python experiments/scripts/bench_real_agent_recovery.py --repeats 3 --max-turns 30
-PYTHONPATH=src:. python3 motivation/bench_optimization_comparison.py --length 64 --repeats 2
-PYTHONPATH=src:. python3 motivation/summarize_optimization_history.py
-AIDER_TIMEOUT_S=180 python experiments/scripts/bench_refactor_compare.py
-```
-
-## Git tip
-
-Local history may use `commit-tree` when environment injects commit trailers; do not push until explicitly asked.
+Next validation gate: representative image-native Terminal-Bench policy
+tests for both agents, with matching model, budget, fault, and verifier
+configuration. Only then start a new Terminal-Bench full-run directory;
+report missing and environment-error cells separately from task failures.

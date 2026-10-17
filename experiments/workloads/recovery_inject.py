@@ -250,6 +250,8 @@ def inject_recovery_dag(
             }
         ),
         "test_run_step": failing.step_id,
+        # Generator truth is independent of the runtime's captured edges.
+        "oracle_invalid_steps": [faulty.step_id, derived.step_id, failing.step_id],
         "root_is_parent_of_derived": faulty.step_id in derived.parents,
         "root_is_parent_of_tests": faulty.step_id in failing.parents,
         "independent_is_parent_of_derived": any(
@@ -872,7 +874,8 @@ def recovery_prompt(
             policy = (
                 "This is a clean recovery-context control. No crash was injected and "
                 "no rollback was performed. The workspace is a clean unsolved benchmark "
-                "checkout; complete the official task normally."
+                "checkout. No faulty step, source path, or recovery certificate is "
+                "available; use the named verifier's observed diagnostics."
             )
         note_step = (
             "There are no retained, invalidated, or recreate-required recovery "
@@ -884,8 +887,16 @@ def recovery_prompt(
             "fails may you inspect the named task source and make one focused correction."
             if reference_progress_verified
             else
-            "Complete the official task in repository sources and run the official "
-            f"verifier with `{test_cmd}`."
+            "Run the exact named verifier before making any edit to establish the clean "
+            "baseline. If it passes, stop immediately. Otherwise complete the pending "
+            "official task with focused edits. Start with the verifier's concrete "
+            "diagnostics, then follow only issue-relevant symbols or tests needed to "
+            "understand a concrete failure. "
+            f"Use `{test_cmd}` and stop immediately when it passes. After a real test "
+            "failure, use that failure to make a focused correction and rerun the same "
+            "verifier. Continue only while each rerun follows a concrete issue-relevant "
+            "edit; stop when there is no justified next edit. An environment failure "
+            "before tests start does not count as a task-code failure."
         )
     elif mode == "crash_no_rollback":
         policy = (
@@ -965,8 +976,8 @@ The benchmark reference solution was materialized before this handoff and the co
             "inspection or edits; "
             if mode == "clean_recovery" and reference_progress_verified
             else "This clean compact control has no recovery certificate or protected "
-            "recovery artifacts. The workspace is an unsolved clean checkout; complete "
-            "the official task and run the named verifier; "
+            "recovery artifacts. The workspace is an unsolved clean checkout; follow "
+            "the verifier-guided task protocol below; "
             if mode == "clean_recovery"
             else "The compact recovery certificate is authoritative: never inspect or "
             "modify protected recovery artifacts. Follow the policy-specific starting "

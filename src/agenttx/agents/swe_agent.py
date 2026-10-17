@@ -31,6 +31,7 @@ from agenttx.runtime import ToolCallRecord
 
 STEP_IDS_KEY = "agenttx_step_ids"
 RECOVERY_GENERATION_KEY = "agenttx_recovery_generation"
+PRECRASH_SEEDED_KEY = "agenttx_precrash_seeded"
 _PROJECTOR_MARKER = "_agenttx_swe_history_projector"
 
 
@@ -103,6 +104,31 @@ class SWEAgentHistoryProjector:
                     continue
                 has_current_notice = True
             projected.append(dict(source))
+
+        if self.adapter.recovery_context_variant == "compact":
+            seeded = [
+                index for index, item in enumerate(projected)
+                if item.get(PRECRASH_SEEDED_KEY)
+            ]
+            if len(seeded) > 12:
+                keep = set(seeded[-12:])
+                projected = [
+                    item for index, item in enumerate(projected)
+                    if not item.get(PRECRASH_SEEDED_KEY) or index in keep
+                ]
+                first = next(
+                    index for index, item in enumerate(projected)
+                    if item.get(PRECRASH_SEEDED_KEY)
+                )
+                projected.insert(first, {
+                    "role": "user",
+                    "content": (
+                        "Earlier retained tool observations are omitted from this "
+                        "compact view; the recovery handoff describes current state."
+                    ),
+                    "agent": self.adapter.agent.name,
+                    "message_type": "observation",
+                })
 
         notice = _recovery_notice(self.adapter.harness.tx.conversation)
         if generation > 0 and notice and not has_current_notice:
@@ -486,6 +512,7 @@ class SWEAgentNativeAdapter:
         self._run_started = False
         self._run_finished = False
         self._committed = False
+        self.recovery_context_variant = "full"
         self._install_history_projector()
 
     def _install_history_projector(self) -> None:

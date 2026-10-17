@@ -1,5 +1,7 @@
 # Step 24 — Token savings from retaining valid agent work
 
+中英文策略名称与 ID 对应关系见[术语表](terminology.md)；历史结果保留各自实验命名空间。
+
 ## Research question
 
 AgentTX claims that causal rollback avoids discarding causally independent work.
@@ -77,18 +79,18 @@ document required one model call in the final run.
 |---:|---|---:|---:|---:|---:|---:|
 | 12 | AgentTX causal | 0 | 0.0 | 0.0 | 0.0 | — |
 | 12 | optimistic checkpoint | 1 | 864.3 | 850.0 | 892.3 | 864.3 |
-| 12 | whole branch/session abort | 2 | 1,797.3 | 1,825.0 | 1,846.6 | 1,797.3 |
+| 12 | Whole branch abort | 2 | 1,797.3 | 1,825.0 | 1,846.6 | 1,797.3 |
 | 24 | AgentTX causal | 0 | 0.0 | 0.0 | 0.0 | — |
 | 24 | optimistic checkpoint | 1 | 1,060.3 | 1,033.0 | 1,113.1 | 1,060.3 |
-| 24 | whole branch/session abort | 2 | 2,231.7 | 2,232.0 | 2,238.3 | 2,231.7 |
+| 24 | Whole branch abort | 2 | 2,231.7 | 2,232.0 | 2,238.3 | 2,231.7 |
 | 48 | AgentTX causal | 0 | 0.0 | 0.0 | 0.0 | — |
 | 48 | optimistic checkpoint | 1 | 1,424.7 | 1,407.0 | 1,497.9 | 1,424.7 |
-| 48 | whole branch/session abort | 2 | 3,340.3 | 3,084.0 | 4,009.2 | 3,340.3 |
+| 48 | Whole branch abort | 2 | 3,340.3 | 3,084.0 | 4,009.2 | 3,340.3 |
 
 On this controlled workload, AgentTX avoids 100% of *avoidable replay tokens*
 because it retains both valid documents. The more useful paper number is the
 absolute saving: 864–1,425 tokens versus the optimistic temporal policy and
-1,797–3,340 tokens versus whole branch/session abort across the tested sizes.
+1,797–3,340 tokens versus Whole branch abort across the tested sizes.
 The roughly increasing curve connects the systems property (retained work) to
 an economic property (avoided model context and generation).
 

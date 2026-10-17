@@ -1,5 +1,7 @@
 # Step 26 — End-to-end autonomous recovery token comparison
 
+中英文策略名称与 ID 对应关系见[术语表](terminology.md)；历史结果保留各自实验命名空间。
+
 ## Research question
 
 Step 24 answers an attribution question: how many model tokens are spent only

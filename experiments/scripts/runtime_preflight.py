@@ -78,7 +78,7 @@ def runtime_preflight(root: Optional[Path] = None) -> Dict[str, object]:
     return {
         "root": str(root),
         "ok": all(
-            bool(check["ok"]) for check in checks if not check.get("required", True)
+            bool(check["ok"]) for check in checks if check.get("required", True)
         ),
         "checks": checks,
     }

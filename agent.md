@@ -1,5 +1,65 @@
 # AgentTX Experiment Specification
 
+[中文版本](agent.zh-CN.md) · [当前实验进度（中文）](docs/EXPERIMENT_STATUS_20261017.md)
+
+**Local execution update, 2026-10-17.** All code changes, environment preparation,
+validation and future experiments run on local host `r760-ssd`. The remote
+machine is a reference-code source only; its preparation queue has stopped.
+The earlier remote image and TB checks are historical diagnostics and do not
+count as local readiness. Code remains in this project; Docker image layers,
+cache, results, logs and temporary files use `/mnt/data/agenttx-runtime`.
+Source `scripts/agenttx-local-env.sh` to select the dedicated local Docker
+socket and data paths. The shared system daemon is not restarted. Local
+Alpine pull, offline runtime, Docker build/runtime and 18 relevant regression
+tests passed. Existing recovered cache/log/result data is moved with content
+verification before switching the original project paths to symlinks.
+
+Only environment preparation is authorized at this stage. The local queue
+verifies 300 SWE images with two workers and hydrates pinned TB inputs into
+the data cache. Full task readiness still requires pristine base-commit
+source, dependencies and official verifier checks. Preserve all failed and
+interrupted attempts; no model launch or result-based retry is automatic.
+Current local progress is maintained in the
+[environment preparation record](docs/DOCKER_ENVIRONMENT_20261017.md).
+
+**Image pull deadlines, 2026-10-17.** Environment cohort r3 replaces r2's
+30-minute total cutoff with Docker API byte/milestone monitoring: fail over
+after 900 seconds without download/extraction progress, or 14400 seconds
+total per source; explicit registry/transport errors fail over immediately.
+Sources are `docker.1ms.run`, `hub.rat.dev`, then `docker.1panel.live`; no direct
+upstream fallback. A real blocked SWE image's manifest/config and large-layer
+sample were checked across candidates; all three usable sources returned the
+same manifest digest. This is a reachability sample, not a completed large
+image pull. Seven timeout/progress tests and a local API pull/offline-container
+smoke check passed. Existing cached images are reverified, not redownloaded;
+all 1818 pinned TB files and SWE metadata were rechecked locally. Preserve r2
+with 121 ready images, 9 errors and 2 pulls interrupted deliberately at the
+cutover; record the interruptions separately, without changing old outcomes.
+The new rules apply to environment downloads only; model budgets are unchanged.
+See [timeout diagnosis and evidence](docs/IMAGE_PULL_TIMEOUT_20261017.md).
+
+**Earlier launch, now paused.** The new
+[stratified pilot](experiments/plans/stratified_pilot_20261017/registration.json)
+is launched on the remote validation host with **8 concurrent experiment
+processes**. It first runs 84 model-free runtime gates (12 canonical manifests
+across all three families × 7 policies). All gates must pass before the queued
+168 model cells (12 × 7 × 2 harnesses, one repeat) begin. Both Codex and
+SWE-agent use `gpt-5.6-luna / max`, a common 900-second model wall limit,
+no model-call cap, and a localization probe limit of `2 * operation_count + 8`
+fixed before execution. This is a separate diagnostic cohort from the earlier
+240-second repeats: token-budget enforcement and matched template accounting
+remain formal gates. Preserve every failure and timeout; do not retry by
+outcome. The frozen v5 execution source is
+`938a059fa1337a8f2e069bc70de1edb8e0251e6d90155a460320690393c78bef`.
+Live snapshots and completion evidence are linked in the
+[pilot progress report](docs/STRATIFIED_PILOT_20261017.md).
+
+The complete system microbenchmark covers **both harnesses**: 400 manifests ×
+7 policies × 3 repeats × 2 harnesses = **16800 cells**. The older 8400-row
+registration has no harness dimension and remains an immutable historical
+plan. Real-world scope remains 5410 cells (300 SWE + 241 TB, five policies,
+both harnesses); pilot results do not fill that formal matrix.
+
 This document is the authoritative experiment specification. The evidence must
 be produced and presented in this order:
 
@@ -18,10 +78,12 @@ attributes the result to specific mechanisms; correctness tests establish
 invariants; and overhead experiments bound costs not visible in end-to-end
 completion metrics.
 
-The existing 400-case Motivation suite remains the Microbenchmark layer. The
-earlier partial 541-task runs remain audit data, not completed real-world
-results. Final paper results must be regenerated from a frozen revision under
-the protocols below.
+The existing 400-case Motivation suite remains the controlled Microbenchmark
+layer. A separate native-trajectory audit may establish whether its recovery
+opportunity occurs in real agent work; it must keep its own sampling frame and
+denominators. The earlier partial 541-task runs remain audit data, not completed
+real-world results. Final paper results must be regenerated from a frozen
+revision under the protocols below.
 
 # Part I: Motivation Microbenchmark
 
@@ -39,14 +101,17 @@ systems benchmark. It establishes the mechanism behind the motivation claim:
 > a poor proxy for causal dependence; the ideal selective rollback bound
 > quantifies how much valid work a precise recovery mechanism could preserve.
 
-No SWE-Bench or Terminal-Bench run is required to regenerate the Motivation
-figures. Those suites form the separate real-world workload layer in Part II.
+No SWE-Bench or Terminal-Bench run is required to regenerate the controlled
+Motivation figures. The proposed real-trajectory incidence figure draws on
+these suites separately; their end-to-end policy results remain in Part II.
 
 ## 2. Motivation Argument and Unified Microbenchmark
 
-The Motivation section uses one controlled microbenchmark family. It does not
-mix native-trace incidence, real-model tokens, or implemented-system results
-into the recovery-boundary argument. Its claim is:
+The three recovery-boundary observations use one controlled microbenchmark
+family. Native-trace incidence may follow them as separately labeled
+external-validity evidence, but its cases, denominators, and token-weight
+proxies must not be pooled with controlled manifests or real-model tokens.
+The controlled claim is:
 
 > Existing recovery boundaries follow execution structure (time, turn, or
 > branch), while corruption follows dependencies. Under-rollback leaves
@@ -54,8 +119,9 @@ into the recovery-boundary argument. Its claim is:
 > No fixed coarse boundary dominates as task length, fault position, and
 > dependency structure change.
 
-All experiments use the same deterministic filesystem-effect generator,
-canonical policy definitions, paired manifests, and validators. The ideal
+All controlled experiments use the same deterministic filesystem-effect
+generator, canonical policy definitions, paired manifests, and validators.
+The native-trajectory audit instead uses observed tool effects. The ideal
 oracle is an analytical upper bound, not an implemented system. Motivation
 must not run, plot, or claim results for `agenttx_causal`.
 
@@ -95,7 +161,7 @@ claim that causality is already the answer.
 This subsection plays the same role as the reference paper's I/O-path analysis:
 before measuring overhead, trace how each representative mechanism reaches its
 recovered state. Follow one shared multi-turn example and show the selected set
-for root-only, turn-checkpoint, temporal-suffix, and whole-branch recovery. Use
+for Root only, Turn checkpoint, Temporal step, and Whole branch recovery. Use
 the ideal set only as a reference target. Explain what each path preserves and
 what it necessarily cannot distinguish; do not report benchmark percentages in
 this subsection.
@@ -104,7 +170,7 @@ The current `paper/main.tex` subsection **Recovery Boundaries in Stateful Agent
 Execution** belongs here. It must be moved before the experiments, not left
 after Observations 1--3. Its existing-boundary and state-propagation paragraphs
 should be condensed into this path analysis; its design requirements belong in
-Section 3.3 below.
+Section 3.4 below.
 
 #### 3.2 Analyzing Recovery Overheads
 
@@ -123,7 +189,7 @@ Define the two measured axes here, rather than in the path analysis:
 This distinction prevents `no_recovery` or `root_only` from appearing efficient
 merely because they leave corrupted descendants behind.
 
-##### Methodology: one workload family and one statistical population
+##### Methodology: one controlled workload family and paired population
 
 Describe the multi-turn microbenchmark once: 16 operations per turn; 1--10
 turns; controlled fault position, dependency value, graph shape, and
@@ -136,22 +202,24 @@ experiment use the same 400 paired manifests as their statistical population:
 - 90 fault-position cases;
 - 210 dependency-value cases.
 
-The paper should state this 400-case population once and reuse it. A subsection
-may zoom into one registered sweep to explain a mechanism, but it must return
-to the same suite-level population and must not present that slice as a new
-workload.
+The paper should state this 400-case population once and reuse it for all
+three controlled observations. A subsection may zoom into one registered sweep
+to explain a mechanism, but it must return to the same suite-level population
+and must not present that slice as a new workload. The observational native-
+trajectory audit in Section 2.8 has a different denominator and cannot be
+reported as another slice of these 400 cases.
 
 ##### Observation 1: correctness creates a collateral-loss dilemma
 
 **Claim.** Correct coarse recovery removes the invalid closure but also
 discards useful work; low-cost under-recovery is not a valid alternative.
 
-**Evidence.** Begin with the correctness gate over the shared suite. No
-recovery removes 0% of the invalid closure and root-only removes 17.03% on
-average. Turn checkpoint, temporal step, whole branch, and ideal all remove
-100%. Among these correctness-qualified policies, checkpoint, temporal, and
-whole-branch rollback discard 54.02%, 56.90%, and 100% of valid work on
-average, while ideal discards none. Use the task-length sweep only to make the
+**Evidence.** Begin with the correctness gate over the shared suite. No recovery
+removes 0% of the invalid closure and Root only removes 17.03% on
+average. Turn checkpoint, Temporal step, Whole branch, and Ideal oracle all remove
+100%. Among these correctness-qualified policies, Turn checkpoint, Temporal step, and
+Whole branch discard 54.02%, 56.90%, and 100% of valid work on
+average, while Ideal oracle discards none. Use the task-length sweep only to make the
 amplification concrete: as a branch grows around a fixed four-operation
 closure, coarse rollback grows while the exact target does not.
 
@@ -196,9 +264,9 @@ column and keep all internal panels horizontally aligned.
 structures.
 
 **Evidence.** Reuse the same 400 cases. Turn checkpoint has lower attributed
-waste in 139 cases, temporal step in 251, and they tie in 10. The ranking
-reverses by registered slice: checkpoint wins 60/100 task-length and 60/90
-fault-position cases, while temporal wins 191/210 dependency cases. The best
+waste in 139 cases, Temporal step in 251, and they tie in 10. The ranking
+reverses by registered slice: Turn checkpoint wins 60/100 task-length and 60/90
+fault-position cases, while Temporal step wins 191/210 dependency cases. The best
 fixed boundary still discards 10.5% more useful token weight than the post-hoc
 per-case minimum of those two coarse choices.
 
@@ -224,14 +292,26 @@ Section 3.2. Move its recovery-policy definitions to Section 3.1, keep its
 workload and measurements here, and remove the standalone suite-level detour
 between Observations 1 and 2.
 
-#### 3.3 Motivation: Attempts, Insight, and Design Challenges
+#### 3.3 Real-Trajectory Incidence and Case Anatomy
+
+After the controlled observations, present the separately sourced audit in
+Section 2.8. It asks whether real agent executions contain independently
+useful work that a correct coarse rollback would discard. State the full task,
+trajectory, turn, and candidate-fault denominators before any percentage.
+Show zero-opportunity cases and one positive and one negative trace example.
+Call the counterfactual result a *retention opportunity*, not an observed
+crash, realized token saving, or measured AgentTX result. If the eligible
+sample stays small, move the analysis to an appendix and narrow the main-text
+claim rather than extrapolating from the six-turn pilot.
+
+#### 3.4 Motivation: Attempts, Insight, and Design Challenges
 
 Close the section in the same order as the reference paper's motivation:
 
-1. **Attempts.** Root-only rollback preserves work but fails completeness.
-   Turn checkpoints constrain loss to affected turns but cannot retain valid
-   work within them. Temporal rollback is exact only when all later work
-   depends on the fault. Whole-branch abort is safe but maximally coarse.
+1. **Attempts.** Root only recovery preserves work but fails completeness.
+   Turn checkpoint constrains loss to affected turns but cannot retain valid
+   work within them. Temporal step is exact only when all later work
+   depends on the fault. Whole branch is safe but maximally coarse.
    Increasing checkpoint frequency changes cost, not representability.
 2. **Insight.** The lifetime of speculation and the unit of recovery are
    different system decisions. Keep the trajectory as the speculation unit,
@@ -260,7 +340,8 @@ The intended main-text order is:
        -> Observation 2 + dependency-sweep figure
        -> Observation 3 + boundary-crossover figure
        -> combined significance
-    -> 3.3 attempts -> insight -> design challenges -> transition
+    -> 3.3 separate real-trajectory incidence + positive/negative case anatomy
+    -> 3.4 attempts -> insight -> design challenges -> transition
 ```
 
 Keep the three observation figures independent. Do not compress
@@ -294,8 +375,8 @@ four. Sweep global fault position from 0.10 to 0.90 with 10 paired manifests
 per point.
 
 **Figure 1b.** Report valid operations discarded. Turn checkpoint follows the
-turns containing invalid effects, whole branch follows the complete branch,
-ideal remains exact, and temporal waste varies with the suffix. This isolates
+turns containing invalid effects, Whole branch follows the complete branch,
+Ideal oracle remains exact, and Temporal step waste varies with the suffix. This isolates
 chronology from dependency structure.
 
 ### 2.3 MB3: Dependency-value sweep
@@ -309,7 +390,7 @@ layered shape, alternating interleaving, all 21 `dependency_value` points from
 
 **Figure 3.** Plot useful work discarded, valid work retained, and rollback
 amplification for all four correct policies. Include every preregistered point,
-including dense cases where temporal approaches ideal.
+including dense cases where Temporal step approaches Ideal oracle.
 
 ### 2.4 Fixed-boundary crossover
 
@@ -337,9 +418,10 @@ turn-count cases, 90 fault-position cases, and 210 dependency-value cases. It re
 recovery completeness for all policies, then measures collateral recovery cost
 only for policies that remove the complete invalid closure.
 
-Native-trace audits, real-turn counterfactuals, real-model replay, SWE-Bench,
-and Terminal-Bench belong in Real-world Workload or Evaluation. They must not
-be used to form a second Motivation workload family.
+Native-trace incidence may support Motivation only under the separate
+observational protocol in Section 2.8. Real-model replay, SWE-Bench and
+Terminal-Bench end-to-end policy results belong in Evaluation. None may be
+pooled with the 400 controlled manifests or used to replace their sweeps.
 
 ### 2.6 Main-text figure disposition
 
@@ -357,7 +439,7 @@ artifacts map to it as follows:
    often execution order diverges from failure dependence.
 3. **Coarse-boundary crossover:** the same 400 MB1--MB3 manifests in
    `FIG-Motivation-Boundary-Crossover`, supporting Observation 3 by showing
-   that turn-checkpoint and temporal-step recovery reverse rank across the
+   that Turn checkpoint and Temporal step recovery reverse rank across the
    registered workload slices.
 The one-factor turn-count, fault-position, shape, and interleaving sweeps remain
 available in `FIG-Motivation-Sensitivity` as supporting robustness evidence,
@@ -367,6 +449,9 @@ but they are not a separate main-text observation.
 the former supports Observation 1, while the latter shows controlled scaling.
 Additional main-text figures may
 report another controlled view only when it supports a distinct observation.
+The real-trajectory incidence figure, if the Section 2.8 acceptance gates
+pass, is a separately sourced external-validity figure after Observation 3,
+not a fourth controlled observation or a panel of the 400-case figures.
 `FIG-M1-Strategy-Outcomes` is a historical, noncanonical plot and
 `FIG-M2-Extreme-Tradeoff` is a historical rendering of the same MB1 endpoint,
 so it must not be counted as additional evidence.
@@ -381,12 +466,193 @@ so it must not be counted as additional evidence.
 | Boundary crossover | derived from the same 400 MB1--MB3 paired manifests | complete; no additional cases |
 | Supporting sensitivity | turn count, fault position, shape, interleaving | complete; no missing paired cells |
 
+### 2.8 Real-agent trajectory incidence and case-study plan
+
+**Question and scope.** How often does a real agent trajectory contain useful
+work that correct turn-, temporal-, or branch-level recovery would discard
+after one of its actual mutating steps becomes faulty? This is an
+observational *opportunity* study. It cannot estimate the natural frequency of
+agent faults or the realized savings of a recovery system. The YoloFS
+290-report study classifies public misuse reports; our unit is an observed
+agent execution, not an incident report or a synthetic manifest.
+
+**Existing evidence and gap.** The current native SWE-agent pilot contains 20
+successful source/replay trajectories and 638 turns. Six turns in three tasks
+pass its strict gate of at least two independent stateful components. Its
+counterfactual token weights are serialized tool-call payload sizes, not LLM
+usage. The official 541-task experiment seeds a synthetic pre-crash trajectory
+and randomized fault; its rows measure recovery under injection, not the
+prevalence of this structure in unmodified agent behavior. Neither dataset
+alone supports a claim that the opportunity is common.
+
+**Cohort and capture.** Run the real agent once per official task from a clean
+workspace, without fault injection, rollback, a seeded reference solution, or
+recovery hints. This clean execution is the native trajectory; retain its
+original agent turns and every tool step, including read-only and failed
+steps. Run four independent source-system/benchmark strata: Codex on SWE-Bench
+Lite, Codex on Terminal-Bench, SWE-agent on SWE-Bench Lite, and SWE-agent on
+Terminal-Bench. Target all available 300 SWE-Bench Lite and 241 Terminal-Bench
+task IDs in each source-system stratum, without selecting by observed
+advantage. Freeze the model (Luna max for both agents), harness, ordinary
+task prompt, and task revision before analysis. Retain every captured attempt
+with its task ID, attempt index, and configuration provenance, including
+partial and failed runs; repeated attempts must not be silently deduplicated.
+Use existing clean runs when their native step records survive; otherwise
+rerun clean with passive trace capture. The current `clean_recovery` prompt describes a recovery-context
+control, while `no_fault` uses an ordinary task prompt but lacks the complete
+transaction step export; neither mode's aggregate CSV alone is a native
+dependency trace. Record task success separately, never use it to filter
+recorded steps, and report missing logs, replay
+mismatches, environment failures, unsupported effects, and duplicate attempts
+in a flow table. Public SWE-agent/Claude traces are a separate source-system
+stratum, never merged silently with new Codex/Luna trajectories. Do not infer
+native dependencies from the official experiment's synthetic recovery
+documents. Test failure, incomplete execution, commit failure, and capture
+warnings remain labels, not analysis inclusion criteria.
+
+Terminal-Bench clean trajectories must run the agent inside each task's
+official Docker image, preserving image paths such as `/data`; verifier files
+must not be placed in the agent-visible workspace. The final workspace must
+then pass the official image's `run-tests.sh` before success is recorded.
+Missing verifier dependencies or failed downloads are environment errors, not
+task failures. Earlier host-projected clean prechecks are excluded from this
+cohort. The current formal Terminal-Bench runner still executes the agent on
+the host and therefore cannot be labeled an image-native agent run merely
+because its final verdict uses Docker.
+
+**Opportunity census.** Capture each real step's observed reads, writes,
+deletes, negative lookups, object identity, turn, timestamp, and tool-result
+provenance. For every actual write/delete step with later observed work,
+counterfactually mark it faulty. Compute its observed dependency closure and
+the valid steps removed by each correct coarse boundary. A survivor counts as
+retention opportunity only when its filesystem and explicit context
+dependencies are accounted for; unresolved effects are reported as uncertain
+and never presented as proven savings. Freeze the candidate-step rule and policy
+semantics before inspecting outcomes. Keep all zero-opportunity tasks and all
+eligible fault sites; do not select a maximally favorable root per task for
+the primary statistic. Separately characterize long dependencies by the
+number of steps and turns spanned by each observed edge, the longest directed
+dependency path per task, and how far an eligible root's dependent work
+extends. A long chain alone is not evidence of recovery waste: count the
+independent, useful steps interleaved with it and compare those steps with
+what each coarse boundary would discard.
+
+**Reported denominators and metrics.** Report unique task IDs, captured
+attempts, recorded turns and steps, mutating roots, and attribution warnings
+separately for all four agent-by-benchmark strata. Do not pool
+Codex and SWE-agent turn-level measurements: a Codex `exec` is one CLI turn
+containing multiple native tool events, while SWE-agent exposes its own model
+turns. Primary prevalence is
+the fraction of recorded tasks with at least one positive site, accompanied by
+the fraction of eligible sites with positive waste; label the first an
+*existence* metric, not a fault probability. Equal-weight tasks for aggregate
+means and bootstrap intervals by task so long trajectories do not dominate.
+Report zero mass, median/P90/P99 of discarded valid steps and serialized
+tool-result token weight, and a same-turn versus cross-turn breakdown. Compare
+Turn checkpoint, Temporal step, Whole branch, and Ideal oracle on identical roots;
+exclude Root only from efficiency claims when it leaves invalid descendants.
+Also report the distribution of edge spans and longest paths in steps and
+turns, the fraction of tasks containing cross-turn dependencies, and waste
+conditional on dependency span and interleaved independent work. Tool-result
+token weight is a work proxy, never model or replay token usage.
+
+**Validation and case replay.** Audit a preregistered sample of positive,
+zero, and unknown classifications against the original syscall/effect logs;
+report disagreement and fail closed on ambiguous dependencies. Before model
+continuation, select cases from fixed strata (high, median, zero opportunity;
+same-turn and cross-turn; both benchmarks), not by realized savings. Inject
+the same fault at the selected real step for each policy and run the official
+verifier plus survivor-file hashes and agent-context checks. Record all
+successes, failures, environment exclusions, model tokens, replay tokens, and
+wall time. Compare replayed cases only after checking that the same native
+trajectory and fault schedule were used. The ideal boundary is an oracle
+lower bound; implemented AgentTX results belong in Evaluation, not this
+Motivation incidence claim.
+
+**Outputs and acceptance.** Produce a frozen cohort manifest, source-trace
+hashes, per-step effect/edge records, per-root policy counterfactuals, a
+task-level summary including zeros, an exclusion table, and reproducible
+positive/negative case timelines. A main-text incidence plot must show the
+denominator and zero-opportunity mass; a separate case timeline may explain
+the mechanism. Do not claim broad prevalence until both real-workload strata
+have adequate usable coverage and the dependency audit passes. If incidence
+is low or one suite lacks usable traces, report that result and narrow the
+paper claim rather than changing the cohort or fault-site rule.
+
+**Implementation route.** Add passive step/effect export to the official
+clean task path before its workspace and session are destroyed, retaining the
+ordinary `no_fault` task prompt and checking that tracing does not alter the
+agent-visible workflow. Persist the full tool-call sequence, turn boundaries,
+ledger/effect provenance, and source configuration; validate `fault_injected`
+and `precrash_progress_seeded` are false. Reuse
+`replay_sweagent_native_traces.py` only to replay an unchanged source action
+sequence and export effect provenance; collect Codex native traces through
+its task harness rather than reconstructing them from the injected official-run
+CSV. Generalize
+`analyze_intra_turn_traces.py` from its six-turn eligibility gate to a census
+that retains every usable task, turn, and candidate root, including zeros.
+Extend `bench_real_trace_counterfactual.py` to write the full per-root policy
+table and uncertainty labels without plotting implemented causal recovery as
+Motivation evidence. Keep the old 20-trace pilot immutable. Put the new cohort,
+raw audit, exclusions, figures, and case-replay outputs under a separately
+versioned `experiments/results/motivation/real_trajectory_audit/` directory;
+never overwrite the controlled 400-manifest results.
+
+**Execution started 2026-10-06.** The first cohort uses native SWE-agent
+with Luna max on the ordinary fault-free task instruction. It records each
+action through the in-process adapter; it does not inject a crash, seed a
+reference patch, or give a recovery hint. The two completed preflight cases
+(`django__django-10924` and `analyze-access-logs`) both show cross-turn
+workspace-file dependencies, but neither has an observed independently
+mutating survivor; they remain zero-opportunity examples. A preregistered
+12-task phase-one sample, two tasks per short/medium/long stratum in each
+benchmark, is in `cohort_phase1.json` under the run directory. Both agents
+use these same task IDs, forming 24 agent-task cells across four strata.
+Image-native outputs are separated by agent and suite under
+`experiments/results/motivation/real_trajectory_audit/`; earlier
+`clean_native_luna_max_20261006` host-projected Terminal-Bench records are
+not part of the official-image cohort.
+The separate 20-trace public SWE-agent/Claude replay is only a method
+calibration stratum, not pooled with Luna. The current analysis counts
+observed workspace-path dependencies and excludes tooling/cache paths; it
+does not certify all other work as independent or convert step counts into
+model-token savings. Codex's ordinary external transaction is one process
+step. Its separate passive native capture observes Codex JSON tool events,
+attributes syscall reads within each event interval, and fingerprints
+workspace writes at event boundaries. Traces with overlapping or unsupported
+mutating tool events or unattributed final writes are excluded; overlapping
+read-only events are conservatively overattributed. Codex `web_search` is a
+real step but an opaque context barrier, so work across it is never certified
+independent. Codex is not treated
+as one transaction step, nor are artificial model-turn boundaries inferred.
+Each of the four strata is validated in its official Docker task image before
+cohort analysis. Earlier Terminal-Bench host-projected traces remain excluded.
+As of 2026-10-06, the frozen six-task pilot has six recorded native trajectories
+in each of the four agent-by-benchmark strata (24 in total). The SWE-agent
+Terminal-Bench set includes a submitted case whose official tests failed and
+a case that ended with the agent's exit format after recording real steps.
+Codex's SWE-Bench Requests case also failed official tests after a valid
+39-step capture. All three traces are retained in the step census. A failed
+official test never excludes recorded steps; verifier/environment errors leave
+the success label unknown. Overlapping mutating Codex tool events make step
+attribution uncertain and are retained with a capture warning. The earlier SWE-Bench
+pilot verifier omitted the official test patch, so its success labels remain
+unknown even though its six step traces are recorded. All pilot denominators,
+duplicate attempts, and warnings are recorded in the four `analysis_*_phase1`
+directories under the real-trajectory audit results.
+After the 24-cell pilot, four persistent full-cohort captures were launched
+from the remaining 294 SWE-Bench Lite and 235 Terminal-Bench tasks per agent.
+They run in `agenttx_native_{swe,codex}_{swe,tb}` tmux sessions and write
+`full_{sweagent,codex}_{swe,tb}_20261006.log` beside their result directories.
+These captures are in progress, not completed evaluation results. The
+SWE-Bench capture admits an exact Astropy image-build pin of `setuptools` to
+`68.0.0` in `pyproject.toml`; all other source-content differences still fail
+the image/base check.
+
 ## 3. Hard Constraints
 
 - Repository: `/home/bfq/agenttx`
 - Python: `/home/bfq/miniconda3/envs/agenttx/bin/python3.11`
-- At most 6 concurrent agent/model requests for this user. The deterministic
-  sweep does not call a model and should normally run serially.
 - Do not run or plot `agenttx_causal` in motivation. Its implemented-system
   results belong in the later evaluation, not the opportunity study.
 - Every policy in one paired cell receives the same materialized trace, fault
@@ -394,7 +660,7 @@ so it must not be counted as additional evidence.
 - Do not remove unfavorable points, failed cells, or dense-dependency points.
 - A single extreme sparse case may be retained as an appendix regression test,
   but it is not main-text evidence and is not a substitute for the sweep.
-- Crab is represented only by `turn_checkpoint_proxy`; do not describe its
+- Crab's turn-boundary policy is represented only by `turn_checkpoint_proxy`; do not describe its
   numbers as measurements of the Crab artifact.
 
 ## 4. Dependency Value
@@ -429,6 +695,9 @@ mixes fault position with dependency density and must not be used as the main
 x-axis.
 
 ## 5. Recovery Policies
+
+See the [bilingual terminology reference](docs/terminology.md) for canonical
+Chinese/English names, policy IDs, and the separate experiment namespaces.
 
 | canonical ID | figure label | rollback boundary | expected role |
 |---|---|---|---|
@@ -465,7 +734,7 @@ The headline experiment is a one-factor sweep over dependency density:
 | seeds/cases per gradient | 0 through 9 (10 cases) |
 
 These 21 dependency points are preregistered. Report all points, including
-points where the ideal ties a coarse baseline.
+points where Ideal oracle ties a coarse baseline.
 
 Primary plots:
 
@@ -771,6 +1040,20 @@ be repeated to estimate variance, but it cannot replace the complete run.
 The primary path uses a live agent and each suite's official verifier. Gold
 patches and oracle solutions are permitted only for environment validation or
 an explicitly labeled oracle upper bound; they are not task-success results.
+Terminal-Bench also requires the agent to execute inside the task's official
+Docker image; running only its verifier there is insufficient. The current
+formal host-projected Terminal-Bench rows are diagnostic, not comparable
+real-world success results. Do not resume or publish them as a native-image
+cohort. A new formal run must use the image-native agent path for every mode.
+
+Freeze the same model, reasoning effort, prompt and crash schedule, task set,
+wall timeout, verifier, and count-limit policy for all strategies and both
+agent harnesses. Do not inherit per-task SWE-agent step/model-call caps from
+the synthetic workload scale when Codex has no corresponding cap. An omitted
+`--max-turns` means no count cap; any explicit cap belongs in `run_config.json`
+and requires a separately matched Codex protocol. Keep incomplete cells and
+infrastructure failures visible in the denominator rather than silently
+treating an expected-cell count as completed data.
 
 ### 16.2 Recovery protocol
 
@@ -874,8 +1157,6 @@ failures remain visible.
 
 - Freeze code, prompts, model, reasoning effort, task versions, and verifiers
   before a canonical run.
-- Use at most six concurrent model requests; deterministic microbenchmarks may
-  run separately without consuming model concurrency.
 - Run order is analytical microbenchmark, system-microbenchmark pilot,
   complete system microbenchmark, real-world environment check, full
   SWE-Bench/Terminal-Bench, Breakdown,

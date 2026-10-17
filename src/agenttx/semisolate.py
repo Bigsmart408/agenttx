@@ -767,15 +767,19 @@ class SharedSemisolate:
         flags = ["-N", str(self.sandbox_dir)]
         if self.hide_network:
             flags.insert(0, "-x")
-        process = subprocess.Popen(
-            [str(self.try_bin), *flags, "--", "python3", str(self._worker_script)],
-            cwd=str(self.workspace),
-            env={**os.environ, "PWD": str(self.workspace)},
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            bufsize=0,
-        )
+        # Startup failures otherwise disappear behind the worker framing error.
+        # Keep only the worker/namespace diagnostics, not model request data.
+        with (self.session_dir / "worker.stderr.log").open("ab") as worker_stderr:
+            process = subprocess.Popen(
+                [str(self.try_bin), *flags, "--",
+                 os.environ.get("AGENTTX_WORKER_PYTHON", "python3"), str(self._worker_script)],
+                cwd=str(self.workspace),
+                env={**os.environ, "PWD": str(self.workspace)},
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=worker_stderr,
+                bufsize=0,
+            )
         self._worker_process = process
         assert process.stdin is not None and process.stdout is not None
         try:
@@ -979,11 +983,17 @@ class SharedSemisolate:
         script = self._write_cmd_script(argv)
         # The script already has a fixed bash shebang and executable mode;
         # executing it directly avoids an extra shell parse in every try call.
-        command = [str(script)]
+        # A task can copy up the reusable script's inode (for example through
+        # shell metadata updates). Later host edits are then hidden by that
+        # upper copy. Send the current body as an argv value to the persistent
+        # worker, which already preserves argument boundaries; one-shot try
+        # still needs a script path to avoid its inline word splitting.
+        command = (["bash", "-c", script.read_text(encoding="utf-8")]
+                   if self.persistent_worker else [str(script)])
         # `try` mounts a private /tmp and /run for the command namespace. Put
-        # the trace in overlaid /var/tmp so it survives namespace teardown without
-        # becoming visible in the agent's workspace, then remove it before collecting
-        # write effects. Sending it to stderr
+        # the trace outside the workspace on a persistent overlay mount so it
+        # survives namespace teardown, then remove it before collecting writes.
+        # Sending it to stderr
         # would expose the raw syscall log to an interactive agent as command
         # output and multiply the model context on every subsequent turn.
         trace_path: Optional[Path] = None
@@ -1001,21 +1011,20 @@ class SharedSemisolate:
                 tracer = "strace"
                 strace_bin = shutil.which("strace")
                 assert strace_bin is not None  # validated during initialization
-                trace_path = Path("/var/tmp") / (
+                trace_root = Path(
+                    os.environ.get("AGENTTX_TRACE_SPOOL_ROOT", "/home")
+                ).resolve()
+                if not trace_root.is_dir() or trace_root.is_relative_to(self.workspace):
+                    raise RuntimeError(
+                        "trace spool must be an existing directory outside the workspace"
+                    )
+                trace_path = trace_root / (
                     f".agenttx-strace-{os.getpid()}-{self._step_count}-{time.time_ns()}"
                 )
                 trace_upper_path = upper.joinpath(*trace_path.relative_to("/").parts)
                 command = [
-                    strace_bin,
-                    "-yy",
-                    "-f",
-                    "-s",
-                    "4096",
-                    "--seccomp-bpf",
-                    "--trace=%file,process",
-                    "-o",
-                    str(trace_path),
-                    *command,
+                    strace_bin, "-yy", "-f", "-s", "4096", "--seccomp-bpf",
+                    "--trace=%file,process", "-o", str(trace_path), *command,
                 ]
 
         if tracer != "bpf":
@@ -1051,7 +1060,8 @@ class SharedSemisolate:
                 trace_upper_path.unlink(missing_ok=True)
             if not trace_text.strip():
                 raise RuntimeError(
-                    "strace did not produce dependency output in the workspace"
+                    "strace did not produce dependency output in the workspace "
+                    f"(command_rc={cp.returncode}, stderr={cp.stderr[-1000:]!r})"
                 )
             trace_effects = parse_strace_effects(trace_text, self.workspace)
 
@@ -1540,6 +1550,7 @@ class SharedSemisolate:
             _grant_upper_commit_access(upper, upper_modes)
         if ordinary_paths is None or ordinary_paths:
             try:
+                self._clear_unmounted_temproot()
                 cp = subprocess.run(
                     cmd,
                     cwd=str(self.workspace),
@@ -1570,6 +1581,25 @@ class SharedSemisolate:
             self._cached_digests = self.upperdir_digests()
             self._pending_snapshot_changes = None
         return cp
+
+    def _clear_unmounted_temproot(self) -> None:
+        """Discard only inactive mount views, preserving versioned upper state."""
+        assert self.sandbox_dir is not None
+        root = self.sandbox_dir / "temproot"
+        if root.is_symlink():
+            raise RuntimeError("refusing symlink sandbox temproot")
+        if not root.exists():
+            return
+        prefix = str(root.absolute()).rstrip("/")
+        for line in Path("/proc/self/mountinfo").read_text().splitlines():
+            mountpoint = line.split()[4]
+            mountpoint = re.sub(
+                r"\\([0-7]{3})", lambda match: chr(int(match.group(1), 8)), mountpoint
+            )
+            if mountpoint == prefix or mountpoint.startswith(prefix + "/"):
+                raise RuntimeError("refusing cleanup of mounted sandbox temproot")
+        _remove_overlay_tree(root)
+        root.mkdir()
 
     def reset(self) -> None:
         """Hard reset overlay (legacy). Prefer rollback_steps for surgical restore."""

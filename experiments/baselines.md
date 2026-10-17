@@ -1,4 +1,6 @@
-﻿# Experiment plan (minimal)
+# Experiment plan (minimal)
+
+Terminology / 中英文策略名称：[reference / 术语表](../docs/terminology.md).
 
 ## Baselines
 1. Bare

@@ -440,8 +440,13 @@ class ConversationLog:
                         changed = True
         return frontier
 
-    def invalidate_steps(self, step_ids: Iterable[int]) -> List[int]:
-        wanted = self.conversation_closure(step_ids)
+    def invalidate_steps(
+        self, step_ids: Iterable[int], *, expand_dependencies: bool = True,
+    ) -> List[int]:
+        wanted = (
+            self.conversation_closure(step_ids) if expand_dependencies
+            else {int(step_id) for step_id in step_ids}
+        )
         invalidated: List[int] = []
         for turn in self.turns:
             if turn.status != "active":
@@ -498,12 +503,17 @@ class ConversationLog:
         self.last_recovery_mode = mode
         return turn
 
-    def rewind(self, step_ids: Sequence[int], notice: str, mode: str = "causal") -> dict:
+    def rewind(
+        self, step_ids: Sequence[int], notice: str, mode: str = "causal", *,
+        expand_dependencies: bool = True,
+    ) -> dict:
         """Drop spans whose effects or copied results were rolled back.
 
         ``step_ids`` should be the ledger closure (causal dependents or the
         temporal suffix).  Token-copy children that the ledger cannot see are
         then added.  The two sets are unioned; neither graph is used alone.
+        Evaluation oracles with an independently registered complete truth
+        set may disable expansion so captured message edges cannot alter it.
         """
         ledger_set = {int(step_id) for step_id in step_ids}
         recorded = {
@@ -521,9 +531,11 @@ class ConversationLog:
                 "ledger_steps_missing_from_conversation": sorted(ledger_set - recorded),
                 "copy_only_step_ids": [],
             }
-        token_expanded = self.conversation_closure(ledger_set)
+        token_expanded = (
+            self.conversation_closure(ledger_set) if expand_dependencies else set()
+        )
         drop = ledger_set | token_expanded
-        effect_ids = self.invalidate_steps(drop)
+        effect_ids = self.invalidate_steps(drop, expand_dependencies=False)
         control_ids = self.invalidate_stale_control()
         self.append_recovery(notice, mode=mode)
         self.generation += 1

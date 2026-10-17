@@ -1,5 +1,7 @@
 # AgentTX 实验术语、设计思路与结果总览
 
+中英文策略名称与 ID 对应关系见[术语表](terminology.md)；历史结果保留各自实验命名空间。
+
 本文档用于统一解释 AgentTX 当前实验中出现的专有名词、对照组、指标、
 设计逻辑和结论。它面向论文写作与组内讨论，重点回答三个问题：
 
@@ -638,7 +640,7 @@ harness 分目录：`experiments/results/{deepseek_harness,codex}/` 与
 
 - AgentTX causal：回滚 `{1, 3, 4}`，两份文档都保留；
 - 乐观 checkpoint：回滚 `{1, 2, 3, 4}`，重放 changelog；
-- whole branch/session abort：回滚 `{0, 1, 2, 3, 4}`，重放两份文档。
+- Whole branch abort：回滚 `{0, 1, 2, 3, 4}`，重放两份文档。
 
 文档规模为 12、24、48 行，每个 cell 三次重复，共 27 个样本。丢失的文档必须
 由真实 `deepseek-v4-flash` 通过 `write_file` tool call 重建。模型输出若结构不完整
@@ -646,7 +648,7 @@ harness 分目录：`experiments/results/{deepseek_harness,codex}/` 与
 
 ### 10.3 结果
 
-| 每份文档行数 | AgentTX replay | 乐观 checkpoint | whole abort |
+| 每份文档行数 | AgentTX replay | 乐观 checkpoint | Whole branch abort |
 |---:|---:|---:|---:|
 | 12 | 0 | 864.3 | 1,797.3 |
 | 24 | 0 | 1,060.3 | 2,231.7 |
@@ -656,7 +658,7 @@ harness 分目录：`experiments/results/{deepseek_harness,codex}/` 与
 上避免了 100% 的**可避免 replay token**：
 
 - 相对最乐观 temporal checkpoint，节省约 864–1,425 token；
-- 相对 whole branch/session abort，节省约 1,797–3,340 token；
+- 相对 Whole branch abort，节省约 1,797–3,340 token；
 - 绝对节省随被保留工作的大小增长。
 
 这里的 0 只表示没有文档需要重新生成。测试、回滚、commit、Agent 诊断以及错误
@@ -743,7 +745,7 @@ snapshot 存储，但不代表 snapshot 遍历和 WAL copy 已经完全解决。
 | 因果回滚是否保留有效工作？ | 受控 DAG 中 100% 保留且 100% 删除无效结果 | 144-run DAG sweep |
 | 没有依赖捕获行不行？ | 不行，64-call 时只删掉 4% invalid subgraph | dependency ablation |
 | 真实 LLM 会使用恢复接口吗？ | 3/3 正确选根并恢复 | real-agent recovery |
-| 能节省多少 token？ | 最高测试点相对 checkpoint/whole abort 节省 1,424.7/3,340.3 | token sweep（机制归因） |
+| 能节省多少 token？ | 最高测试点相对 checkpoint/Whole branch abort 节省 1,424.7/3,340.3 | token sweep（机制归因） |
 | 完整恢复循环能否节省 token？ | deepseek-v4 已跑；须与 success 联读（causal 6/6） | `token_end_to_end.*` |
 | 换到官方 SWE/TB 后原理变了吗？ | 没有。仍是注入 DAG + causal/temporal/abort，只是仓库和 verifier 换成官方题 | `bench_official_tasks.py` |
 | 优化路径是否稳健？ | worker crash、256-step reload、4-agent concurrency 均通过 | robustness bundle |

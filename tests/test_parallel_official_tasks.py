@@ -1,8 +1,12 @@
 import signal
+from pathlib import Path
+
+import pytest
 
 from agenttx.semisolate import _probe_try_backend
 from experiments.scripts.run_parallel_official_tasks import (
     DEFAULT_MODES,
+    catalog_tasks,
     merged_rows,
     parse_args,
     partition_tasks,
@@ -15,6 +19,17 @@ from experiments.scripts.run_parallel_official_tasks import (
     worker_command,
     worker_environment,
 )
+
+
+def test_catalog_tasks_filters_suite_before_launch(monkeypatch):
+    from experiments.workloads import swe_bench_suite as swe
+    from experiments.workloads import terminal_bench_suite as tb
+
+    monkeypatch.setattr(swe, "load_tasks", lambda _cache: {"swe-case": object()})
+    monkeypatch.setattr(tb, "load_tasks", lambda _cache: {"tb-case": object()})
+
+    assert catalog_tasks(Path("cache"), "swe") == ["swe:swe-case"]
+    assert catalog_tasks(Path("cache"), "tb") == ["tb:tb-case"]
 
 
 def test_default_modes_cover_the_complete_official_experiment_matrix():
@@ -83,6 +98,17 @@ def test_mode_parallel_cli_accepts_fewer_workers_than_modes():
     assert args.workers == 4
 
 
+def test_mode_parallel_cli_can_pause_one_mode():
+    args = parse_args([
+        "--mode-parallel", "--workers", "4", "--modes", "causal",
+        "clean_recovery", "temporal_checkpoint", "whole_branch_abort",
+        "--skip-modes", "causal", "--resume-scale-workers",
+    ])
+
+    assert args.skip_modes == ["causal"]
+    assert args.resume_scale_workers is True
+
+
 def test_paired_prefix_requires_mode_parallel():
     try:
         parse_args(["--paired-prefix", "1"])
@@ -115,12 +141,64 @@ def test_result_shard_count_uses_frozen_queue_width(monkeypatch, tmp_path):
     assert result_shard_count("run", 4) == 7
 
 
+def test_mode_parallel_resume_can_scale_workers_without_changing_workload(monkeypatch, tmp_path):
+    import json
+
+    from experiments.scripts import run_parallel_official_tasks as parallel
+
+    monkeypatch.setattr(parallel, "ROOT", tmp_path)
+    monkeypatch.setattr(parallel.subprocess, "run", lambda *args, **kwargs: type(
+        "Result", (), {"stdout": "commit\n"}
+    )())
+    modes = ["causal", "clean_recovery", "temporal_checkpoint"]
+    tasks = ["swe:one"]
+    base = [
+        "--run-name", "run", "--mode-parallel", "--workers", "2",
+        "--max-requests", "2", "--modes", *modes,
+        "--model", "gpt-5.6-luna", "--reasoning-effort", "max",
+    ]
+    env = {"AGENTTX_KEEP_EVAL_IMAGES": "1", "AGENTTX_FAULT_SEED": "7"}
+    original = parallel.write_run_config(parallel.parse_args(base), tasks, env)
+    scaled_args = parallel.parse_args(base + ["--resume-scale-workers"])
+    scaled_args.workers = 3
+    scaled_args.max_requests = 3
+    assert parallel.write_run_config(scaled_args, tasks, env) == original
+    config = json.loads(original.read_text())
+    assert config["workers"] == 3
+    assert config["max_concurrent_requests"] == 3
+    assert config["result_shards"] == 3
+
+
 def test_parallel_runner_defaults_to_four_external_requests():
     args = parse_args([])
 
     assert args.workers == 8
     assert args.max_requests == 4
     assert args.reasoning_effort == "max"
+    assert args.max_turns is None
+    assert args.suite == "all"
+
+
+def test_context_matrix_matches_compact_environment_for_all_policies():
+    modes = ["causal", "temporal_checkpoint", "whole_branch_abort", "crash_no_rollback"]
+    assert recovery_context_by_mode(modes, {"AGENTTX_RECOVERY_CONTEXT": "compact"}, "inherit", "inherit") == dict.fromkeys(modes, "compact")
+
+
+def test_resuming_after_source_change_is_rejected_even_when_worker_scaling_is_allowed(monkeypatch, tmp_path):
+    from experiments.scripts import run_parallel_official_tasks as parallel
+
+    monkeypatch.setattr(parallel, "ROOT", tmp_path)
+    monkeypatch.setattr(parallel.subprocess, "run", lambda *args, **kwargs: type("Result", (), {"stdout": "commit\n"})())
+    source = tmp_path / "src/agenttx/runtime.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("before\n")
+    args = parallel.parse_args(["--run-name", "run", "--mode-parallel", "--workers", "1", "--resume-scale-workers", "--modes", "causal"])
+    config = parallel.write_run_config(args, ["swe:one"], {"AGENTTX_KEEP_EVAL_IMAGES": "1"})
+    original = config.read_bytes()
+    source.write_text("after\n")
+    with pytest.raises(RuntimeError, match="configuration changed"):
+        parallel.write_run_config(args, ["swe:one"], {"AGENTTX_KEEP_EVAL_IMAGES": "1"})
+    assert config.read_bytes() == original
 
 
 def test_clean_recovery_context_override_is_worker_local():
@@ -132,6 +210,22 @@ def test_clean_recovery_context_override_is_worker_local():
     assert clean["AGENTTX_RECOVERY_CONTEXT"] == "compact"
     assert causal["AGENTTX_RECOVERY_CONTEXT"] == "full"
     assert base["AGENTTX_RECOVERY_CONTEXT"] == "full"
+
+
+def test_runner_workers_do_not_inherit_proxy_environment():
+    from experiments.scripts import run_parallel_official_tasks as parallel
+
+    base = {
+        "AGENTTX_RECOVERY_CONTEXT": "full",
+        "HTTP_PROXY": "http://127.0.0.1:17897",
+        "https_proxy": "http://127.0.0.1:17897",
+    }
+    direct = parallel.worker_environment(base, ["causal"], "inherit", "compact")
+
+    assert "HTTP_PROXY" not in direct
+    assert "https_proxy" not in direct
+    assert direct["NO_PROXY"] == "*"
+    assert direct["AGENTTX_NO_PROXY"] == "1"
 
 
 def test_causal_recovery_context_override_is_worker_local():
@@ -195,6 +289,52 @@ def test_worker_command_pins_reasoning_effort(monkeypatch):
     assert "gpt-5.6-luna" in harness
     assert 'model_reasoning_effort=\"max\"' in harness
     assert "--allow-result-failures" in command
+
+
+def test_sweagent_worker_uses_native_harness_and_luna_max(monkeypatch):
+    monkeypatch.setattr(
+        "experiments.scripts.run_parallel_official_tasks.shutil.which",
+        lambda name: "/usr/bin/bwrap" if name == "bwrap" else None,
+    )
+
+    command = worker_command(
+        tasks=["swe:case"],
+        run_name="sweagent-run",
+        shard_index=1,
+        modes=["causal"],
+        repeats=1,
+        model="gpt-5.6-luna",
+        reasoning_effort="max",
+        harness_timeout=1800,
+        python="/opt/conda/bin/python",
+        harness="sweagent",
+        suite="swe",
+    )
+
+    assert command[command.index("--suite") + 1] == "swe"
+    assert command[command.index("--harness") + 1] == "sweagent"
+    assert command[command.index("--model") + 1] == "gpt-5.6-luna"
+    assert command[command.index("--reasoning-effort") + 1] == "max"
+    assert "--harness-command" not in command
+    assert "--max-turns" not in command
+    assert command[0] == "/usr/bin/bwrap"
+    assert command[command.index("--setenv") + 2] == "/root"
+    assert "AGENTTX_MOTIVATION_BWRAP" in command
+
+
+def test_sweagent_step_cap_is_only_applied_when_requested(monkeypatch):
+    monkeypatch.setattr(
+        "experiments.scripts.run_parallel_official_tasks.shutil.which",
+        lambda name: "/usr/bin/bwrap" if name == "bwrap" else None,
+    )
+    command = worker_command(
+        tasks=["swe:case"], run_name="run", shard_index=0,
+        modes=["causal"], repeats=1, model="gpt-5.6-luna",
+        reasoning_effort="max", harness_timeout=1800,
+        python="/opt/conda/bin/python", harness="sweagent", max_turns=192,
+    )
+
+    assert command[command.index("--max-turns") + 1] == "192"
 
 
 def test_merged_rows_can_include_environment_failures(monkeypatch, tmp_path):

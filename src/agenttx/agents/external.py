@@ -32,6 +32,24 @@ except ImportError:  # pragma: no cover - exercised only on minimal installation
     _zstandard = None
 
 
+PROXY_ENV_KEYS = (
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+    "http_proxy", "https_proxy", "all_proxy",
+)
+
+
+def _direct_network_enabled() -> bool:
+    return os.environ.get("AGENTTX_NO_PROXY", "").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+
+
+def _direct_shell_prefix() -> str:
+    if not _direct_network_enabled():
+        return ""
+    return "unset " + " ".join(PROXY_ENV_KEYS) + "; export NO_PROXY='*' no_proxy='*'; "
+
+
 @contextmanager
 def _external_request_slot() -> Iterator[None]:
     """Limit external model requests across independent benchmark workers."""
@@ -344,9 +362,7 @@ class ExternalHarness:
     @staticmethod
     def _resolve_proxy_command(value: Optional[str]) -> List[str]:
         """Return the optional proxy launcher as argv, without shell parsing."""
-        if os.environ.get("AGENTTX_NO_PROXY", "").strip().lower() in {
-            "1", "true", "yes", "on"
-        }:
+        if _direct_network_enabled():
             return []
         configured = value or os.environ.get("AGENTTX_CLASH_COMMAND")
         if configured:
@@ -389,6 +405,10 @@ class ExternalHarness:
         merged_env = os.environ.copy()
         if env:
             merged_env.update(env)
+        if _direct_network_enabled():
+            for name in PROXY_ENV_KEYS:
+                merged_env.pop(name, None)
+            merged_env.update({"NO_PROXY": "*", "no_proxy": "*"})
         started = time.perf_counter()
         started_ns = time.time_ns()
         try:
@@ -537,7 +557,7 @@ class DeepSeekHarness(ExternalHarness):
             # DSH_HOME/DSH_SESSION_ROOT.  Keep both roots inside the protected
             # workspace so AgentTX never tries to publish harness metadata from
             # the user's real home directory.
-            f"cd {shlex.quote(str(workdir))} && "
+            _direct_shell_prefix() + f"cd {shlex.quote(str(workdir))} && "
             "mkdir -p .dsh .agents .sessions && "
             # The profile's flat dependency tree is an implementation detail,
             # not workspace input.  Copying it into the task root makes DSH's
@@ -692,6 +712,7 @@ class CodexHarness(ExternalHarness):
         run_home = workdir / f".agenttx-codex-{uuid.uuid4().hex}"
         codex_home = run_home / "codex"
         cache_home = run_home / "cache"
+        config_home = run_home / "config"
         pip_cache = cache_home / "pip"
         tmp_home = run_home / "tmp"
         userbase = run_home / "userbase"
@@ -702,8 +723,9 @@ class CodexHarness(ExternalHarness):
         shell = [
             "bash",
             "-lc",
-            f"cd {shlex.quote(str(workdir))} && "
+            _direct_shell_prefix() + f"cd {shlex.quote(str(workdir))} && "
             f"mkdir -p {shlex.quote(str(codex_home))} {shlex.quote(str(pip_cache))} "
+            f"{shlex.quote(str(config_home / 'astropy'))} "
             f"{shlex.quote(str(cache_home / 'fontconfig'))} {shlex.quote(str(cache_home / 'matplotlib'))} "
             f"{shlex.quote(str(cache_home / 'pyc'))} {shlex.quote(str(tmp_home))} "
             f"{shlex.quote(str(userbase / 'bin'))} && "
@@ -740,6 +762,7 @@ class CodexHarness(ExternalHarness):
             "printf '' | "
             f"CODEX_HOME={shlex.quote(str(codex_home))} "
             f"XDG_CACHE_HOME={shlex.quote(str(cache_home))} "
+            f"XDG_CONFIG_HOME={shlex.quote(str(config_home))} "
             f"FONTCONFIG_FILE={shlex.quote(str(cache_home / 'fonts.conf'))} "
             f"PIP_CACHE_DIR={shlex.quote(str(pip_cache))} "
             f"MPLCONFIGDIR={shlex.quote(str(cache_home / 'matplotlib'))} "

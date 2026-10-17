@@ -15,8 +15,9 @@ import sys
 import time
 from typing import Sequence
 
-
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+from experiments.scripts.experiment_storage import experiment_path
 DEFAULT_RUN_NAME = "codex_7mode_full_r1_parallel_20260903"
 DEFAULT_MODES = (
     "no_fault",
@@ -31,13 +32,15 @@ REASONING_EFFORTS = ("none", "low", "medium", "high", "xhigh", "max")
 RECOVERY_CONTEXTS = ("inherit", "full", "compact")
 
 
-def catalog_tasks(cache_dir: Path) -> list[str]:
+def catalog_tasks(cache_dir: Path, suite: str = "all") -> list[str]:
     from experiments.workloads import swe_bench_suite as swe
     from experiments.workloads import terminal_bench_suite as tb
 
+    swe_tasks = swe.load_tasks(cache_dir) if suite in {"all", "swe"} else {}
+    tb_tasks = tb.load_tasks(cache_dir) if suite in {"all", "tb"} else {}
     return [
-        *(f"swe:{name}" for name in swe.load_tasks(cache_dir)),
-        *(f"tb:{name}" for name in tb.load_tasks(cache_dir)),
+        *(f"swe:{name}" for name in swe_tasks),
+        *(f"tb:{name}" for name in tb_tasks),
     ]
 
 
@@ -75,7 +78,7 @@ def partition_work(
 
 
 def result_shard_count(run_name: str, fallback: int) -> int:
-    config_path = ROOT / "experiments" / "results" / run_name / "run_config.json"
+    config_path = experiment_path("results", project_root=ROOT) / run_name / "run_config.json"
     try:
         config = json.loads(config_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -123,7 +126,7 @@ def merged_rows(
             )
             rows_by_key[key] = row
     rows = list(rows_by_key.values())
-    config_path = ROOT / "experiments" / "results" / run_name / "run_config.json"
+    config_path = experiment_path("results", project_root=ROOT) / run_name / "run_config.json"
     try:
         config = json.loads(config_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -163,11 +166,16 @@ def merge_outputs(
     if not rows:
         return None
     summary = bench.summarize(rows)
+    config_path = experiment_path("results", project_root=ROOT) / run_name / "run_config.json"
+    try:
+        harness = json.loads(config_path.read_text(encoding="utf-8")).get("harness", "codex")
+    except (OSError, ValueError):
+        harness = "codex"
     return bench.write_outputs(
         summary,
         provider=None,
         oracle=False,
-        harness_backend="codex",
+        harness_backend=harness,
         result_subdir=f"{run_name}/merged",
     )
 
@@ -179,11 +187,12 @@ def status(
     repeats: int,
     max_requests: int,
     tasks: Sequence[str] | None = None,
+    suite: str = "all",
 ) -> dict:
     selected_tasks = (
         list(tasks)
         if tasks is not None
-        else catalog_tasks(ROOT / "experiments" / "cache")
+        else catalog_tasks(experiment_path("cache", project_root=ROOT), suite)
     )
     rows = merged_rows(run_name, workers, modes)
     attempts = merged_rows(run_name, workers, modes, completed_only=False)
@@ -232,31 +241,16 @@ def worker_command(
     reasoning_effort: str,
     harness_timeout: float,
     python: str,
+    harness: str = "codex",
+    max_turns: int | None = None,
+    suite: str = "all",
 ) -> list[str]:
-    codex = shutil.which("codex")
-    if codex is None:
-        raise FileNotFoundError("codex executable not found on PATH")
-    harness_command = shlex.join(
-        [
-            codex,
-            "exec",
-            "--model",
-            model,
-            "-c",
-            "features.plugins=false",
-            "-c",
-            f'model_reasoning_effort="{reasoning_effort}"',
-            "--dangerously-bypass-approvals-and-sandbox",
-            "--skip-git-repo-check",
-            "--json",
-        ]
-    )
-    return [
+    command = [
         python,
         "-u",
         str(ROOT / "experiments" / "scripts" / "bench_official_tasks.py"),
         "--suite",
-        "all",
+        suite,
         "--task-set",
         "selected",
         "--tasks",
@@ -266,11 +260,9 @@ def worker_command(
         "--repeats",
         str(repeats),
         "--harness",
-        "codex",
+        harness,
         "--model",
         model,
-        "--harness-command",
-        harness_command,
         "--harness-timeout",
         str(harness_timeout),
         "--allow-result-failures",
@@ -279,6 +271,46 @@ def worker_command(
         "--python",
         python,
     ]
+    if harness == "codex":
+        codex = shutil.which("codex")
+        if codex is None:
+            raise FileNotFoundError("codex executable not found on PATH")
+        harness_command = shlex.join(
+            [
+                codex,
+                "exec",
+                "--model",
+                model,
+                "-c",
+                "features.plugins=false",
+                "-c",
+                f'model_reasoning_effort="{reasoning_effort}"',
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--skip-git-repo-check",
+                "--json",
+            ]
+        )
+        command.extend(["--harness-command", harness_command])
+    elif harness == "sweagent":
+        command.extend(["--reasoning-effort", reasoning_effort])
+        if max_turns is not None:
+            command.extend(["--max-turns", str(max_turns)])
+        bwrap = shutil.which("bwrap")
+        if bwrap is None:
+            raise FileNotFoundError("bwrap executable not found on PATH")
+        command = [
+            bwrap,
+            "--bind", "/", "/",
+            "--dev-bind", "/dev", "/dev",
+            "--proc", "/proc",
+            "--tmpfs", "/root",
+            "--setenv", "HOME", "/root",
+            "--setenv", "AGENTTX_MOTIVATION_BWRAP", "1",
+            *command,
+        ]
+    else:
+        raise ValueError(f"unsupported official-task harness: {harness}")
+    return command
 
 
 def worker_environment(
@@ -289,6 +321,13 @@ def worker_environment(
 ) -> dict[str, str]:
     """Apply mode-local context overrides without changing other workers."""
     env = base_env.copy()
+    for name in (
+        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+        "http_proxy", "https_proxy", "all_proxy",
+    ):
+        env.pop(name, None)
+    env.update({"NO_PROXY": "*", "no_proxy": "*"})
+    env["AGENTTX_NO_PROXY"] = "1"
     overrides = {
         "clean_recovery": clean_recovery_context,
         "causal": causal_recovery_context,
@@ -332,7 +371,7 @@ def recovery_context_by_mode(
                 else causal_recovery_context
             )
         else:
-            contexts[mode] = "full"
+            contexts[mode] = inherited
     return contexts
 
 
@@ -343,7 +382,9 @@ def write_run_config(
     *,
     result_shards: int | None = None,
 ) -> Path:
-    result_dir = ROOT / "experiments" / "results" / args.run_name
+    from experiments.scripts.experiment_provenance import source_manifest
+
+    result_dir = experiment_path("results", project_root=ROOT) / args.run_name
     result_dir.mkdir(parents=True, exist_ok=True)
     commit = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -361,8 +402,11 @@ def write_run_config(
         stderr=subprocess.DEVNULL,
         check=False,
     ).stdout
+    sources = source_manifest(ROOT)
     config = {
         "run_name": args.run_name,
+        "suite": args.suite,
+        "harness": args.harness,
         "model": args.model,
         "reasoning_effort": args.reasoning_effort,
         "modes": list(args.modes),
@@ -377,6 +421,7 @@ def write_run_config(
         "paired_prefix": args.paired_prefix,
         "max_concurrent_requests": args.max_requests,
         "harness_timeout_s": args.harness_timeout,
+        "max_turns": args.max_turns,
         "task_count": len(tasks),
         "tasks": list(tasks),
         "expected_cells": len(tasks) * len(args.modes) * args.repeats,
@@ -384,7 +429,9 @@ def write_run_config(
         "keep_eval_images": env["AGENTTX_KEEP_EVAL_IMAGES"],
         "randomize_crash": env.get("AGENTTX_RANDOMIZE_CRASH", "0") == "1",
         "fault_seed": env.get("AGENTTX_FAULT_SEED", "0"),
-        "auto_localize": env.get("AGENTTX_AUTO_LOCALIZE", "0") == "1",
+        "auto_localize": "causal" in args.modes,
+        "fault_location_protocol": "causal_localizer_coarse_hidden_oracle_registered_truth_v1",
+        "source_manifest_sha256": sources["sha256"],
         "swe_verify": env.get("AGENTTX_SWE_VERIFY", "auto"),
         "recovery_context_by_mode": recovery_context_by_mode(
             args.modes,
@@ -401,12 +448,14 @@ def write_run_config(
     if path.exists() and path.read_text(encoding="utf-8") != encoded:
         previous = json.loads(path.read_text(encoding="utf-8"))
         invariant_fields = (
+            "suite",
+            "harness",
             "model",
             "reasoning_effort",
             "repeats",
-            "workers",
             "paired_prefix",
             "harness_timeout_s",
+            "max_turns",
             "task_count",
             "tasks",
             "python",
@@ -414,10 +463,17 @@ def write_run_config(
             "randomize_crash",
             "fault_seed",
             "auto_localize",
+            "fault_location_protocol",
+            "source_manifest_sha256",
             "swe_verify",
         )
+        if not args.resume_scale_workers:
+            invariant_fields += ("workers",)
         invariant_mismatch = [
-            field for field in invariant_fields if previous.get(field) != config.get(field)
+            field
+            for field in invariant_fields
+            if previous.get(field, "codex" if field == "harness" else "all" if field == "suite" else None)
+            != config.get(field)
         ]
         if (
             "recovery_context_by_mode" in previous
@@ -433,9 +489,24 @@ def write_run_config(
             and config["scheduling"] == previous_scheduling
             and not invariant_mismatch
         )
-        if not subset_resume_ok:
+        scale_resume_ok = bool(
+            args.resume_scale_workers
+            and config["scheduling"] == previous_scheduling == "mode_parallel"
+            and config["modes"] == previous.get("modes")
+            and config["result_shards"] == previous.get("result_shards")
+            and int(config["workers"]) >= int(previous.get("workers", 0))
+            and int(config["max_concurrent_requests"])
+            >= int(previous.get("max_concurrent_requests", 0))
+            and not invariant_mismatch
+        )
+        if not (subset_resume_ok or scale_resume_ok):
             raise RuntimeError(f"run configuration changed since initial launch: {path}")
+        if scale_resume_ok:
+            previous["workers"] = config["workers"]
+            previous["max_concurrent_requests"] = config["max_concurrent_requests"]
+            path.write_text(json.dumps(previous, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return path
+    (result_dir / "source_manifest.json").write_text(json.dumps(sources, indent=2) + "\n", encoding="utf-8")
     path.write_text(encoded, encoding="utf-8")
     return path
 
@@ -444,7 +515,7 @@ def run(args: argparse.Namespace) -> int:
     from agenttx.semisolate import _default_try_bin, _probe_try_backend
     from experiments.workloads import swe_bench_suite as swe
 
-    catalog = catalog_tasks(args.cache_dir)
+    catalog = catalog_tasks(args.cache_dir, args.suite)
     tasks = list(args.tasks) if args.tasks else catalog
     unknown = sorted(set(tasks) - set(catalog))
     if unknown:
@@ -469,15 +540,22 @@ def run(args: argparse.Namespace) -> int:
     ]
     if mixed_overrides and not args.mode_parallel:
         raise ValueError("mode-local recovery context overrides require --mode-parallel")
-    logs_dir = ROOT / "experiments" / "logs" / args.run_name
+    logs_dir = experiment_path("logs", project_root=ROOT) / args.run_name
     logs_dir.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
+    for name in (
+        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+        "http_proxy", "https_proxy", "all_proxy",
+    ):
+        env.pop(name, None)
+    env.update({"NO_PROXY": "*", "no_proxy": "*"})
+    env["AGENTTX_NO_PROXY"] = "1"
     env["AGENTTX_SKIP_ORPHAN_REAP"] = "1"
     env["AGENTTX_KEEP_EVAL_IMAGES"] = "1"
     if args.randomize_crash:
         env["AGENTTX_RANDOMIZE_CRASH"] = "1"
     env.setdefault("AGENTTX_DOCKER_PULL_ATTEMPTS", "3")
-    slot_dir = ROOT / "experiments" / "results" / args.run_name / ".request_slots"
+    slot_dir = experiment_path("results", project_root=ROOT) / args.run_name / ".request_slots"
     slot_dir.mkdir(parents=True, exist_ok=True)
     env["AGENTTX_EXTERNAL_MAX_CONCURRENCY"] = str(args.max_requests)
     env["AGENTTX_EXTERNAL_SLOT_DIR"] = str(slot_dir.resolve())
@@ -497,6 +575,10 @@ def run(args: argparse.Namespace) -> int:
     config_path = write_run_config(args, tasks, env, result_shards=len(assignments))
     print(f"frozen run configuration: {config_path}", flush=True)
 
+    active_assignments = [
+        index for index, (_tasks, modes) in enumerate(assignments)
+        if not set(modes).intersection(args.skip_modes)
+    ]
     children: list[tuple[int, subprocess.Popen, object]] = []
     stop_reason = ""
 
@@ -546,6 +628,9 @@ def run(args: argparse.Namespace) -> int:
             reasoning_effort=args.reasoning_effort,
             harness_timeout=args.harness_timeout,
             python=args.python,
+            harness=args.harness,
+            max_turns=args.max_turns,
+            suite=args.suite,
         )
         worker_env = worker_environment(
             env,
@@ -569,12 +654,12 @@ def run(args: argparse.Namespace) -> int:
         )
 
     next_assignment = 0
-    while next_assignment < len(assignments) and next_assignment < args.workers:
-        start_assignment(next_assignment)
+    while next_assignment < len(active_assignments) and next_assignment < args.workers:
+        start_assignment(active_assignments[next_assignment])
         next_assignment += 1
 
     last_report = 0.0
-    while next_assignment < len(assignments) or any(
+    while next_assignment < len(active_assignments) or any(
         child.poll() is None for _, child, _ in children
     ):
         now = time.monotonic()
@@ -598,8 +683,8 @@ def run(args: argparse.Namespace) -> int:
             stop_children()
             break
         running = sum(child.poll() is None for _, child, _ in children)
-        while next_assignment < len(assignments) and running < args.workers:
-            start_assignment(next_assignment)
+        while next_assignment < len(active_assignments) and running < args.workers:
+            start_assignment(active_assignments[next_assignment])
             next_assignment += 1
             running += 1
         if now - last_report >= 60:
@@ -631,6 +716,7 @@ def run(args: argparse.Namespace) -> int:
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-name", default=DEFAULT_RUN_NAME)
+    parser.add_argument("--suite", choices=("all", "swe", "tb"), default="all")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--max-requests", type=int, default=4)
     parser.add_argument("--repeats", type=int, default=1)
@@ -671,13 +757,29 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="resume an existing run with fewer modes and no higher concurrency",
     )
+    parser.add_argument(
+        "--resume-scale-workers",
+        action="store_true",
+        help="resume a mode-parallel run with more workers and the same frozen workload",
+    )
+    parser.add_argument(
+        "--skip-modes",
+        nargs="*",
+        default=[],
+        help="leave selected mode-parallel shards paused while resuming the others",
+    )
     parser.add_argument("--model", default="gpt-5.6-luna")
+    parser.add_argument("--harness", choices=("codex", "sweagent"), default="codex")
     parser.add_argument(
         "--reasoning-effort", choices=REASONING_EFFORTS, default="max"
     )
     parser.add_argument("--harness-timeout", type=float, default=1800.0)
+    parser.add_argument(
+        "--max-turns", type=int, default=None,
+        help="optional SWE-agent step and model-call cap; omitted means no count cap",
+    )
     parser.add_argument("--python", default=sys.executable)
-    parser.add_argument("--cache-dir", type=Path, default=ROOT / "experiments" / "cache")
+    parser.add_argument("--cache-dir", type=Path, default=experiment_path("cache", project_root=ROOT))
     parser.add_argument(
         "--tasks",
         nargs="+",
@@ -693,12 +795,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--max-requests must be positive")
     if args.repeats < 1:
         parser.error("--repeats must be positive")
+    if args.max_turns is not None and args.max_turns < 1:
+        parser.error("--max-turns must be positive")
     if args.paired_prefix < 0:
         parser.error("--paired-prefix cannot be negative")
     if args.paired_prefix and not args.mode_parallel:
         parser.error("--paired-prefix requires --mode-parallel")
     if args.mode_parallel and args.workers > len(args.modes):
         parser.error("--mode-parallel cannot use more workers than modes")
+    if args.skip_modes and not args.mode_parallel:
+        parser.error("--skip-modes requires --mode-parallel")
+    if set(args.skip_modes) - set(args.modes):
+        parser.error("--skip-modes must be a subset of --modes")
     return args
 
 
@@ -714,6 +822,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.repeats,
                     args.max_requests,
                     args.tasks,
+                    args.suite,
                 ),
                 indent=2,
             )

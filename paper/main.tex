@@ -33,7 +33,6 @@
 \renewcommand\paragraph{\@startsection{paragraph}{4}{\z@}{-1.1ex plus-.3ex minus-.1ex}{0pt plus.1ex}{\reset@font\normalsize\bfseries}}
 \makeatother
 \newcommand{\system}{\textsc{AgentTX}\xspace}
-\newcommand{\aet}{\textsc{AET}\xspace}
 \newcommand{\trycmd}{\texttt{try}\xspace}
 \AtBeginEnvironment{thebibliography}{%
   \normalsize
@@ -43,7 +42,7 @@
 
 \begin{document}
 \date{}
-\title{\Large \bf \system: Causal Effect Transactions for Long-Running Coding Agents}
+\title{\Large \bf Roll Back the Fault, Not the Future: Causal Recovery for Coding Agents with \system}
 \author{Anonymous submission}
 \maketitle
 
@@ -54,13 +53,11 @@ testing. Existing mechanisms couple the lifetime of speculative state to the
 granularity of recovery: command-scoped isolation repeatedly reconstructs
 state, whereas coarse temporal rollback discards independent later work.
 Recovery may target a historical state that never existed as a temporal prefix,
-and the workspace and agent context must move to that target together. We
-introduce Agent Effect Transactions
-(\aet), an abstraction that treats the complete trajectory as the speculation
-unit and a dependency-defined subgraph of versioned effects as the recovery
-unit. \system realizes \aet through dependency capture and object-aware
-reconstruction, using one recovery decision to rebuild both the workspace and
-the agent-visible context. In the 144-run
+and the workspace and agent context must move to that target together.
+\system keeps the trajectory in one speculative workspace but recovers only
+the failed step and its dependents. It captures dependencies and object
+versions, then uses one recovery decision to rebuild both the workspace and
+agent-visible context. In the 144-run
 controlled recovery suite, \system retained 100\% of independent work and
 removed 100\% of invalid descendants; temporal recovery retained only 41\% of
 independent work at 64 calls. At 48 document entries, preserving valid later
@@ -117,20 +114,19 @@ must relate effects across aliases, renames, replacements, and layered
 filesystems. Third, \emph{selective reconstruction} must rebuild a non-prefix
 workspace while aligning agent-visible context with that state.
 
-The root cause is a mismatch between how systems organize state and how
-failures propagate. Existing substrates index recovery by command, time, or
-path, while failures propagate through dependencies among versioned effects.
+The root cause is a mismatch between how the compared substrates organize
+recovery state and how failures propagate. Their recovery boundaries follow
+commands, checkpoints, or branches, while failures propagate through
+dependencies among versioned effects.
 The trajectory should therefore remain one speculation unit, but recovery
 should select a dependency-defined subgraph of tool-step effects. Recording
 individual steps alone is insufficient because a temporal suffix still follows
 execution order rather than dependence.
 
-Agent Effect Transactions (\aet) encode this separation. An AET records
-observed effects and their dependencies throughout one speculative trajectory.
-\system is the Linux implementation of AET. It captures hidden dependencies,
-tracks object versions, and reconstructs the workspace and agent context from
-the selected survivor set. It reuses a persistent speculative environment
-across tool calls.
+\system keeps one speculative environment across tool calls while recording
+their observed effects and dependencies. When a step fails, it selects the
+affected steps, tracks the object versions needed to remove them, and
+reconstructs the workspace and agent context from the same survivor set.
 
 We implemented \system on Linux with dependency capture, object-aware
 historical reconstruction, fail-closed alias handling, and conversation
@@ -144,15 +140,12 @@ isolation cost cannot recover valid work once a coarse rollback boundary has
 discarded it. We evaluate the prevalence and end-to-end benefit of this
 opportunity separately from the controlled recovery mechanism.
 
-This paper makes four contributions:
+This paper makes three contributions:
 \begin{itemize}
   \item We identify the recovery-unit mismatch in stateful coding-agent
         trajectories and characterize the limits of fixed coarse boundaries.
-  \item We introduce \aet, separating trajectory-wide speculation from
-        dependency-selected recovery over versioned effects.
-  \item We implement \aet in \system with dependency capture and object-aware
-        reconstruction, applying the same survivor set to the workspace and
-        agent-visible context.
+  \item We build \system to recover dependency-selected effects while keeping
+        the workspace and agent-visible context aligned.
   \item We evaluate \system across recovery correctness, retained work,
         runtime, replay cost, object identity, and context consistency.
 \end{itemize}
@@ -288,9 +281,9 @@ dependency-defined recovery unit within one trajectory.
 \label{sec:motivation}
 
 Recovery mechanisms inherit their rollback boundaries from the execution
-substrate.  We first examine what state each boundary can select.  We then use
-a shared multi-turn microbenchmark to measure the valid work each boundary
-sacrifices after a crash.
+substrate. We first examine what state each boundary can select. A shared
+multi-turn microbenchmark measures the valid work each boundary sacrifices
+after a crash, followed by an audit of opportunities in native agent traces.
 
 Artifact availability prevents a complete implementation-to-implementation
 comparison. We replay the shared cases through pinned artifacts for \trycmd,
@@ -336,22 +329,46 @@ corrupted state.  The \emph{ideal oracle} removes only the failed step and the
 steps that depend on it, preserving all unaffected work.  The oracle represents
 the desired recovered state without prescribing how to discover it.
 
+\subsection{Methodology}
+\label{sec:motivation-methodology}
+
+\textbf{Controlled cases.}
+We use one filesystem-effect microbenchmark family. A turn contains 16 tool
+calls, each represented by one recoverable ledger step; a branch contains one
+to ten turns. The generator varies turn count, fault position, dependency
+value, graph shape, and interleaving. We analyze 400 paired manifests: 100
+vary task length, 90 vary fault position, and 210 vary dependency value. Every
+policy receives the same manifest and fault root in each paired case.
+
+The generated dependencies identify the failed root and every step that
+depends on it. Recovery is complete only if it removes all these affected
+steps. Among complete policies, collateral cost counts removed steps outside
+this set. We also attribute each step a deterministic token weight to compare
+the amount of useful work discarded; this weight is not billed model usage or
+measured replay. We replay all 400 manifests through \trycmd, BranchFS,
+YoloFS, and Waypoint to compare recovered states, not cross-environment
+latency. The first two observations use this shared population.
+
+\textbf{Native traces.}
+For the third observation, we inspect fault-free SWE-agent runs on SWE-Bench
+and Terminal-Bench. We include complete traces regardless of verifier outcome;
+an unsuccessful task attempt still supplies observed tool steps. We treat each
+workspace-mutating step with a later step as a hypothetical fault root. The
+analysis connects accesses to the last preceding writer of
+each included workspace path. Opaque agent-context steps conservatively link
+earlier observations to later actions. We compare the resulting dependent
+steps with the temporal suffix that would be removed from the root onward.
+
+We retain tasks and roots with zero observed opportunity in the denominators,
+and report both per-task incidence and per-root counts. A dependency edge
+spanning at least five turns is a descriptive slice, not a condition for an
+opportunity: even a short dependency can leave independent work inside a
+rollback boundary. This path-level counterfactual excludes some build artifacts
+and unobserved state. It injects no crash, does not certify that apparently
+independent steps are independent through agent context, and measures no
+replay tokens.
+
 \subsection{Analyzing Recovery Overheads}
-
-\textbf{Methodology.}
-We use one filesystem-effect microbenchmark family.  A turn contains 16 tool
-calls, each represented by one recoverable ledger step, and a branch contains
-between one and ten turns.  The generator controls turn count, fault position,
-dependency value, graph shape, and interleaving.  Every policy in a paired case
-receives the same manifest and fault root.
-
-We analyze 400 paired manifests: 100 vary task length, 90 vary fault position,
-and 210 vary dependency value.  All three observations below use this same
-400-case population.  We
-measure \emph{recovery completeness} as the fraction of affected effects
-removed and \emph{collateral cost} as valid independent work discarded. We also
-replay all 400 manifests through \trycmd, BranchFS, YoloFS, and Waypoint. These
-artifact runs report recovered state, not cross-environment latency.
 
 Figure~\ref{fig:motivation-coarse-waste} exposes the controlled scaling
 behavior.  Its plots retain only policies that remove every affected effect.
@@ -456,7 +473,7 @@ aborts can reduce mechanism overhead, but they cannot represent a non-prefix
 survivor state. Eliminating this waste requires selecting recovery state by
 dependencies rather than by execution time.
 
-This result locates the first granularity gap. Mechanisms that preserve a
+This result locates a granularity gap. Mechanisms that preserve a
 long-running agent workspace recover at a turn, checkpoint, branch, or session
 boundary. Command-scoped semisolates expose one call's effects but end the
 speculative unit at that call. A long-lived runtime must instead retain the
@@ -479,45 +496,47 @@ is necessary, but the next observation shows that it is not sufficient.
   \label{fig:motivation-dependency}
 \end{figure}
 
-\textbf{Observation \#3: Changing the coarse boundary shifts waste rather than
-eliminating it.}
-No fixed checkpoint or temporal boundary is best across workload structures.
+\textbf{Observation \#3: Long-range dependence alone does not imply a large
+recovery opportunity.}
+We next inspect fault-free agent trajectories to test whether the structural
+opportunity constructed above appears in real executions. This analysis
+treats each observed workspace write as a hypothetical fault root; it does not
+inject a crash or measure replay tokens. We use SWE-agent because the current
+Codex CLI exporter groups its entire execution into one turn, preventing a
+cross-turn comparison.
 
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\linewidth]{FIG-Motivation-Boundary-Crossover.pdf}
-  \caption{\textbf{No fixed coarse recovery boundary dominates.}
-  \small\emph{Both plots reuse the same 400 paired manifests as the preceding
-  figures.  (a) The lower-waste policy changes across the task-length,
-  fault-position, and dependency-value slices.  (b) A fixed checkpoint or
-  temporal boundary discards more useful token weight than choosing the better
-  coarse boundary separately for each case.  Token weight is deterministic
-  work attribution, not billed model usage.}}
-  \label{fig:motivation-boundary-crossover}
+  \includegraphics[width=\linewidth]{FIG-Motivation-Native-Opportunity.pdf}
+  \caption{\textbf{Observed recovery opportunities in native SWE-agent traces.}
+  \small\emph{This interim full-sweep snapshot contains 189 complete SWE-Bench
+  and 54 complete Terminal-Bench traces, including failed task attempts. A long edge spans at
+  least five turns; an interleaved write lies outside the observed dependency
+  closure but between affected steps. Panel (b) considers 236 and 101
+  hypothetical write-root candidates, respectively. These are observed-path
+  counterfactuals, not certified independent work or measured replay cost.}}
+  \label{fig:motivation-native-opportunity}
 \end{figure}
 
-Figure~\ref{fig:motivation-boundary-crossover} compares them on the same 400
-paired manifests. The turn checkpoint discards less useful token weight in 139
-cases, temporal-step recovery does so in 251, and the policies tie in 10. The
-direction reverses across controlled slices. Turn checkpoint wins 60 of 100
-task-length cases and 60 of 90 fault-position cases. Temporal-step recovery
-wins 191 of 210 dependency-sweep cases.
+Figure~\ref{fig:motivation-native-opportunity} separates long-distance
+dependencies from independent work that a temporal suffix would discard.
+Cross-turn workspace dependencies occur in 171 of 189 complete SWE-Bench
+traces and 44 of 54 Terminal-Bench traces. Edges spanning at least five turns
+appear in 99 and 15 traces. Yet only 4 and 7 traces, respectively, contain an
+observed later independent write; just 3 and 6 place such a write inside the
+affected execution interval. Correspondingly, 231 of 236 SWE-Bench candidate
+fault roots and 84 of 101 Terminal-Bench roots have no additional independent
+write for temporal recovery to discard.
 
-Across all 400 cases, the turn checkpoint and temporal step discard means of
-1,677 and 2,120 useful token-weight units, respectively.  Selecting the better
-of these two coarse boundaries separately for each case, using post-hoc
-knowledge unavailable to a fixed policy, reduces the mean to 1,518.  Even the
-better fixed boundary therefore incurs 10.5\% more waste than this per-case
-coarse-policy envelope.  This envelope is an analytical comparison, not an
-implemented recovery mechanism. The crossover shows that choosing another
-fixed coarse boundary cannot consistently eliminate collateral deletion.
-
-Temporal-step recovery already uses the finest execution unit in this
-comparison, so denser checkpoints cannot resolve the crossover. The remaining
-problem is the selection rule: a temporal suffix still differs from the set of
-dependent steps. Recovery must therefore record tool steps individually and
-select among them by dependency.
+Thus real trajectories exhibit the temporal--dependency mismatch, but a long
+dependency span is not itself evidence of large avoidable loss. The observed
+opportunity is sparse and workload-dependent. Our path analysis excludes some
+build artifacts and cannot certify independence through agent context or
+unobserved process state; the figure bounds a possible opportunity rather
+than demonstrating realized savings. The controlled cases above isolate the
+mechanism, while real-agent recovery must establish its end-to-end benefit
+separately.
 
 
 
@@ -526,8 +545,9 @@ Together, the observations progressively narrow the required recovery model.
 Observation \#1 excludes policies that appear efficient by leaving invalid
 state behind and exposes substantial collateral loss within affected turns.
 Observation \#2 attributes that loss to disagreement between temporal order and
-dependencies. Observation \#3 shows that a step-level temporal suffix still
-only shifts the loss across workloads. The required recovery unit is therefore
+dependencies. Observation \#3 shows that long-range dependencies occur in
+native trajectories, while the independently writable work that could be
+retained varies sharply across tasks. The required recovery unit is therefore
 a dependency-selected set of tool-step effects, not another fixed interval in
 execution time.
 
@@ -538,8 +558,8 @@ The three observations rule out refining a temporal boundary as a complete
 solution. No recovery and root-only undo fail the correctness gate. Turn
 checkpoints and branch abort remove invalid state but discard valid work inside
 their boundaries. Temporal-step recovery uses a finer unit, yet still removes
-a suffix. The crossover result further shows that replacing one fixed boundary
-with another only moves the waste between workloads.
+a suffix. The native-trace audit shows that the possible benefit depends on
+whether independent work actually overlaps the affected execution interval.
 
 \textbf{Insight.}
 The observations show that a turn is too large to serve as the recovery unit.
@@ -556,60 +576,58 @@ discovery}, uncovering relations hidden inside shells, compilers, tests, and
 descendant processes; 2) \emph{object identity}, tracking objects through
 aliases, renames, replacements, and layered filesystems; and 3) \emph{selective
 reconstruction}, rebuilding a state that may never have existed at a checkpoint
-and aligning the agent-visible context with it. These requirements motivate the
-abstraction in the next section.
+and aligning the agent-visible context with it. The next section states the
+recovery model used to describe these requirements.
 
-\section{Agent Effect Transactions}
-\label{sec:aet}
+\section{Selective Recovery Model}
+\label{sec:recovery-model}
 
-The observations in Section~\ref{sec:motivation} motivate an abstraction that
-assigns different units to execution and recovery: an \emph{Agent Effect
-Transaction} (AET). An AET treats the trajectory as one speculative lifetime
-but selects recovery over a dependency-defined subset of versioned effects.
-Recovery applies the same selection to the workspace and agent-visible context.
-Section~\ref{sec:design} presents AgentTX, a Linux implementation of this
-abstraction.
+To describe the separation observed in Section~\ref{sec:motivation}, we model
+the trajectory as an \emph{Agent Effect Transaction} (AET). This notation gives
+execution and recovery different units: the trajectory remains speculative,
+while recovery selects a dependency-defined subset of versioned effects. The
+same selection applies to the workspace and agent-visible context.
+Section~\ref{sec:design} maps this model to Linux mechanisms in \system.
 
 \subsection{Overview and Design Principles}
 
-\begin{figure}[H]
+\begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{FIG-AgentTX-Overview.pdf}
-\caption{\textbf{AET separates trajectory-wide speculation from
-dependency-defined recovery.} \small\emph{Tool calls share one speculative
-view and an aligned message history. Observed effects form a dependency DAG;
-recovery removes the affected subgraph from both states while retaining
+\caption{\textbf{Execution and selective recovery in \system.}
+\small\emph{The agent executes tool calls against a shared overlay view.
+The runtime records their effects and dependencies, removes the failed step
+and its descendants from the workspace and agent context, and retains
 independent work.}}
 \label{fig:overview}
 \end{figure}
 
-\textbf{Transaction overview.}
-Figure~\ref{fig:overview} follows one trajectory across the workspace and model
-context. Tool calls execute in a shared speculative view, so each call observes
-earlier effects. Their requests and results remain associated with the ledger
-steps that produced them.
+\textbf{Execution and effect capture.}
+Figure~\ref{fig:overview} connects agent tool calls and context (left), the
+runtime (center), and the overlay filesystem (right). Before a call,
+\system snapshots the upper layer, then runs the command through \trycmd in
+the merged view. In the example, the merged view takes F1 and F3 from the
+lower layer while the upper layer updates F2 and adds F4. After the call, an upper-layer diff
+records writes and deletes; tracing records reads and failed lookups.
 
-\textbf{Recovery overview.}
-Each tool step contributes typed effects to a ledger. Producer--consumer edges
-connect steps across calls and form a dependency DAG. The failed step roots a
-transitive descendant set; temporally later steps outside that set remain
-eligible for retention.
-
-\textbf{Context overview.}
-Workspace rollback alone would leave the model reasoning from invalid tool
-results. Recovery therefore removes message spans associated with the recovery
-set and its context dependents, then resumes from the retained history.
+\textbf{Dependency-guided recovery.}
+The captured effects form a DAG of tool steps. In the figure, failed E3
+invalidates E4--E7, but later E8 remains on an independent path. \system
+rebuilds the overlay view without the invalid effects and removes their
+associated calls and results from the agent context. E8 and its context
+remain available. The separate \trycmd commit path publishes selected
+surviving files to the host; it does not determine the rollback set.
 
 \textbf{Design principles.}
 An AET spans the complete tool-call trajectory rather than one command or
 recovery attempt. It records dependencies from observed reads, absence,
 writes, and deletes rather than inferring them from command text. Recovery
 reconstructs object versions without the selected steps while preserving
-supported retained effects. The model-visible history is rebuilt from the same
+supported retained effects. The model-visible history follows the same
 survivor set.
 
 
-\subsection{AET State and Transitions}
+\subsection{Recovery State and Transitions}
 \label{sec:aet-model}
 
 \textbf{Scope.}
@@ -688,7 +706,7 @@ is associated with the object opened earlier only when observation supplies
 that relation. Otherwise, the effect remains unknown instead of receiving a
 guessed dependency. Selective recovery that requires an unresolved identity
 relation must fail closed and lies outside the recovery guarantee. The identity
-relation is part of the AET contract; Section~\ref{sec:design} describes how
+relation is part of the recovery model; Section~\ref{sec:design} describes how
 \system approximates it on Linux.
 
 \textbf{Recovery set.}
@@ -766,30 +784,18 @@ retained-effects manifest instead of an in-place message rewrite.
 \section{AgentTX Implementation}
 \label{sec:design}
 
-AgentTX realizes each AET state component with a Linux mechanism. A shared
+AgentTX maps each model component to a Linux mechanism. A shared
 OverlayFS view keeps the trajectory in $V$; effect capture constructs $L$; the
 version store and object catalog preserve $H$; a ledger-bound conversation log
 maintains $M$. Together, these mechanisms preserve trajectory-wide speculation
 while restricting rollback to a dependency-defined effect subgraph. We follow
-this path from execution to workspace and context recovery, then describe
-performance optimizations.
+this path from execution through fault localization to workspace and context
+recovery, then describe performance optimizations.
 
 \subsection{Runtime Architecture and Continuous Speculation}
 
-\begin{figure}[t]
-\centering
-\includegraphics[width=\linewidth]{FIG-Per-Call-Continuous-Speculation.png}
-\caption{\textbf{One tool call extends the shared speculative state.}
-\small\emph{A call executes in a four-directory OverlayFS view.  Complementary
-observers produce typed effects, AgentTX appends record $E_i$, and snapshot
-$V_i$ becomes historical input for later recovery.  DAG construction starts
-after this per-call record exists.}}
-\label{fig:continuous-speculation}
-\end{figure}
-
 \textbf{Workspace construction.}
-Figure~\ref{fig:continuous-speculation} shows the runtime path for one call
-$T_i$.  AgentTX selects the project baseline as the read-only
+For each tool call $T_i$, AgentTX selects the project baseline as the read-only
 \texttt{lowerdir}, creates the session's writable \texttt{upperdir}, and
 allocates the OverlayFS \texttt{workdir} and \texttt{merged} mount point.  The
 command runs against \texttt{merged}, not the host project.
@@ -870,13 +876,37 @@ materializer verifies it.  Bind mounts, external aliases, arbitrary generation
 changes, and general multi-object identity remain outside the contract.  An
 operation that requires one of these relations fails closed.
 
+\subsection{Fault Localization and Recovery Planning}
+
+\textbf{Failure observation.}
+A failed verifier establishes that the current view is invalid, but does not
+identify the faulty step. AgentTX records the failed check as a ledger step and
+uses its observed dependencies to find earlier active steps that changed state.
+The search excludes committed steps and, when available, steps before the last
+passing check. Dependency distance and diagnostic references rank candidates;
+neither constitutes proof that a candidate is the fault's origin.
+
+\textbf{Counterfactual checks.}
+For each candidate, AgentTX forks the speculative view, removes the candidate
+and its dependents, and reruns the same verifier in the fork. It can also test
+candidate groups to handle interacting faults. Among plans
+that pass within the probe budget, it selects one that discards the least
+active work, with conversation loss as a secondary cost. A passing check
+establishes a sufficient recovery plan for that verifier, not a unique root
+cause. If no plan passes, localization is inconclusive and the causal path
+does not change the live view. The real-workload causal evaluation disables
+optional coarse fallback so an inconclusive search cannot count as causal
+recovery.
+
 \subsection{Causal Reconstruction}
 
 \textbf{Recovery plan.}
-Given a failed root, AgentTX alternates ledger and conversation expansion until
-the recovery set reaches a fixed point. It collects objects written or deleted
-by that unified closure, expands known alias groups, and chooses the version
-preceding each object's earliest selected effect.
+AgentTX applies a verified plan to the live view only after counterfactual
+checks finish. For its selected root steps, it alternates ledger and
+conversation expansion until the recovery set reaches a fixed point. It
+collects objects written or deleted by that unified closure, expands known
+alias groups, and chooses the version preceding each object's earliest
+selected effect.
 
 \textbf{Retained-state check.}
 The runtime compares every target with active effects outside the closure.  A
@@ -917,7 +947,7 @@ state or process memory.
 A Python worker exchanges length-prefixed requests inside one semisolate.  This
 amortizes namespace and overlay setup across a long trajectory.  If the worker
 dies, the current request uses the one-shot path and the next request starts a
-new worker.  Worker reuse does not change AET semantics.
+new worker.  Worker reuse does not change recovery semantics.
 
 \textbf{Incremental history.}
 After the initial snapshot, AgentTX clones the previous snapshot and replays
@@ -1033,38 +1063,39 @@ ten-write predicate also succeeds in 50 of 50 full-system runs and zero of
 recovery-unit claim on controlled effect DAGs, not arbitrary repository
 failures or non-filesystem effects.
 
-We also examine the model-token cost of the 400 multi-turn manifests used in
-Section~\ref{sec:motivation}, with three repetitions per manifest.  This
-separate run uses GPT-5.6 Luna at maximum reasoning effort.  AgentTX has
-measurements for all 1,200 cells; each control has 314--367 measured cells,
-concentrated in the task-length sweep.  Figure~\ref{fig:system-token-projection}
-shows these measurements and a projection for the missing control cells.
-For each control, we scale the measured AgentTX tokens of a missing cell by
-that control's aggregate ratio on paired measured cells.  Deterministic
-resampling of observed ratios supplies case-level variation; it does not
-measure a new dependency or fault-position effect.
+We also examine model-token cost on the same 400 multi-turn manifests, with
+three repetitions per manifest and policy. This separate run uses GPT-5.6
+Luna at maximum reasoning effort. All seven policies have measurements for
+their 1,200 cells. Figure~\ref{fig:system-token-measured} includes every
+recorded attempt, including failed runs; a failed run with no reported model
+usage contributes zero rather than an imputed cost. Completion requires both
+the final-state verifier and the replay-operation protocol.
 
 \begin{figure}[!t]
   \centering
-  \includegraphics[width=\linewidth]{FIG-System-Token-Projection.pdf}
-  \caption{\textbf{Measured and projected model-token cost on the common
-  microbenchmark.} \small\emph{Each point averages 30 case--repetition
-  cells. Task length is measured for every policy; the fault-position panel
-  combines measurements and projections, and control-policy curves in the
-  dependency panel are projected. Projections use paired measured token
-  ratios with bounded empirical case-level variation.}}
-  \label{fig:system-token-projection}
+  \includegraphics[width=\linewidth]{FIG-System-Token-Measured.pdf}
+  \caption{\textbf{Measured model-token cost on the common microbenchmark.}
+  \small\emph{Each point averages 30 case--repetition cells, including
+  failures, across the same manifests. Zero-usage failures remain zero in the
+  charged-token mean; the curves must be read with completion rates in the
+  text. The ideal oracle receives the fault location without running a
+  localizer.}}
+  \label{fig:system-token-measured}
 \end{figure}
 
-The fully measured task-length slice separates the recovery boundaries:
-AgentTX and the ideal oracle stay close to clean execution, whereas coarse
-rollback and no rollback use substantially more tokens as trajectories grow.
-Across the complete projected grid, the estimated totals are 0.81 billion
-tokens for AgentTX, 0.83 billion for ideal, 4.54 billion for turn checkpoint,
-and 7.12 billion for temporal step.  These totals illustrate the possible
-cost scale, not a measured full-grid ranking.  In particular, the projected
-dependency curves cannot establish policy sensitivity to dependency value,
-and no success rate is inferred for unrun cells.
+Across all cells, clean execution averages 123K tokens, the ideal oracle 606K,
+and AgentTX 676K. The checkpoint, temporal-step, whole-branch, and no-rollback
+controls average 1.14M, 1.62M, 2.36M, and 2.71M tokens. These are charged
+means, not cost per successful recovery. AgentTX completes 1,193 of 1,200
+cells, compared with 1,191 for ideal, 1,161 for checkpoint, 705 for temporal,
+441 for whole branch, and 1,162 for no rollback. In particular, temporal and
+whole-branch runs often reach a correct final state but fail the operation
+protocol; treating their lower-usage failures as efficient recoveries would
+confound cost with completion. On cells where both policies complete, AgentTX
+uses 531K fewer tokens than checkpoint on average (1,154 pairs) and 1.01M
+fewer than temporal step (699 pairs). These paired comparisons avoid mixing
+different completed-case populations, but do not price an unsuccessful run's
+eventual retry.
 
 \subsection{RQ2: Runtime Cost and Scaling}
 \label{sec:eval-runtime}
@@ -1397,7 +1428,7 @@ OverlayFS copy-up.
 
 \textbf{What state is outside the transaction?}
 The current AgentTX prototype places workspace-local filesystem effects and
-ledger-bound tool-call history inside its AET. Hidden provider reasoning,
+ledger-bound tool-call history inside its transaction state. Hidden provider reasoning,
 network requests, emails, package registries, cloud control planes, process
 memory, and terminal state remain outside the guarantee. These effects may be
 irreversible or require subsystem-specific compensation; systems that capture
@@ -1455,8 +1486,8 @@ improve agent/user control~\cite{yolofs}.  Its filesystem mediation and
 permission interface are broader than \system's current substrate.  BranchFS
 provides nested copy-on-write branch contexts with atomic leaf commit/abort and
 first-commit-wins coordination~\cite{branchfs}. These systems select snapshots
-or branches. AgentTX implements the AET abstraction, whose recovery unit is a
-dependency-defined effect subgraph inside one evolving trajectory.
+or branches. AgentTX instead selects a dependency-defined effect subgraph
+inside one evolving trajectory.
 
 \textbf{Checkpoint and restore.}
 Waypoint combines filesystem deltas with process, memory, shell, and terminal
@@ -1496,11 +1527,10 @@ the reconstructed workspace.
 \section{Conclusion}
 
 Long-running coding agents need a speculation unit larger than one command and
-a recovery unit smaller than one session. An Agent Effect Transaction keeps
-the trajectory speculative but recovers a dependency-defined subgraph of
-versioned effects. \system realizes this abstraction with effect capture,
-object-aware history, selective workspace reconstruction, and context-aligned
-rollback.
+a recovery unit smaller than one session. \system keeps the trajectory
+speculative while recovering a dependency-defined subgraph of versioned
+effects. It combines effect capture, object-aware history, selective workspace
+reconstruction, and context-aligned rollback.
 
 Across 144 controlled runs, it retained all independent work and removed all
 invalid descendants. At 48 document entries, it avoided 1,424.7 replay tokens

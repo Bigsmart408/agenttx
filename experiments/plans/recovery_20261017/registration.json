@@ -1,0 +1,26 @@
+{
+  "schema": "agenttx-recovery-campaign-registration-v1",
+  "status": "registered_not_run",
+  "system_micro_cells": 8400,
+  "pilot_cells": 84,
+  "official_cells": 5410,
+  "pilot_selection": "For each registered family, choose indices 0, floor(n/3), floor(2n/3), n-1 in canonical generator order; seven policies, one repeat. Diagnostic only.",
+  "source_manifest_sha256": "0ff4325f574e597d66d1b938ff3f6312ee7131efeaaa48918b04a3ad8081c323",
+  "historical_model": "gpt-5.6-luna",
+  "reasoning_effort": "max",
+  "model_availability_verified": false,
+  "official_count_caps": null,
+  "localization_protocol": "causal_localizer_coarse_hidden_oracle_registered_truth_v1",
+  "gates_before_launch": [
+    "Complete the actual runtime+model system runner: bench_intra_turn_replay currently edits artifacts directly and is not a validated full-runtime measurement.",
+    "Pin current model access, prompt text/hash, fault schedule, token/wall budget and usage collection for both harnesses.",
+    "Resolve every official task version and evaluator image ID; old task IDs are a scope list, not a complete frozen dataset.",
+    "Implement image-native formal Terminal-Bench agent path; retain host-projected rejection guard.",
+    "Pass backend correctness gates and record the validated environment lock."
+  ],
+  "files": {
+    "system_micro_cells.csv": "9e93d5e03f9e84071c783c24d5416feedfaee416340a7163f4e37197c8817f0f",
+    "system_micro_pilot_cells.csv": "b1641defd87a7e60a46117e19f22f24b033b8ae7f85171de3f11882709eabbf2",
+    "official_cells.csv": "017c4e5b0596a2e25a6212709f5c7488f1aebe54c8ea516471872eeff9a4e236"
+  }
+}

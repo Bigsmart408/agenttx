@@ -1,0 +1,195 @@
+{
+  "checked_at": "2026-10-17T10:54:56.584009+08:00",
+  "registered": {
+    "system_micro_pilot_cells.csv": {
+      "rows": 84,
+      "states": {
+        "registered_not_run": 84
+      },
+      "has_harness": false,
+      "sha256": "b1641defd87a7e60a46117e19f22f24b033b8ae7f85171de3f11882709eabbf2"
+    },
+    "system_micro_cells.csv": {
+      "rows": 8400,
+      "states": {
+        "registered_not_run": 8400
+      },
+      "has_harness": false,
+      "sha256": "9e93d5e03f9e84071c783c24d5416feedfaee416340a7163f4e37197c8817f0f"
+    },
+    "official_cells.csv": {
+      "rows": 5410,
+      "states": {
+        "registered_not_run": 5410
+      },
+      "has_harness": true,
+      "sha256": "017c4e5b0596a2e25a6212709f5c7488f1aebe54c8ea516471872eeff9a4e236",
+      "by_harness_suite": {
+        "codex/swe": 1500,
+        "sweagent/swe": 1500,
+        "codex/tb": 1205,
+        "sweagent/tb": 1205
+      }
+    }
+  },
+  "validation_cohorts": {
+    "protocol_validation_20261017": {
+      "attempts": 29,
+      "by_harness_suite_category": {
+        "codex/canonical_micro/passed": 6,
+        "codex/canonical_micro/model_wall_timeout": 1,
+        "sweagent/canonical_micro/passed": 8,
+        "codex/terminal_bench/passed": 6,
+        "sweagent/terminal_bench/passed": 5,
+        "sweagent/terminal_bench/harness_infrastructure_error": 3
+      },
+      "formal_eligible": false,
+      "sha256": "d5388ef2c5d2b4864f602c69091a84fc6266e450d6e59cddbb552f43fbbfe1f6"
+    },
+    "reproducibility_20261017": {
+      "attempts": 50,
+      "by_harness_suite_category": {
+        "codex/canonical_micro/passed": 14,
+        "sweagent/canonical_micro/passed": 16,
+        "codex/terminal_bench/passed": 10,
+        "sweagent/terminal_bench/passed": 9,
+        "sweagent/terminal_bench/task_or_protocol_failed": 1
+      },
+      "formal_eligible": false,
+      "sha256": "750aaf9b01297e98da3147aa3784d9ab81575e8c1f6397f5fd5c22969dae5c16"
+    }
+  },
+  "historical_audit": {
+    "path": "/home/bfq/agenttx-recovery-20261016/reports/official_cell_status_summary.json",
+    "sha256": "eb07cc873fbd0a0b40201826f401024ded5b50d216c168acfabbae1c92702351",
+    "counts": {
+      "codex_luna_max_realworld_5mode_full_20260930": {
+        "expected": 2705,
+        "attempted": 2705,
+        "completed": 2444,
+        "statuses": {
+          "swe/completed_success": 1292,
+          "swe/completed_task_failure": 197,
+          "swe/environment_error": 8,
+          "swe/terminal_timeout": 3,
+          "tb/completed_success": 427,
+          "tb/completed_task_failure": 528,
+          "tb/environment_error": 155,
+          "tb/terminal_timeout": 67,
+          "tb/unfinished_or_error": 28
+        },
+        "recorded_auto_localize": false,
+        "causal_swe_localization": {
+          "('agenttx_localizer', 'passed')": 300
+        }
+      },
+      "sweagent_luna_max_swe_fair_20261012": {
+        "expected": 1500,
+        "attempted": 1429,
+        "completed": 1237,
+        "statuses": {
+          "swe/completed_success": 1053,
+          "swe/completed_task_failure": 184,
+          "swe/environment_error": 175,
+          "swe/never_attempted": 71,
+          "swe/terminal_timeout": 5,
+          "swe/unfinished_or_error": 12
+        },
+        "recorded_auto_localize": false,
+        "causal_swe_localization": {
+          "('agenttx_localizer', 'passed')": 215,
+          "('none', '')": 63
+        }
+      }
+    }
+  },
+  "note": "Completion and task success are distinct. Validation cohorts do not fill the frozen formal campaign. Microbenchmark registration lacks harness dimension.",
+  "active_campaign": {
+    "plan": "experiments/plans/stratified_pilot_20261017/registration.json",
+    "schema": "agenttx.stratified-pilot-summary/v1",
+    "checked_at": "2026-10-17T03:17:42.057498+00:00",
+    "remote_updated_at": "2026-10-17T03:16:21.253683+00:00",
+    "coordinator_pid": 2547424,
+    "workers": 8,
+    "planned_runtime_gates": 84,
+    "planned_model_cells": 168,
+    "counts": {
+      "runtime_gate": {
+        "passed": 60,
+        "interrupted_by_user": 8,
+        "deferred_until_environment_ready": 16
+      },
+      "model_pilot": {
+        "deferred_until_environment_ready": 168
+      }
+    },
+    "formal_eligible": false,
+    "execution_finished": false,
+    "formal_completed_cells": 0,
+    "paused_for_environment": true,
+    "by_harness": {
+      "codex": {
+        "deferred_until_environment_ready": 84
+      },
+      "sweagent": {
+        "deferred_until_environment_ready": 84
+      }
+    },
+    "literal_credential_hits": 0
+  },
+  "dual_harness_full_micro_target": 16800,
+  "environment_preparation": {
+    "checked_at": "2026-10-17T07:51:26.536589+00:00",
+    "host": "r760-ssd",
+    "code_root": "/home/bfq/agenttx-recovery-20261016/project",
+    "docker_host": "unix:///run/agenttx-docker/docker.sock",
+    "docker_root": "/mnt/data/agenttx-runtime/docker",
+    "cache": "/mnt/data/agenttx-runtime/cache",
+    "results": "/mnt/data/agenttx-runtime/results",
+    "image_stage_counts": {
+      "image_ready": 121,
+      "preparing": 2,
+      "pending": 177
+    },
+    "active_tasks": [
+      {
+        "task": "matplotlib__matplotlib-22711",
+        "started_at": "2026-10-17T07:41:59.552228+00:00"
+      },
+      {
+        "task": "mwaskom__seaborn-2848",
+        "started_at": "2026-10-17T07:42:01.272959+00:00"
+      }
+    ],
+    "image_errors": [],
+    "disk_free_gib": 1200.3,
+    "tb_source": {
+      "status": "task_sources_hydrated",
+      "host": "r760-ssd",
+      "checked_at": "2026-10-17T07:40:27.223206+00:00",
+      "commit": "d28711d0da2675d0bb1d56de45ae5df6082438a3",
+      "files_verified": 1818,
+      "cache": "/mnt/data/agenttx-runtime/cache/terminal_bench/terminal-bench-1-d28711d0da26",
+      "download": {
+        "url": "https://gh-proxy.com/https://github.com/harbor-framework/terminal-bench-1/archive/d28711d0da2675d0bb1d56de45ae5df6082438a3.tar.gz",
+        "bytes": 131856834,
+        "sha256": "7850bccaa5ff25ff11cb88dcebedceea49136e362bb80c9639deffeabd339081",
+        "revision": null
+      },
+      "agent_solution_files_excluded": true,
+      "reused_from": "/mnt/data/agenttx-runtime/validation/environment-preparation-local-20261017-r2",
+      "all_files_reverified": true
+    },
+    "automatic_model_launch": false,
+    "model_experiments_started": 0,
+    "previous_environment_cohort": "/mnt/data/agenttx-runtime/validation/environment-preparation-local-20261017-r2",
+    "previous_state_counts": {
+      "image_ready": 121,
+      "environment_error": 9,
+      "preparing": 2,
+      "pending": 168
+    },
+    "full_task_environments_ready": false,
+    "image_stage_finished": false
+  }
+}
