@@ -139,7 +139,7 @@
   },
   "dual_harness_full_micro_target": 16800,
   "environment_preparation": {
-    "checked_at": "2026-10-17T07:51:26.536589+00:00",
+    "checked_at": "2026-10-17T07:56:26.550278+00:00",
     "host": "r760-ssd",
     "code_root": "/home/bfq/agenttx-recovery-20261016/project",
     "docker_host": "unix:///run/agenttx-docker/docker.sock",
@@ -162,7 +162,7 @@
       }
     ],
     "image_errors": [],
-    "disk_free_gib": 1200.3,
+    "disk_free_gib": 1178.2,
     "tb_source": {
       "status": "task_sources_hydrated",
       "host": "r760-ssd",
