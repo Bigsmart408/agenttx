@@ -1,4 +1,0 @@
-mode,trace_reads,trace_backend,workload,steps,repeats,samples,per_step_ms_mean,per_step_ms_p50,per_step_ms_p95,reads_captured,negatives_captured,capture_expected,step_retries
-off,False,auto,read,12,2,24,17.701,2.987,178.926,0,0,0,0
-strace,True,strace,read,12,2,24,25.598,11.669,183.293,24,24,24,0
-bpf,True,bpf,read,12,2,24,61.387,26.294,413.544,24,24,24,0

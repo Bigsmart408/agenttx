@@ -1,3 +1,0 @@
-mode,trace_reads,steps,repeats,per_step_ms_mean,per_step_ms_stdev
-trace_off,False,20,3,110.18627514955975,2.3608561914155657
-trace_on,True,20,3,118.06887861651678,2.2101693970491088
