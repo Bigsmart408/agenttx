@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import signal
 import shlex
@@ -147,6 +148,7 @@ def load_agent_config(
     profile: CodexGPTProfile,
     swe_agent_root: Path = DEFAULT_SWE_AGENT_ROOT,
     max_model_calls: int = 30,
+    session_timeout_s: Optional[float] = None,
 ) -> tuple[DefaultAgentConfig, str]:
     """Apply the Codex GPT profile to SWEAgent's native model config."""
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
@@ -177,9 +179,23 @@ def load_agent_config(
         }
     )
     agent_data["model"] = model_data
+    if session_timeout_s is not None and session_timeout_s > 0:
+        # Let the registered outer session deadline govern long builds. The
+        # upstream defaults (30s per command / 1800s cumulative) otherwise
+        # terminate legitimate work before that deadline.
+        tools=dict(agent_data.get('tools') or {})
+        tools['execution_timeout']=math.ceil(session_timeout_s)
+        tools['total_execution_timeout']=math.ceil(session_timeout_s)+1
+        agent_data['tools']=tools
     config = DefaultAgentConfig.model_validate(agent_data)
     canonical = json.dumps(config.model_dump(mode="json"), sort_keys=True)
     return config, hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def sweagent_exit_returncode(summary: str) -> int:
+    if 'exit_total_execution_time' in str(summary):
+        return 124
+    return 0 if str(summary) == 'submitted' else 1
 
 
 def _cleanup_sweagent_runtime() -> None:
@@ -409,6 +425,7 @@ class SWEAgentNativeWorkloadHarness:
             profile=profile,
             swe_agent_root=swe_agent_root,
             max_model_calls=max_model_calls,
+            session_timeout_s=timeout_s,
         )
         # The config stores only the environment variable name, never this value.
         os.environ["OPENAI_API_KEY"] = profile.api_key
@@ -419,6 +436,10 @@ class SWEAgentNativeWorkloadHarness:
             "harness_backend": self.name,
             "native_adapter": "SWEAgentNativeAdapter",
             "sweagent_config_hash": self.config_hash,
+            "tool_limits": {
+                "execution_timeout": self.config.tools.execution_timeout,
+                "total_execution_timeout": self.config.tools.total_execution_timeout,
+            },
             "codex_gpt_profile": self.profile.public_dict(),
             "gpt5_protocol_mapping": {
                 "temperature": 1.0,
@@ -665,7 +686,7 @@ class SWEAgentNativeWorkloadHarness:
             return SWEAgentHarnessResult(
                 harness=self.name,
                 model=self.model,
-                returncode=0 if submitted else 1,
+                returncode=sweagent_exit_returncode(result.summary),
                 duration_s=time.perf_counter() - started,
                 stderr="" if submitted else f"SWEAgent exit_status={result.summary}",
                 prompt_tokens=result.prompt_tokens,
@@ -678,6 +699,7 @@ class SWEAgentNativeWorkloadHarness:
                     "harness_backend": self.name,
                     "sweagent_model": self.model,
                     "sweagent_config_hash": self.config_hash,
+                    "tool_limits": self.public_config['tool_limits'],
                     "sweagent_exit_status": result.summary,
                     "sweagent_model_calls": result.model_calls,
                     "native_adapter": "SWEAgentNativeAdapter",

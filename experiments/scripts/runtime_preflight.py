@@ -43,7 +43,7 @@ def runtime_preflight(root: Optional[Path] = None) -> Dict[str, object]:
             "detail": "not attempted because try_binary is unavailable",
         })
     else:
-        with tempfile.TemporaryDirectory(prefix="agenttx-preflight-", dir="/tmp") as temp:
+        with tempfile.TemporaryDirectory(prefix="agenttx-preflight-", dir=os.environ.get('TMPDIR','/tmp')) as temp:
             sandbox = Path(temp) / "sandbox"
             sandbox.mkdir()
             try:

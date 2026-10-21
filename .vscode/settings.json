@@ -1,0 +1,19 @@
+{
+    "search.followSymlinks": false,
+    "search.useIgnoreFiles": true,
+    "search.exclude": {
+        "**/experiments/results": true,
+        "**/experiments/cache": true,
+        "**/experiments/logs": true
+    },
+    "files.watcherExclude": {
+        "**/experiments/results/**": true,
+        "**/experiments/cache/**": true,
+        "**/experiments/logs/**": true
+    },
+    "files.exclude": {
+        "experiments/results": true,
+        "experiments/cache": true,
+        "experiments/logs": true
+    }
+}

@@ -604,14 +604,6 @@ def prepare_workspace_runtime(workdir: Path, instance: dict, python: str) -> Non
         raise RuntimeError(detail)
 
 
-def _strip_live_agent_scratch(workdir: Path) -> None:
-    """Drop agent-only dirs so they are not copied into the official eval image."""
-    for name in (".venv", ".codex", ".cache", ".tmp"):
-        path = Path(workdir) / name
-        if path.is_dir():
-            shutil.rmtree(path, ignore_errors=True)
-
-
 def _urlopen(url: str, timeout: int = 60):
     req = urllib.request.Request(url, headers={"User-Agent": "agenttx"})
     last = None
@@ -847,9 +839,14 @@ def test_command(task: SWETask, instance: dict, python: str = sys.executable) ->
             f"{_quoted(django_test_labels(names, instance))}"
         )
     if repo == "sympy/sympy":
+        # bin/test -k consumes all following non-option arguments. Files must
+        # precede it, otherwise they become keywords and selection scans the
+        # entire repository. Keep every published FAIL_TO_PASS function.
+        keywords = list(dict.fromkeys(str(n).rsplit("::", 1)[-1].split("[", 1)[0] for n in names))
+        selection = f" -k {_quoted(keywords)}" if keywords else ""
         return (
             f"{runtime_env} PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. {py} bin/test -C --verbose "
-            f"{_quoted(_sympy_test_targets(instance, names))}"
+            f"{_quoted(_sympy_test_targets(instance, names))}{selection}"
         )
     pythonpath = task.pythonpath
     if pythonpath == "auto":
@@ -1110,10 +1107,39 @@ def _verify_tests_docker(
     image = swe_eval_image(task.instance_id)
     name = _docker_container_name(task.instance_id)
     cmd = test_command(task, instance, DOCKER_TESTBED_PYTHON)
-    _strip_live_agent_scratch(workdir)
+    fixture_name = None
+    # Exclude runtime scratch from the archive below. The live agent still
+    # needs its workspace interpreter and temporary files after verification.
     try:
         runtime = instance.get("_agenttx_eval_runtime")
         image = runtime["image_id"] if runtime else ensure_eval_image(task.instance_id)
+        fixture_image = os.environ.get("AGENTTX_HTTPBIN_IMAGE") if instance.get("repo") == "psf/requests" else None
+        network = "none"
+        if fixture_image:
+            if not fixture_image.startswith("sha256:"):
+                raise RuntimeError("HTTP fixture must be pinned to a local image ID")
+            fixture_name = name + "-httpbin"
+            fixture = subprocess.run(
+                ["docker", "run", "-d", "--pull=never", "--network=none", "--name", fixture_name, fixture_image],
+                capture_output=True, text=True, timeout=30,
+            )
+            if fixture.returncode:
+                raise RuntimeError("HTTP fixture start failed: " + (fixture.stderr or fixture.stdout)[-1500:])
+            health = subprocess.run(
+                ["docker", "exec", fixture_name, "/opt/agenttx-httpbin/bin/python", "-c",
+                 "import urllib.request,time\n"
+                 "for attempt in range(50):\n"
+                 " try:\n"
+                 "  assert urllib.request.urlopen('http://127.0.0.1:8000/get',timeout=1).status==200;break\n"
+                 " except Exception:\n"
+                 "  if attempt==49:raise\n"
+                 "  time.sleep(0.1)"],
+                capture_output=True, text=True, timeout=20,
+            )
+            if health.returncode:
+                raise RuntimeError("HTTP fixture readiness failed: " + (health.stderr or health.stdout)[-1500:])
+            network = "container:" + fixture_name
+            cmd = "HTTPBIN_URL=http://127.0.0.1:8000/ " + cmd
         subprocess.run(
             ["docker", "rm", "-f", name],
             stdout=subprocess.DEVNULL,
@@ -1125,7 +1151,7 @@ def _verify_tests_docker(
                 "docker",
                 "create",
                 "--pull=never",
-                "--network=none",
+                "--network=" + network,
                 "--name",
                 name,
                 "--workdir",
@@ -1152,6 +1178,17 @@ def _verify_tests_docker(
         )
         if started.returncode != 0:
             raise RuntimeError((started.stderr or started.stdout or "docker start failed")[-2000:])
+        if fixture_image and task.instance_id == "psf__requests-2148":
+            # Docker forbids --add-host with --network=container:<fixture>.
+            # Keep the official cross-host redirect test unchanged and route
+            # its unrelated HTTP origin to the isolated fixture's port 80.
+            origin = subprocess.run(
+                ["docker", "exec", name, "sh", "-c",
+                 "printf '\\n127.0.0.1 www.google.co.uk\\n' >> /etc/hosts"],
+                capture_output=True, text=True, timeout=20,
+            )
+            if origin.returncode:
+                raise RuntimeError("offline redirect origin setup failed: " + (origin.stderr or origin.stdout)[-1500:])
         archive = subprocess.Popen(
             [
                 "tar",
@@ -1220,6 +1257,7 @@ def _verify_tests_docker(
             "docker_image": image,
             "test_patch_applied": bool(apply_test_patch and instance.get("test_patch")),
             "verifier_runtime_python": (runtime or {}).get("python_version", ""),
+            "http_fixture_image": fixture_image,
         }
     except subprocess.TimeoutExpired:
         return {
@@ -1246,6 +1284,8 @@ def _verify_tests_docker(
             stderr=subprocess.DEVNULL,
             check=False,
         )
+        if fixture_name:
+            subprocess.run(["docker", "rm", "-f", fixture_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
 
 
 _REFERENCE_VERIFY_CACHE: Dict[str, dict] = {}

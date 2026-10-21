@@ -1,6 +1,6 @@
 """Shared/incremental semisolate pool backed by binpash/try -N DIR."""
 from __future__ import annotations
-import base64, hashlib, json, os, re, shlex, shutil, signal, stat, struct, subprocess, tempfile, time, threading
+import base64, hashlib, json, os, pwd, re, shlex, shutil, signal, stat, struct, subprocess, tempfile, time, threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Optional, Sequence, Tuple
@@ -248,6 +248,7 @@ class SharedSemisolate:
     _cached_digests: Dict[str, str] = field(default_factory=dict)
     _cmd_script: Optional[Path] = None
     persistent_worker: bool = True
+    tool_user: Optional[str] = None
     _worker_process: Optional[subprocess.Popen] = None
     _worker_script: Optional[Path] = None
     _pending_snapshot_changes: Optional[List[str]] = None
@@ -266,6 +267,12 @@ class SharedSemisolate:
 
     def __post_init__(self) -> None:
         self.workspace = Path(self.workspace).resolve()
+        if self.tool_user is not None:
+            if os.geteuid() != 0:
+                raise RuntimeError('tool_user requires a root namespace coordinator')
+            account = pwd.getpwnam(self.tool_user)
+            if account.pw_uid == 0:
+                raise ValueError('tool_user must be an original non-root task account')
         self.try_bin = Path(self.try_bin)
         if self.trace_backend not in _TRACE_BACKENDS:
             raise ValueError(
@@ -661,8 +668,8 @@ class SharedSemisolate:
                 ):
                     continue
 
-                # OverlayFS uses character devices as whiteouts on this VM. Some
-                # union implementations use .wh.<name> files instead.
+                # Only character device 0/0 is an OverlayFS whiteout. Task
+                # root filesystems can also contain real device nodes.
                 if entry.name == ".wh..wh..opq":
                     logical = Path("/" + rel.parent.as_posix())
                     out[str(logical)] = "<agenttx:opaque-directory>"
@@ -671,7 +678,7 @@ class SharedSemisolate:
                     logical = logical.with_name(entry.name[4:])
                     out[str(logical)] = _WHITEOUT_DIGEST
                     continue
-                if stat.S_ISCHR(mode):
+                if stat.S_ISCHR(mode) and entry_stat.st_rdev == os.makedev(0, 0):
                     out[str(logical)] = _WHITEOUT_DIGEST
                     continue
 
@@ -690,6 +697,11 @@ class SharedSemisolate:
                         + b"\0"
                         + _read_regular_preserving_mode(entry, mode)
                     )
+                elif stat.S_ISCHR(mode) or stat.S_ISBLK(mode):
+                    node = f"{stat.S_IFMT(mode)}:{entry_stat.st_rdev}".encode("ascii")
+                    payload = b"device\0" + metadata + b"\0" + node
+                elif stat.S_ISFIFO(mode):
+                    payload = b"fifo\0" + metadata
                 elif stat.S_ISDIR(mode):
                     try:
                         logical.relative_to(self.workspace)
@@ -718,11 +730,23 @@ class SharedSemisolate:
             cmd_dir = Path(tempfile.mkdtemp(prefix="agenttx-cmd-", dir="/tmp"))
             self._cmd_script = cmd_dir / "cmd.sh"
             self._cmd_script.touch(mode=0o700)
+            if self.tool_user:
+                cmd_dir.chmod(0o755)
+                self._cmd_script.chmod(0o755)
         script = self._cmd_script
         if len(argv) >= 3 and Path(argv[0]).name == "bash" and argv[1] == "-c":
             body = "#!/bin/bash\nset -e\n" + argv[2] + "\n"
         else:
             body = "#!/bin/bash\nset -e\n" + " ".join(shlex.quote(a) for a in argv) + "\n"
+        # Linux limits each exec argument to roughly 128 KiB. Large file
+        # writes cannot travel as one `bash -c` argument. Use a fresh script
+        # name so an earlier overlay copy cannot hide the current command.
+        if len(body.encode("utf-8")) >= 64 * 1024:
+            fd, name = tempfile.mkstemp(prefix="large-", suffix=".sh", dir=script.parent)
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                os.fchmod(stream.fileno(), 0o755 if self.tool_user else 0o700)
+                stream.write(body)
+            return Path(name)
         script.write_text(body, encoding="utf-8")
         return script
 
@@ -954,6 +978,11 @@ class SharedSemisolate:
                 _remove_overlay_tree(path)
         (self.sandbox_dir / "upperdir").mkdir(parents=True, exist_ok=True)
 
+    def _task_user_environment(self) -> List[str]:
+        account = pwd.getpwnam(self.tool_user)
+        return ['HOME='+account.pw_dir, 'USER='+account.pw_name,
+                'LOGNAME='+account.pw_name, 'SHELL='+account.pw_shell]
+
     def run(
         self,
         argv: Sequence[str],
@@ -989,7 +1018,7 @@ class SharedSemisolate:
         # worker, which already preserves argument boundaries; one-shot try
         # still needs a script path to avoid its inline word splitting.
         command = (["bash", "-c", script.read_text(encoding="utf-8")]
-                   if self.persistent_worker else [str(script)])
+                   if self.persistent_worker and script == self._cmd_script else [str(script)])
         # `try` mounts a private /tmp and /run for the command namespace. Put
         # the trace outside the workspace on a persistent overlay mount so it
         # survives namespace teardown, then remove it before collecting writes.
@@ -1002,6 +1031,8 @@ class SharedSemisolate:
         trace_effects: List[Effect] = []
         if should_trace_reads:
             backend, _detail = self._resolve_step_backend()
+            if self.tool_user and backend != 'strace':
+                raise RuntimeError('tool_user currently requires strace or untraced commands')
             if backend == "bpf":
                 cp, trace_effects, duration = self._run_step_bpf_persistent(
                     command, flags
@@ -1024,9 +1055,14 @@ class SharedSemisolate:
                 trace_upper_path = upper.joinpath(*trace_path.relative_to("/").parts)
                 command = [
                     strace_bin, "-yy", "-f", "-s", "4096", "--seccomp-bpf",
-                    "--trace=%file,process", "-o", str(trace_path), *command,
+                    "--trace=%file,process", "-o", str(trace_path),
+                    *(["-u", self.tool_user, "env", *self._task_user_environment()] if self.tool_user else []),
+                    *command,
                 ]
 
+        if self.tool_user and tracer is None:
+            command = ['runuser', '-u', self.tool_user, '--', 'env',
+                       *self._task_user_environment(), *command]
         if tracer != "bpf":
             t0 = time.perf_counter()
             if self.persistent_worker:
@@ -1470,6 +1506,7 @@ class SharedSemisolate:
             upper.mkdir(parents=True, exist_ok=True)
             if saved.exists():
                 self.layers.copy_tree(saved, upper)
+            self._repair_worker_sandbox()
             self._cached_summary = {}
             self._cached_digests = self.upperdir_digests()
             self._pending_snapshot_changes = None
@@ -1507,6 +1544,7 @@ class SharedSemisolate:
         finally:
             if saved_current:
                 self.layers.copy_tree(saved, upper)
+                self._repair_worker_sandbox()
                 self._cached_summary = {}
                 self._cached_digests = self.upperdir_digests()
                 self._pending_snapshot_changes = None
@@ -1630,6 +1668,7 @@ class SharedSemisolate:
             return
         self.layers.restore_paths(min(step_ids), self.sandbox_dir / "upperdir", list(paths))
         self.layers.drop_from(step_ids)
+        self._repair_worker_sandbox()
         self._cached_summary = {}
         self._cached_digests = self.upperdir_digests()
         self._pending_snapshot_changes = None
@@ -1648,6 +1687,7 @@ class SharedSemisolate:
         for before_step_id, paths in path_groups:
             self.layers.restore_paths(before_step_id, upper, list(paths))
         self.layers.drop_from(step_ids)
+        self._repair_worker_sandbox()
         self._cached_summary = {}
         self._cached_digests = self.upperdir_digests()
         self._pending_snapshot_changes = None
@@ -1662,6 +1702,9 @@ class SharedSemisolate:
         upper = self.sandbox_dir / "upperdir"
         self.layers.restore_before(first, upper)
         self.layers.drop_from(step_ids)
+        # OverlayFS's workdir/index stores handles to the previous upper inode
+        # generation. A restored upper must not reuse those handles on remount.
+        self._repair_worker_sandbox()
         self._cached_summary = {}
         self._cached_digests = self.upperdir_digests()
         self._pending_snapshot_changes = None

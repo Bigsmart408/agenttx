@@ -34,6 +34,16 @@ def _remove_overlay_tree(path: Path) -> None:
         path.unlink()
 
 
+def _copy_metadata(source: Path, destination: Path) -> None:
+    # copystat/copy2 deliberately omit uid/gid. Upperdir directory owners and
+    # set-id bits are part of the task filesystem and must survive rollback.
+    original = source.lstat()
+    copied = destination.lstat()
+    if (original.st_uid, original.st_gid) != (copied.st_uid, copied.st_gid):
+        os.chown(destination, original.st_uid, original.st_gid, follow_symlinks=False)
+    shutil.copystat(source, destination, follow_symlinks=False)
+
+
 def _copy_regular(source: Path, destination: Path, mode: int) -> None:
     original_mode = stat.S_IMODE(mode)
     readable_mode = original_mode | stat.S_IRUSR
@@ -42,11 +52,22 @@ def _copy_regular(source: Path, destination: Path, mode: int) -> None:
         source.chmod(readable_mode)
     try:
         shutil.copy2(source, destination, follow_symlinks=False)
+        _copy_metadata(source, destination)
         if changed_mode:
             destination.chmod(original_mode)
     finally:
         if changed_mode:
             source.chmod(original_mode)
+
+
+def _copy_special_node(source: Path, destination: Path, entry_stat: os.stat_result) -> None:
+    """Recreate a device/FIFO without opening it or aliasing live metadata."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if stat.S_ISFIFO(entry_stat.st_mode):
+        os.mkfifo(destination, stat.S_IMODE(entry_stat.st_mode))
+    else:
+        os.mknod(destination, entry_stat.st_mode, entry_stat.st_rdev)
+    _copy_metadata(source, destination)
 
 
 def _copy_overlay_entry(
@@ -60,7 +81,7 @@ def _copy_overlay_entry(
         _copy_overlay_tree(source, destination, inode_memo)
     elif stat.S_ISLNK(mode):
         destination.symlink_to(os.readlink(source))
-        shutil.copystat(source, destination, follow_symlinks=False)
+        _copy_metadata(source, destination)
     elif stat.S_ISREG(mode):
         if inode_memo is None:
             inode_memo = {}
@@ -69,12 +90,14 @@ def _copy_overlay_entry(
         destination.parent.mkdir(parents=True, exist_ok=True)
         if previous is not None:
             os.link(previous, destination, follow_symlinks=False)
-            shutil.copystat(source, destination, follow_symlinks=False)
+            _copy_metadata(source, destination)
         else:
             _copy_regular(source, destination, mode)
             inode_memo[key] = destination
     elif stat.S_ISCHR(mode) and entry_stat.st_rdev == os.makedev(0, 0):
         os.link(source, destination, follow_symlinks=False)
+    elif stat.S_ISCHR(mode) or stat.S_ISBLK(mode) or stat.S_ISFIFO(mode):
+        _copy_special_node(source, destination, entry_stat)
     else:
         raise shutil.SpecialFileError(
             f"unsupported upperdir entry: {source}"
@@ -184,7 +207,7 @@ def _copy_overlay_tree(
                     source_entry, destination_entry, inode_memo
                 )
 
-        shutil.copystat(source, destination, follow_symlinks=False)
+        _copy_metadata(source, destination)
         if changed_mode:
             destination.chmod(original_mode)
     finally:
@@ -213,17 +236,15 @@ def _clone_snapshot_tree(source: Path, destination: Path) -> None:
                 elif stat.S_ISLNK(mode):
                     destination_entry.parent.mkdir(parents=True, exist_ok=True)
                     destination_entry.symlink_to(os.readlink(source_entry))
-                    shutil.copystat(source_entry, destination_entry, follow_symlinks=False)
-                elif stat.S_ISREG(mode) or (
-                    stat.S_ISCHR(mode) and entry_stat.st_rdev == os.makedev(0, 0)
-                ):
+                    _copy_metadata(source_entry, destination_entry)
+                elif stat.S_ISREG(mode) or stat.S_ISCHR(mode) or stat.S_ISBLK(mode) or stat.S_ISFIFO(mode):
                     destination_entry.parent.mkdir(parents=True, exist_ok=True)
                     os.link(source_entry, destination_entry, follow_symlinks=False)
                 else:
                     raise shutil.SpecialFileError(
                         f"unsupported snapshot entry: {source_entry}"
                     )
-        shutil.copystat(source, destination, follow_symlinks=False)
+        _copy_metadata(source, destination)
     finally:
         if changed_mode:
             source.chmod(original_mode)
@@ -370,7 +391,7 @@ def _copy_snapshot_entry(
     elif stat.S_ISLNK(mode):
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.symlink_to(os.readlink(source))
-        shutil.copystat(source, destination, follow_symlinks=False)
+        _copy_metadata(source, destination)
     elif stat.S_ISREG(mode):
         fingerprint = fingerprints.get(str(logical)) if fingerprints else None
         _copy_snapshot_regular(
@@ -379,6 +400,8 @@ def _copy_snapshot_entry(
     elif stat.S_ISCHR(mode) and entry_stat.st_rdev == os.makedev(0, 0):
         destination.parent.mkdir(parents=True, exist_ok=True)
         os.link(source, destination, follow_symlinks=False)
+    elif stat.S_ISCHR(mode) or stat.S_ISBLK(mode) or stat.S_ISFIFO(mode):
+        _copy_special_node(source, destination, entry_stat)
     else:
         raise shutil.SpecialFileError(
             f"unsupported upperdir entry: {source}"
@@ -410,7 +433,7 @@ def _copy_snapshot_tree(
                     logical / entry.name,
                     fingerprints,
                 )
-        shutil.copystat(source, destination, follow_symlinks=False)
+        _copy_metadata(source, destination)
         if changed_mode:
             destination.chmod(original_mode)
     finally:

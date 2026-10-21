@@ -193,11 +193,13 @@ def test_worker_startup_diagnostics_are_preserved(tmp_path, monkeypatch):
 
 
 def test_declared_readonly_infrastructure_survives_overlay_and_rejects_writes(tmp_path, monkeypatch):
+    import os
     from agenttx.runtime import AgentTX
     workspace = tmp_path/'workspace'; workspace.mkdir()
     infrastructure = tmp_path/'immutable-tool-config'
     infrastructure.write_text('original')
-    monkeypatch.setenv('TRY_BIND_READONLY', str(infrastructure))
+    monkeypatch.setenv('TRY_BIND_READONLY', ':'.join(filter(None,
+        [os.environ.get('TRY_BIND_READONLY'),str(infrastructure)])))
     tx = AgentTX.begin(workdir=workspace, session_dir=tmp_path/'session', trace_reads=True)
     try:
         record = tx.run_tool('read', ['cat', str(infrastructure)])
@@ -228,3 +230,55 @@ def test_worker_uses_current_command_after_reusable_script_is_copied_up(tmp_path
         tx.rollback(current.step_id)
         assert tx.run_tool('after-rollback',['bash','-c','printf next']).stdout=='next'
     finally:tx.close(destroy=True)
+
+
+def test_large_file_writes_keep_exact_content_and_rollback_under_persistent_worker(tmp_path):
+    from agenttx.harness import CodingAgentHarness
+    workspace=tmp_path/'workspace';workspace.mkdir()
+    harness=CodingAgentHarness(workspace,session_dir=tmp_path/'session',trace_backend='strace')
+    content='中文 recovery content\n' * 12000
+    try:
+        first=harness.call_tool('write_file',dict(path='large.txt',content=content))
+        assert first.returncode==0,first.stderr
+        assert not (workspace/'large.txt').exists()
+        read=harness.call_tool('read_file',dict(path='large.txt'))
+        assert read.returncode==0 and read.stdout==content+'\n'
+        assert first.step_id in read.parents
+        second=harness.call_tool('write_file',dict(path='large.txt',content=content+'next'))
+        assert second.returncode==0,second.stderr
+        assert harness.call_tool('read_file',dict(path='large.txt')).stdout==content+'next\n'
+        harness.tx.rollback(second.step_id)
+        assert harness.call_tool('read_file',dict(path='large.txt')).stdout==content+'\n'
+        assert harness.call_tool('run_shell',dict(cmd='printf next')).stdout=='next'
+        harness.tx.commit()
+        assert (workspace/'large.txt').read_text()==content+'\n'
+    finally:harness.close(destroy=True)
+
+
+def test_task_user_requires_root_coordinator_and_cannot_select_root(tmp_path,monkeypatch):
+    import os,pwd
+    monkeypatch.setattr(os,'geteuid',lambda:1003)
+    with pytest.raises(RuntimeError,match='root namespace coordinator'):
+        SharedSemisolate(workspace=tmp_path,tool_user='nobody')
+    monkeypatch.setattr(os,'geteuid',lambda:0)
+    with pytest.raises(ValueError,match='original non-root'):
+        SharedSemisolate(workspace=tmp_path,tool_user='root')
+
+
+def test_task_user_environment_uses_original_account_home():
+    import pwd
+    pool=object.__new__(SharedSemisolate);pool.tool_user='nobody'
+    account=pwd.getpwnam('nobody')
+    assert pool._task_user_environment()==['HOME='+account.pw_dir,'USER=nobody','LOGNAME=nobody','SHELL='+account.pw_shell]
+
+
+@pytest.mark.skipif(__import__('os').geteuid()!=0,reason='task-user execution needs root coordinator')
+def test_task_user_rejects_bpf_before_dispatching_any_command(tmp_path,monkeypatch):
+    pool=SharedSemisolate(workspace=tmp_path,sandbox_dir=tmp_path/'session',
+                          tool_user='nobody',trace_backend='strace')
+    monkeypatch.setattr(pool,'_resolve_step_backend',lambda:('bpf','available'))
+    monkeypatch.setattr(pool,'_run_step_bpf_persistent',lambda *a:pytest.fail('must not dispatch as root'))
+    try:
+        with pytest.raises(RuntimeError,match='requires strace'):
+            pool.run(['true'])
+    finally:pool.close(destroy=True)

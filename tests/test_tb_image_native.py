@@ -9,6 +9,53 @@ import pytest
 from experiments.scripts import bench_tb_image_native as native
 
 
+def test_timeout_usage_keeps_deduplicated_lower_bound_and_unknown_total(tmp_path):
+    folder=tmp_path/'session/upperdir/app/.agenttx-codex-probe/codex/sessions/2026/10/20'
+    folder.mkdir(parents=True)
+    record=dict(type='token_usage_record',payload=dict(response_id='response-1',
+        usage=dict(input_tokens=100,output_tokens=20,total_tokens=120)))
+    (folder/'rollout.jsonl').write_text(json.dumps(record)+'\n'+json.dumps(record)+'\n')
+    row=dict(workspace='/app',model_calls=0,total_tokens=0,usage_source='stdout_jsonl')
+    usage=native.logged_usage(tmp_path,'codex',row)
+    assert not usage['complete'] and usage['total_tokens'] is None
+    assert usage['partial_session_usage']['recorded_tokens']==120
+    assert usage['partial_session_usage']['records']==1
+    assert usage['partial_session_usage']['evidence'][0]['sha256']
+
+
+def test_verifier_observes_transaction_state_and_preserves_failed_verdict(tmp_path):
+    class PrivateView:
+        def run_tool(self,name,command,**kwargs):
+            assert name=='official-verifier' and command==['verifier']
+            assert kwargs['timeout_s']==7
+            return SimpleNamespace(stdout='private view verdict',stderr='target test failed',returncode=1)
+    assert native.verify_transaction_view(PrivateView(),['verifier'],tmp_path,7)==1
+    assert (tmp_path/'verifier.stdout.log').read_text()=='private view verdict'
+    assert (tmp_path/'verifier.stderr.log').read_text()=='target test failed'
+
+
+def test_verifier_timeout_preserves_output_and_remains_a_task_observation(tmp_path):
+    class TimeoutView:
+        def run_tool(self,*args,**kwargs):
+            raise native.subprocess.TimeoutExpired('verifier',7,output=b'partial output',stderr=b'time limit')
+    rc=native.verify_transaction_view(TimeoutView(),['verifier'],tmp_path,7)
+    assert rc==124
+    assert (tmp_path/'verifier.stdout.log').read_text()=='partial output'
+    assert native.outcome_status(0,rc,True)==(True,'verifier_timeout')
+
+
+def test_trusted_verifier_restores_original_agent_user_even_after_error():
+    pool=SimpleNamespace(tool_user='original-task-user')
+    class View:
+        def run_tool(self,*args,**kwargs):
+            assert pool.tool_user is None
+            raise RuntimeError('grading error')
+    tx=View();tx.pool=pool
+    with pytest.raises(RuntimeError,match='grading error'):
+        native.run_trusted_verifier_tool(tx,'official-verifier',['verifier'],7)
+    assert pool.tool_user=='original-task-user'
+
+
 def test_image_identity_rejects_nonroot_without_overriding_task_user(monkeypatch):
     monkeypatch.setattr(native.subprocess,'run',lambda *a,**k: SimpleNamespace(stdout=json.dumps([
         dict(Id='sha256:pinned',Config=dict(User='1000:1000',WorkingDir='/original'))])))
@@ -29,6 +76,11 @@ def test_container_preserves_image_workdir_task_interpreter_and_uses_pinned_id(t
     monkeypatch.setattr(native.subprocess,'run',lambda *a,**k: SimpleNamespace(
         stdout=json.dumps([str(tmp_path/'venv'),str(tmp_path/'base')])))
     monkeypatch.setattr(native.shutil,'which',lambda name: str(tmp_path/name))
+    monkeypatch.setenv('AGENTTX_TB_PORTABLE_STRACE',str(tmp_path/'portable'))
+    portable=tmp_path/'portable'
+    for f in ['usr/bin/strace','usr/lib/x86_64-linux-gnu/libunwind-ptrace.so.0',
+              'usr/lib/x86_64-linux-gnu/libunwind-x86_64.so.8','usr/lib/x86_64-linux-gnu/libunwind.so.8']:
+        p=portable/f;p.parent.mkdir(parents=True,exist_ok=True);p.write_text('portable')
     mounts=[]
     original=native.mount
     def mounted(cmd,src,dst=None,readonly=True):
@@ -47,8 +99,48 @@ def test_container_preserves_image_workdir_task_interpreter_and_uses_pinned_id(t
     assert not any('solution.sh' in source for source,_,_ in mounts)
     assert not any(value.startswith('PATH=') for value in command)
     assert f'AGENTTX_WORKER_PYTHON={args.python}' in command
+    assert not any(dst=='/usr/bin/git' for _,dst,_ in mounts)
+    assert any('portable/usr/bin/strace' in src for src,_,_ in mounts)
+    assert 'AGENTTX_TRACE_SPOOL_ROOT=/var/tmp' in command
     assert '--user' not in command
     assert '--max-turns' not in command
+
+    args.portable_git = tmp_path/'git-bundle'
+    (args.portable_git/'root').mkdir(parents=True)
+    args.portable_git_wrapper = args.portable_git/'git-private-loader'
+    args.portable_git_wrapper.write_text('local git')
+    mounts.clear()
+    command=native.build_command(args,dict(id='sha256:immutable',workdir='/original',user='root'),
+        tmp_path/'cell/causal',tmp_path/'task.json',tmp_path/'run-tests.sh',tmp_path/'tests',tmp_path/'uv')
+    assert any(dst=='/opt/agenttx-portable-git' and ro for _,dst,ro in mounts)
+    assert any(dst=='/opt/agenttx-prerequisites/git' and ro for _,dst,ro in mounts)
+    assert not any(dst in ('/lib/ld-musl-x86_64.so.1','/usr/local/bin/git','/usr/bin/git') for _,dst,_ in mounts)
+    assert 'AGENTTX_TB_GIT_FALLBACK=/opt/agenttx-prerequisites/git' in command
+
+
+def test_runtime_git_preserves_available_image_git(tmp_path,monkeypatch):
+    monkeypatch.delenv('AGENTTX_TB_PORTABLE_GIT',raising=False)
+    monkeypatch.setenv('AGENTTX_TB_GIT_FALLBACK','/missing-fallback')
+    monkeypatch.setattr(native.shutil,'which',lambda _: '/usr/bin/git')
+    monkeypatch.setattr(native.subprocess,'run',lambda *a,**kw:pytest.fail('must not install or replace available image Git'))
+    assert native.prepare_runtime_tools(tmp_path)==dict(git='image-provided')
+
+
+def test_runtime_missing_git_uses_only_local_fallback(tmp_path,monkeypatch):
+    fallback=tmp_path/'fallback';fallback.write_text('local executable')
+    target=tmp_path/'git'
+    monkeypatch.delenv('AGENTTX_TB_PORTABLE_GIT',raising=False)
+    monkeypatch.setenv('AGENTTX_TB_GIT_FALLBACK',str(fallback))
+    monkeypatch.setattr(native.shutil,'which',lambda _:None)
+    monkeypatch.setattr(native,'COORDINATOR_GIT',target)
+    commands=[]
+    monkeypatch.setattr(native.subprocess,'run',lambda command,**kw:commands.append(command))
+    native.prepare_runtime_tools(tmp_path)
+    assert target.is_symlink() and target.resolve()==fallback
+    assert commands==[[str(fallback),'--version']]
+    target.unlink();target.symlink_to(tmp_path/'absent')
+    with pytest.raises(RuntimeError,match='occupied'):native.prepare_runtime_tools(tmp_path)
+    assert target.is_symlink() and not target.exists()
 
 
 def test_missing_official_tests_records_infrastructure_failure_before_models(tmp_path,monkeypatch):
@@ -79,3 +171,75 @@ def test_compact_view_keeps_six_live_calls_without_changing_audit_history():
     results=[m['content'] for m in view if m.get('role')=='tool']
     assert results==[f'result {i}' for i in [2,3,4,5,6,8]]
     assert conversation.to_dict()==before
+
+
+def test_named_nonroot_identity_requires_explicit_adapter_opt_in(monkeypatch):
+    monkeypatch.setattr(native.subprocess,'run',lambda *a,**k:SimpleNamespace(stdout=json.dumps([
+        dict(Id='sha256:pinned',Config=dict(User='alice',WorkingDir='/home/alice'))])))
+    with pytest.raises(RuntimeError):native.image_identity('tag')
+    assert native.image_identity('tag',allow_task_user=True)==dict(id='sha256:pinned',workdir='/home/alice',user='alice')
+
+
+def test_official_inline_patch_is_preserved_without_inventing_missing_test_files(tmp_path):
+    source=tmp_path/'task';source.mkdir();output=tmp_path/'out';output.mkdir()
+    script="cat > /app/test_patch.diff << 'EOF'\npublic test diff\nEOF\npatch --fuzz=5 -p1 -i /app/test_patch.diff\npytest tests/test_module.py\n"
+    (source/'run-tests.sh').write_text(script)
+    tests,layout=native.official_tests_directory(source,output)
+    assert layout=='inline_patch_in_official_script' and tests.is_dir()
+    assert not list(tests.iterdir())
+    assert (source/'run-tests.sh').read_text()==script
+
+
+def test_task_failure_finishes_cell_without_becoming_infrastructure_failure():
+    assert native.outcome_status(0,1,True)==(True,'task_or_model_failed')
+    assert native.outcome_status(124,1,False)==(True,'task_or_model_failed')
+    assert native.outcome_status(127,1,True)==(False,'harness_error')
+    assert native.outcome_status(0,0,True)==(True,'passed')
+
+
+def test_verified_timeout_is_success_but_cannot_bypass_tests_or_recovery():
+    row=dict(completed=True,model_returncode=124,official_tests_rc=0,
+             documents_valid=True,derived_removed=True,success=False)
+    assert native.result_success(row)
+    assert native.outcome_status(124,0,True)==(True,'passed_after_model_timeout')
+    assert not native.result_success({**row,'official_tests_rc':1})
+    assert not native.result_success({**row,'official_tests_rc':124})
+    assert not native.result_success({**row,'derived_removed':False})
+    assert not native.result_success({**row,'documents_valid':False})
+    assert not native.result_success({**row,'model_returncode':127})
+    assert row['success'] is False  # Historical result is never overwritten.
+
+
+@pytest.mark.parametrize('policy',native.POLICIES)
+def test_native_prompt_discloses_cleanup_even_when_fault_location_is_hidden(policy):
+    from experiments.workloads.recovery_inject import render_recovery_manifest_prompt
+    manifest=dict(authoritative=True,policy=policy,state_id='state',retained=[],
+        recreate_required=[],invalidated=[dict(path='secret/fault.py',reason='fault',current_state='absent',must_stay_absent=False)],
+        pending=['implement task','run verifier'],localized_fault_step_ids=[],oracle_fault_step_id=7)
+    prompt=native.completion_prompt('Official task\n'+render_recovery_manifest_prompt(manifest))
+    assert 'ensure `recovery_build/derived.txt` is absent' in prompt
+    assert 'remove it if it exists' in prompt
+    assert 'Preserve the protected independent recovery notes' in prompt
+    if policy in ('crash_no_rollback','temporal_checkpoint','whole_branch_abort'):
+        assert 'secret/fault.py' not in prompt
+
+
+def test_six_arm_context_projection_preserves_full_control_history():
+    from agenttx.conversation import ConversationLog
+    log=ConversationLog();log.seed('system','original')
+    for i in range(10):
+        log.append_turn([dict(role='assistant',content='run',tool_calls=[dict(id=str(i),type='function',function=dict(name='run_shell',arguments='{}'))]),
+                         dict(role='tool',tool_call_id=str(i),content=f'result {i}')],step_ids=[i],tool_names=['run_shell'],kind='effect')
+    assert set(native.POLICIES)==set(native.CONTEXTS)
+    for p in native.POLICIES:
+        messages=native.recovery_messages(log,p)
+        expected=6 if p in ('causal','ideal_oracle','clean_recovery') else 10
+        assert sum(m.get('role')=='tool' for m in messages)==expected
+    assert len(log.active_step_ids())==10
+
+
+def test_logged_api_usage_does_not_substitute_text_estimate(tmp_path):
+    (tmp_path/'container.stdout.log').write_text('usage=Usage(completion_tokens=12, prompt_tokens=88, total_tokens=100)')
+    usage=native.logged_usage(tmp_path,'sweagent',dict(model_calls=1,total_tokens=76))
+    assert usage['complete'] and usage['total_tokens']==100
+    assert not native.logged_usage(tmp_path,'sweagent',dict(model_calls=2))['complete']

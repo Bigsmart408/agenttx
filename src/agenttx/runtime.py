@@ -95,6 +95,7 @@ class AgentTX:
     hide_network: bool = False
     trace_reads: bool = True
     trace_backend: str = "auto"
+    tool_user: Optional[str] = None
     commit_policy: Optional[CommitPolicy] = None
     object_catalog: HardlinkCatalog = field(default_factory=HardlinkCatalog)
     conversation: ConversationLog = field(default_factory=ConversationLog)
@@ -115,6 +116,7 @@ class AgentTX:
         hide_network: bool = False,
         trace_reads: bool = True,
         trace_backend: str = "auto",
+        tool_user: Optional[str] = None,
         commit_policy: Optional[CommitPolicy] = None,
     ) -> "AgentTX":
         workdir = Path(workdir).resolve() if workdir else Path.cwd()
@@ -124,6 +126,7 @@ class AgentTX:
             hide_network=hide_network,
             trace_reads=trace_reads,
             trace_backend=trace_backend,
+            tool_user=tool_user,
         )
         # if caller passed session_dir, SharedSemisolate should not destroy foreign dirs? 
         # mark ownership: if session_dir provided, still allow destroy on close(destroy=True)
@@ -135,6 +138,7 @@ class AgentTX:
             hide_network=hide_network,
             trace_reads=trace_reads,
             trace_backend=trace_backend,
+            tool_user=tool_user,
             commit_policy=commit_policy,
         )
         tx.object_catalog.refresh(workdir)
@@ -169,6 +173,7 @@ class AgentTX:
             hide_network=bool(data.get("hide_network", False)),
             trace_reads=bool(data.get("trace_reads", True)),
             trace_backend=str(data.get("trace_backend", "auto")),
+            tool_user=data.get("tool_user"),
             commit_policy=commit_policy,
             object_catalog=HardlinkCatalog.from_dict(data.get("object_catalog")),
             conversation=_load_conversation(session_dir, data),
@@ -183,6 +188,7 @@ class AgentTX:
             hide_network=tx.hide_network,
             trace_reads=tx.trace_reads,
             trace_backend=tx.trace_backend,
+            tool_user=tx.tool_user,
         )
         tx.pool._owns_sandbox = True
         tx._recover_commit_wal()
@@ -230,6 +236,7 @@ class AgentTX:
             "hide_network": self.hide_network,
             "trace_reads": self.trace_reads,
             "trace_backend": self.trace_backend,
+            "tool_user": self.tool_user,
             "commit_policy": {
                 "allow_globs": list(self.commit_policy.allow_globs),
                 "deny_globs": list(self.commit_policy.deny_globs),
@@ -255,6 +262,7 @@ class AgentTX:
                 hide_network=self.hide_network,
                 trace_reads=self.trace_reads,
                 trace_backend=self.trace_backend,
+                tool_user=self.tool_user,
             )
 
     def _overlay_entry(self, logical: Path) -> Optional[Path]:

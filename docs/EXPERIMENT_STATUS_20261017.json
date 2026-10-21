@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-10-17T10:54:56.584009+08:00",
+  "checked_at": "2026-10-18T10:41:57.236407+08:00",
   "registered": {
     "system_micro_pilot_cells.csv": {
       "rows": 84,
@@ -139,54 +139,21 @@
   },
   "dual_harness_full_micro_target": 16800,
   "environment_preparation": {
-    "checked_at": "2026-10-17T08:15:27.642469+00:00",
+    "checked_at": "2026-10-17T15:31:01.971497+00:00",
     "host": "r760-ssd",
     "code_root": "/home/bfq/agenttx-recovery-20261016/project",
     "data_root": "/mnt/data/agenttx-runtime",
     "docker_root": "/mnt/data/agenttx-runtime/docker",
     "docker_host": "unix:///run/agenttx-docker/docker.sock",
     "docker_reachable": true,
-    "coordinator_alive": true,
-    "image_stage_finished": false,
+    "coordinator_alive": false,
+    "image_stage_finished": true,
     "stage": "preparing_local_images",
     "image_stage_counts": {
-      "image_ready": 125,
-      "pending": 173,
-      "preparing": 2
+      "image_ready": 300
     },
     "image_errors": [],
-    "active_pulls": [
-      {
-        "task": "pydata__xarray-3364",
-        "wall_s": 420.78,
-        "idle_s": 1.001,
-        "downloaded_bytes": 581238816,
-        "extracted_bytes": 0,
-        "last_event": {
-          "status": "Downloading",
-          "layer": "d0e25e76b4c8"
-        },
-        "reason": null,
-        "error": null,
-        "mirror": "docker.1ms.run",
-        "observed_at": "2026-10-17T08:15:21.231510+00:00"
-      },
-      {
-        "task": "pylint-dev__pylint-5859",
-        "wall_s": 319.348,
-        "idle_s": 0.0,
-        "downloaded_bytes": 243236864,
-        "extracted_bytes": 0,
-        "last_event": {
-          "status": "Downloading",
-          "layer": "40a3ace33efe"
-        },
-        "reason": null,
-        "error": null,
-        "mirror": "docker.1ms.run",
-        "observed_at": "2026-10-17T08:15:23.021051+00:00"
-      }
-    ],
+    "active_pulls": [],
     "migration_complete": true,
     "migration": {
       "updated_at": "2026-10-17T03:47:27.804926+00:00",
@@ -229,7 +196,7 @@
       "reused_from": "/mnt/data/agenttx-runtime/validation/environment-preparation-local-20261017-r2",
       "all_files_reverified": true
     },
-    "disk_free_gib": 1172.0,
+    "disk_free_gib": 1038.9,
     "alerts": [],
     "monitor_status": "healthy",
     "automatic_model_launch": false,
@@ -243,5 +210,210 @@
     },
     "remote_execution_stopped": true,
     "remote_results_counted_as_local": false
+  },
+  "environment_preparation_completion_recheck": {
+    "checked_at": "2026-10-17T16:21:06.294323+00:00",
+    "host": "r760-ssd",
+    "status": "completed_normally",
+    "cohort": "/mnt/data/agenttx-runtime/validation/environment-preparation-local-20261017-r3",
+    "finished_at": "2026-10-17T15:30:32.856071+00:00",
+    "registered_tasks": 300,
+    "images_present_and_identity_matched": 300,
+    "content_probe_records_verified": 300,
+    "execution_progress_match": true,
+    "frozen_script_hashes_match": true,
+    "model_experiments_started": 0,
+    "full_task_environments_ready": false,
+    "execution_sha256": "ae67e67ad0fed7c9c84565cb42213a1e1b08cbd1908128c9d7a8466477e4028f",
+    "attempt_reasons": {
+      "complete": 179,
+      "idle_timeout": 1
+    }
+  },
+  "local_monitored_launch_20261018": {
+    "retired": true,
+    "deleted_by_user_request": true,
+    "cleanup_proof": "/mnt/data/agenttx-runtime/validation/swe-user-requested-reset-20261018.json"
+  },
+  "local_full_swe_campaign_20261018": {
+    "retired": true,
+    "deleted_by_user_request": true,
+    "cleanup_proof": "/mnt/data/agenttx-runtime/validation/swe-user-requested-reset-20261018.json"
+  },
+  "tb_image_preparation_20261018": {
+    "first_queue_finished_normally": true,
+    "finished_at": "2026-10-18T01:19:36.444273+00:00",
+    "original_ready": 216,
+    "original_environment_errors": 25,
+    "independently_repaired": 3,
+    "unique_ready": 219,
+    "total": 241,
+    "unresolved": 22,
+    "active_repair": null
+  },
+  "clean_ideal_protocol_20261018": {
+    "retired": true,
+    "deleted_by_user_request": true,
+    "cleanup_proof": "/mnt/data/agenttx-runtime/validation/swe-user-requested-reset-20261018.json"
+  },
+  "expectation_audit_20261018": {
+    "retired": true,
+    "deleted_by_user_request": true,
+    "cleanup_proof": "/mnt/data/agenttx-runtime/validation/swe-user-requested-reset-20261018.json"
+  },
+  "selective_context_profile_20261018": {
+    "checked_at": "2026-10-18T06:06:16.394408+00:00",
+    "launch": {
+      "updated_at": "2026-10-18T05:35:24.826012+00:00",
+      "stage": "running_full_suite",
+      "supervisor_pid": 3037272,
+      "previous_cohort": "sweagent-swe-local-monitored-20261018-full-r5",
+      "canary_cohort": "sweagent-swe-local-monitored-20261018-selective-canary-r1",
+      "full_cohort": "sweagent-swe-local-monitored-20261018-selective-full-r1",
+      "reset_proof": "/mnt/data/agenttx-runtime/validation/swe-user-requested-reset-20261018.json",
+      "context_by_policy": {
+        "clean_recovery": "compact",
+        "crash_no_rollback": "full",
+        "temporal_checkpoint": "full",
+        "whole_branch_abort": "full",
+        "causal": "compact",
+        "ideal_oracle": "compact"
+      },
+      "coordinator_pid": 3037281,
+      "log": "/mnt/data/agenttx-runtime/logs/sweagent-swe-local-monitored-20261018-selective-full-r1.log"
+    },
+    "registration": {
+      "context_profile": "selective-compact-v1",
+      "context_by_policy": {
+        "clean_recovery": "compact",
+        "crash_no_rollback": "full",
+        "temporal_checkpoint": "full",
+        "whole_branch_abort": "full",
+        "causal": "compact",
+        "ideal_oracle": "compact"
+      },
+      "code_root": "/home/bfq/agenttx-executions/swe-local-monitored-20261018-selective-r2/project",
+      "source_sha256": "f25788ee3dabd0b4832ab6f923417d405735c69baf95f4e77bed10c1873953e9",
+      "previous_cohort": "sweagent-swe-local-monitored-20261018-full-r5",
+      "canary_cells": 6,
+      "full_cells": 1800,
+      "max_workers": 8,
+      "old_results_inherited": false,
+      "formal_eligible": false,
+      "sympy_verifier_proof": "/mnt/data/agenttx-runtime/validation/swe-sympy-selection-preflight-20261018-r2/proof.json",
+      "redirect_proof": "/mnt/data/agenttx-runtime/validation/swe-selective-redirect-preflight-20261018-r1/proof.json",
+      "previous_cohort_retired": true,
+      "reset_proof": "/mnt/data/agenttx-runtime/validation/swe-user-requested-reset-20261018.json"
+    },
+    "regression_tests_passed": 54,
+    "old_results_inherited": false,
+    "cleanup_proof": "/mnt/data/agenttx-runtime/validation/swe-user-requested-reset-20261018.json",
+    "canary_review": {
+      "checked_at": "2026-10-18T05:17:20.274970+00:00",
+      "cohort": "sweagent-swe-local-monitored-20261018-selective-canary-r1",
+      "completed": 6,
+      "successful": 5,
+      "infrastructure_errors": 0,
+      "actual_contexts_match_registration": true,
+      "full_suite_started": false,
+      "full_suite_blocked_by": "six-arm official-success gate: whole_branch_abort task failure",
+      "failure_diagnosis": "Whole-branch main trajectory contains an empty parsed action followed by submit; submission contains recovery notes only, no repository source fix. Official result: 1 failed, 6 passed. Preserve task failure; no outcome-based retry or gate change.",
+      "combined_tokens": 299321,
+      "rows": [
+        {
+          "policy": "causal",
+          "actual_context": "compact",
+          "success": true,
+          "tests_rc": 0,
+          "environment_error": false,
+          "main_tokens": 42997,
+          "replay_tokens": 0,
+          "combined_tokens": 42997,
+          "result": "/mnt/data/agenttx-runtime/results/sweagent-swe-local-monitored-20261018-selective-canary-r1/cells/psf__requests-1963/causal/result.json",
+          "sha256": "734693c1a36da6f954e78dd404aade78ea432b05b6bfb8b4c49c20185b1c4770"
+        },
+        {
+          "policy": "clean_recovery",
+          "actual_context": "compact",
+          "success": true,
+          "tests_rc": 0,
+          "environment_error": false,
+          "main_tokens": 54492,
+          "replay_tokens": 0,
+          "combined_tokens": 54492,
+          "result": "/mnt/data/agenttx-runtime/results/sweagent-swe-local-monitored-20261018-selective-canary-r1/cells/psf__requests-1963/clean_recovery/result.json",
+          "sha256": "a5c0e64219ff8705a4a58f23406f7812bd049580bd5ba255f8eafabca1c95f5f"
+        },
+        {
+          "policy": "crash_no_rollback",
+          "actual_context": "full",
+          "success": true,
+          "tests_rc": 0,
+          "environment_error": false,
+          "main_tokens": 92603,
+          "replay_tokens": 0,
+          "combined_tokens": 92603,
+          "result": "/mnt/data/agenttx-runtime/results/sweagent-swe-local-monitored-20261018-selective-canary-r1/cells/psf__requests-1963/crash_no_rollback/result.json",
+          "sha256": "e1ddbe73633ec95e80f410aa3acf604fb9a12e6b9a5dab349f4852d5a90a2b21"
+        },
+        {
+          "policy": "ideal_oracle",
+          "actual_context": "compact",
+          "success": true,
+          "tests_rc": 0,
+          "environment_error": false,
+          "main_tokens": 32358,
+          "replay_tokens": 0,
+          "combined_tokens": 32358,
+          "result": "/mnt/data/agenttx-runtime/results/sweagent-swe-local-monitored-20261018-selective-canary-r1/cells/psf__requests-1963/ideal_oracle/result.json",
+          "sha256": "e07964182268657ce140f566ccc0b37ca17d8fd9bcc9f9068c6992ff0cf5249f"
+        },
+        {
+          "policy": "temporal_checkpoint",
+          "actual_context": "full",
+          "success": true,
+          "tests_rc": 0,
+          "environment_error": false,
+          "main_tokens": 46610,
+          "replay_tokens": 8270,
+          "combined_tokens": 54880,
+          "result": "/mnt/data/agenttx-runtime/results/sweagent-swe-local-monitored-20261018-selective-canary-r1/cells/psf__requests-1963/temporal_checkpoint/result.json",
+          "sha256": "4db30de8444979117d4e472b5d16940561a9e8ca71c7aad2934b752d0158e752"
+        },
+        {
+          "policy": "whole_branch_abort",
+          "actual_context": "full",
+          "success": false,
+          "tests_rc": 1,
+          "environment_error": false,
+          "main_tokens": 7587,
+          "replay_tokens": 14404,
+          "combined_tokens": 21991,
+          "result": "/mnt/data/agenttx-runtime/results/sweagent-swe-local-monitored-20261018-selective-canary-r1/cells/psf__requests-1963/whole_branch_abort/result.json",
+          "sha256": "beea5fb8dc1d07493419ddcc0f3e2bf8b4821b6f23cf2b428c6b741198506d20"
+        }
+      ]
+    },
+    "full_suite_started": true,
+    "parser_audit": {
+      "checked_at": "2026-10-18T05:32:34.501211+00:00",
+      "model_calls": 0,
+      "trajectory": "/mnt/data/agenttx-runtime/results/sweagent-swe-local-monitored-20261018-selective-canary-r1/cells/psf__requests-1963/whole_branch_abort/trajectories/tmp/attempt-618650a93afb47ae87e73d096f089c21/tmp.traj",
+      "trajectory_sha256": "e0a7e3808a0a5a1f53bb6eb8e4b89e50550de0dd110560eca0269288f65de375",
+      "parser_class": "SingleBashCodeBlockParser",
+      "first_response_rejected": true,
+      "rejection": "We detected multiple bash code blocks in your output. You need to include EXACTLY ONE bash code block in your output.",
+      "second_response_action": "submit",
+      "conclusion": "Parser correctly rejected multi-block response; the next model response submitted without source repair. No parser defect demonstrated; retain as task failure."
+    },
+    "full_suite_counts": {
+      "completed": 65,
+      "running": 8,
+      "pending": 1727
+    },
+    "full_suite_registration": "/mnt/data/agenttx-runtime/results/sweagent-swe-local-monitored-20261018-selective-full-r1/registration.json",
+    "task_success_required": false,
+    "user_revoked_assistant_added_success_gate": true,
+    "latest_full_review": "/mnt/data/agenttx-runtime/validation/swe-selective-full-progress-20261018.json"
   }
 }

@@ -676,7 +676,7 @@ def run_once(
         tempfile.mkdtemp(
             prefix=("benchmark-direct" if direct_runtime else "agenttx")
             + f"-{suite}-{task_name}-{mode}-{repeat}-",
-            dir="/tmp",
+            dir=os.environ.get('TMPDIR', '/tmp'),
         )
     )
     # Workspace is the scratch directory itself.  A nested `repo/` child made
@@ -689,7 +689,7 @@ def run_once(
         else Path(
             tempfile.mkdtemp(
                 prefix=f"agenttx-session-{suite}-{task_name}-{mode}-{repeat}-",
-                dir="/tmp",
+                dir=os.environ.get('TMPDIR', '/tmp'),
             )
         )
     )

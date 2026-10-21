@@ -250,6 +250,29 @@ def test_load_agent_config_uses_codex_gpt_profile_and_absolute_bundles(
     )
     assert uncapped_config.model.per_instance_call_limit == 0
 
+    aligned, aligned_hash = load_agent_config(
+        config_path, profile=profile, swe_agent_root=swe_root,
+        max_model_calls=0, session_timeout_s=3600,
+    )
+    assert aligned.tools.execution_timeout == 3600
+    assert aligned.tools.total_execution_timeout == 3601
+    assert aligned.model.per_instance_call_limit == 0
+    assert aligned_hash != config_hash
+    _, repeated_hash = load_agent_config(
+        config_path, profile=profile, swe_agent_root=swe_root,
+        max_model_calls=0, session_timeout_s=3600.0,
+    )
+    assert repeated_hash == aligned_hash
+
+
+def test_native_internal_budget_exit_is_timeout_even_after_autosubmit():
+    classify = sweagent_native_workload.sweagent_exit_returncode
+    assert classify('submitted') == 0
+    assert classify('exit_total_execution_time') == 124
+    assert classify('submitted (exit_total_execution_time)') == 124
+    assert classify('submitted (exit_error)') == 1
+    assert classify('exit_cost') == 1
+
 
 def test_initialize_workspace_repo_creates_submit_compatible_baseline(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"

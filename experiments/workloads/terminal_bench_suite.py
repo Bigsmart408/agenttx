@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import json
 import os
 import re
 import shlex
@@ -35,9 +36,21 @@ from experiments.workloads.recovery_inject import (
 
 TB_REPO = "https://github.com/harbor-framework/terminal-bench-1.git"
 
+_LC0_CPU_WHEELS = {
+    'torch-2.8.0+cpu-cp313-cp313-manylinux_2_28_x86_64.whl':
+        '8f81dedb4c6076ec325acc3b47525f9c550e5284a18eae1d9061c543f7b6e7de',
+    'torchvision-0.23.0+cpu-cp313-cp313-manylinux_2_28_x86_64.whl':
+        'dea90a67d60a5366b0358a0b8d6bf267805278697d6fd950cf0e31139e56d1be',
+}
+
 # Official Dockerfiles download these immutable benchmark inputs at build time.
 # The cache preserves their bytes while allowing builds without HF/Archive access.
 _CACHED_DOWNLOADS = {
+    "leelachess0-pytorch-conversion": ((
+        "RUN wget -O leela-network.pb.gz https://training.lczero.org/get_network?sha=47e3f899519dc1bc95496a457b77730fce7b0b89b6187af5c01ecbbd02e88398",
+        "leela-network.pb.gz", "leela-network.pb.gz",
+        "7b14c647813a1620aff8935e8502ae16239acf29aa7377ff76578474644c50b1",
+    ),),
     "html-finance-verify": ((
         'RUN curl -L -o /app/nvidia-corrupted.mhtml "https://huggingface.co/datasets/pimpalgaonkar/terminal-bench-files/resolve/1e9aed81248f1e61298e1e9cd891f2dd6a97062b/nvidia-corrupted.mhtml"',
         "nvidia-corrupted.mhtml", "/app/nvidia-corrupted.mhtml",
@@ -489,6 +502,110 @@ def _cached_dataset_dockerfile(source: Path, original: str, cache: Path) -> Tupl
     return rewritten, True
 
 
+def _domestic_dockerfile(original: str) -> str:
+    """Mirror external image references while preserving local build stages."""
+    hub = os.environ.get('AGENTTX_TB_HUB_MIRROR', 'docker.1ms.run').rstrip('/')
+    ghcr = os.environ.get('AGENTTX_TB_GHCR_MIRRORS', 'ghcr.nju.edu.cn').split(',')[0].rstrip('/')
+    stages = set()
+    arguments = {}
+
+    def image_reference(image):
+        expanded = re.sub(r'\$\{(\w+)\}|\$(\w+)',
+                          lambda m: arguments.get(m[1] or m[2], m[0]), image)
+        if (expanded.lower() in stages or image.isdigit()
+                or image in {'scratch', 'agenttx-assets'} or image.startswith('$')):
+            return image
+        if image.startswith('ghcr.io/'):
+            return ghcr + '/' + image[len('ghcr.io/'):]
+        first = image.split('/')[0]
+        if image.startswith('docker.io/'):
+            image = image[len('docker.io/'):]
+        elif '/' in image and ('.' in first or ':' in first or first == 'localhost'):
+            raise ValueError('No registered domestic mirror for base ' + image)
+        if '/' not in image:
+            image = 'library/' + image
+        return hub + '/' + image
+
+    rewritten = []
+    for line in original.splitlines(keepends=True):
+        argument = re.match(r'(?i)^\s*ARG\s+(\w+)(?:=([^\r\n]*))?', line)
+        if argument and argument[2] is not None:
+            arguments[argument[1]] = argument[2].strip().strip('\"\'')
+        base = re.match(r'(?i)^(\s*FROM\s+(?:--platform=\S+\s+)?)(\S+)(.*)', line)
+        if base:
+            alias = re.search(r'(?i)\s+AS\s+(\S+)', base[3])
+            line = line[:base.start(2)] + image_reference(base[2]) + line[base.end(2):]
+            if alias:
+                stages.add(alias[1].lower())
+        elif re.match(r'(?i)^\s*(?:COPY|ADD)\s', line):
+            line = re.sub(r'(?i)(--from=)(\S+)',
+                          lambda m: m[1] + image_reference(m[2]), line)
+        rewritten.append(line)
+    return ''.join(rewritten)
+
+
+def _domestic_package_sources(original: str) -> str:
+    """Use reachable package transport without changing requested versions."""
+    setup = '''ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple PIP_DEFAULT_TIMEOUT=180 PIP_RETRIES=2
+RUN for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do \\
+ [ ! -f "$f" ] || sed -i -E 's|https?://archive.ubuntu.com/ubuntu|https://mirrors.tuna.tsinghua.edu.cn/ubuntu|g; s|https?://security.ubuntu.com/ubuntu|https://mirrors.tuna.tsinghua.edu.cn/ubuntu|g; s|https?://deb.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g; s|https?://security.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g; s|https?://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' "$f"; done
+'''
+    return ''.join(line + (setup if re.match(r'(?i)^\s*FROM\s', line) else '')
+                   for line in original.splitlines(keepends=True))
+
+
+def _cached_build_bootstrap(source: Path, original: str, cache: Path) -> Tuple[str, bool]:
+    if source.name=='leelachess0-pytorch-conversion':
+        assert original.count('https://download.pytorch.org/whl/cpu')==1
+        original=original.replace('https://download.pytorch.org/whl/cpu',
+                                  'https://mirrors.nju.edu.cn/pytorch/whl/cpu',1)
+        if all((cache/name).is_file() for name in _LC0_CPU_WHEELS):
+            for name,expected in _LC0_CPU_WHEELS.items():_verify_local_asset(cache/name,expected)
+            anchor='RUN pip install torch==2.8.0 torchvision==0.23.0 --index-url https://mirrors.nju.edu.cn/pytorch/whl/cpu'
+            assert original.count(anchor)==1
+            copies=''.join(f'COPY --from=agenttx-assets {name} /tmp/agenttx-cpu-wheels/{name}\n' for name in _LC0_CPU_WHEELS)
+            wheels=' '.join('/tmp/agenttx-cpu-wheels/'+name for name in _LC0_CPU_WHEELS)
+            original=original.replace(anchor,copies+'RUN pip install '+wheels+
+                ' --index-url https://mirrors.nju.edu.cn/pytorch/whl/cpu',1)
+    if source.name=='vul-flink' and (cache/'flink-source-proof.json').exists():
+        proof=json.loads((cache/'flink-source-proof.json').read_text())
+        assert proof['commit']=='fe3613574f76201a8d55d572a639a4ce7e18a9db'
+        repo=cache/'flink-source'
+        actual=subprocess.check_output(['git','-C',str(repo),'rev-parse','HEAD^{tree}'],text=True,timeout=20).strip()
+        assert actual==proof['tree']=='fe436b1700cddd42fad6821ecb43852d671097d9'
+        assert not subprocess.check_output(['git','-C',str(repo),'status','--porcelain'],text=True,timeout=20).strip()
+        anchor='RUN git clone --depth 1 --branch release-1.11.2 https://github.com/apache/flink.git /opt/flink &&'
+        assert original.count(anchor)==1
+        return original.replace(anchor,'COPY --from=agenttx-assets flink-source /opt/flink\nRUN true &&',1),True
+    if source.name == 'fix-git':
+        bundle=cache/'personal-site.bundle';script=cache/'fix-git-setup.sh'
+        if not bundle.exists() or not script.exists():return original, False
+        proof=json.loads((cache/'fix-git-source-proof.json').read_text())
+        assert proof['clone_tip']=='b0d59cded7105fea91a4ea0008098295d8895786'
+        _verify_local_asset(bundle,proof['bundle_sha256'])
+        _verify_local_asset(script,proof['effective_setup_sha256'])
+        _verify_local_asset(source/'setup.sh',proof['original_setup_sha256'])
+        heads=subprocess.check_output(['git','bundle','list-heads',str(bundle)],text=True,timeout=20)
+        assert heads.strip()==proof['clone_tip']+' refs/heads/master'
+        assert original.count('COPY setup.sh ./')==1
+        return original.replace('COPY setup.sh ./',
+            'COPY --from=agenttx-assets personal-site.bundle /tmp/personal-site.bundle\n'
+            'COPY --from=agenttx-assets fix-git-setup.sh /app/setup.sh',1), True
+    if source.name not in {'path-tracing', 'path-tracing-reverse'}:
+        return original, False
+    binary = cache/'uv-0.7.13'
+    script = cache/(source.name+'-install.sh')
+    if not binary.exists() or not script.exists():
+        return original, False
+    anchor = 'COPY install.sh /app'
+    assert original.count(anchor) == 1
+    reported = subprocess.check_output([str(binary), '--version'], text=True, timeout=10)
+    assert reported.split()[1] == '0.7.13'
+    return original.replace(anchor,
+        'COPY --from=agenttx-assets uv-0.7.13 /probe/uv-0.7.13\n'
+        'COPY --from=agenttx-assets '+script.name+' /app/install.sh', 1), True
+
+
 def _dockerfile_candidates(
     source: Path, dockerfile_path: Optional[Path] = None,
 ) -> List[Tuple[Optional[Path], str, bool]]:
@@ -503,7 +620,31 @@ def _dockerfile_candidates(
     original, cached_dataset = _cached_dataset_dockerfile(
         source, original, _asset_cache_dir()
     )
-    local_assets = local_assets or cached_models or cached_dataset
+    original, cached_bootstrap = _cached_build_bootstrap(source, original, _asset_cache_dir())
+    local_assets = local_assets or cached_models or cached_dataset or cached_bootstrap
+    if os.environ.get('AGENTTX_DOMESTIC_ONLY') == '1':
+        rewritten = _domestic_package_sources(_domestic_dockerfile(original))
+        if source.name in {'qemu-alpine-ssh', 'qemu-startup'}:
+            # Minimal Bullseye has no CA bundle until its first APT install.
+            # HTTP package transport retains Debian's signed-index validation.
+            rewritten = rewritten.replace('https://mirrors.tuna.tsinghua.edu.cn/debian',
+                'http://mirrors.tuna.tsinghua.edu.cn/debian')
+            # Bullseye security packages have moved out of live mirrors.
+            # The archive retains these exact versions and signed indexes.
+            rewritten = rewritten.replace('http://mirrors.tuna.tsinghua.edu.cn/debian-security',
+                'http://archive.debian.org/debian-security')
+            rewritten = rewritten.replace('RUN apt-get update',
+                "RUN sed -i 's|deb http://archive.debian.org/debian-security|deb [check-valid-until=no] http://archive.debian.org/debian-security|' /etc/apt/sources.list && apt-get update",1)
+            rewritten = rewritten.replace('https://dl-cdn.alpinelinux.org/alpine/',
+                'https://mirrors.tuna.tsinghua.edu.cn/alpine/')
+        if source.name == 'vul-flink':
+            rewritten=rewritten.replace('https://github.com/apache/flink.git',
+                'https://ghfast.top/https://github.com/apache/flink.git')
+        handle = tempfile.NamedTemporaryFile(mode='w', prefix=f'agenttx-{source.name}-domestic-',
+                                             suffix='.Dockerfile', delete=False, encoding='utf-8')
+        with handle:
+            handle.write(rewritten)
+        return [(Path(handle.name), 'domestic-only', local_assets)]
     snapshot_variant = None
     if source.name in {"qemu-startup", "qemu-alpine-ssh"}:
         if "FROM debian:bullseye-slim" not in original:
@@ -591,6 +732,11 @@ def ensure_official_image(task: TBTask, cache_root: Path) -> Tuple[str, str]:
             candidates = _dockerfile_candidates(source, dockerfile_path)
             try:
                 for dockerfile, label, local_assets in candidates:
+                    evidence = os.environ.get('AGENTTX_TB_BUILD_EVIDENCE_DIR')
+                    if evidence:
+                        target = Path(evidence)
+                        target.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(dockerfile or dockerfile_path or source/'Dockerfile', target/(label+'.Dockerfile'))
                     command = ["docker", "build", "--progress", "plain", "--tag", image]
                     network = os.environ.get("AGENTTX_DOCKER_BUILD_NETWORK")
                     if network:
@@ -605,6 +751,9 @@ def ensure_official_image(task: TBTask, cache_root: Path) -> Tuple[str, str]:
                         command.extend(["--file", str(dockerfile)])
                     command.append(str(context))
                     built = _docker_run(command, timeout=3600)
+                    if evidence:
+                        (target/(label+'.stdout')).write_text(built.stdout or '')
+                        (target/(label+'.stderr')).write_text(built.stderr or '')
                     if built.returncode == 0:
                         break
                     detail = _build_failure_detail(built.stdout or "", built.stderr or "")
@@ -1109,25 +1258,57 @@ def _verify_in_official_container(
 
 
 def prepare_official_test_script(source: Path, cache_root: Path) -> Tuple[Path, Optional[Path]]:
-    """Use a local uv binary for the upstream verifier when it is available."""
+    """Use version-matched local uv; retain upstream dependency/interpreter pins."""
     test_script = source / "run-tests.sh"
     script_text = test_script.read_text(encoding="utf-8")
-    uv_install = "curl -LsSf https://astral.sh/uv/0.7.13/install.sh | sh"
-    local_uv = (
-        Path(cache_root) / "terminal_bench" / "uv" / "installed" / "bin" / "uv"
-    )
-    if uv_install in script_text and local_uv.is_file():
-        script_text = script_text.replace(
-            uv_install,
+    original_text = script_text
+    pattern = re.compile(r"curl -LsSf https://astral\.sh/uv/(?:(\d+\.\d+\.\d+)/)?install\.sh \| sh")
+    matches = list(pattern.finditer(script_text))
+    local_uv = None
+    if matches:
+        versions = {m.group(1) or '0.7.13' for m in matches}
+        if len(versions) != 1:
+            raise ValueError('multiple uv versions in one official verifier')
+        version = versions.pop()
+        tools = Path(cache_root).parent / 'validation/tb-validation-tools-20261018'
+        candidates = [Path(cache_root)/'terminal_bench/uv'/version/'bin/uv',
+                      Path(cache_root)/'terminal_bench/uv/installed/bin/uv',
+                      tools/'bin/uv' if version == '0.7.13' else tools/('uv-'+version)/'bin/uv']
+        for candidate in candidates:
+            if candidate.is_file():
+                reported = subprocess.check_output([str(candidate), '--version'], text=True, timeout=10).split()
+                if len(reported)>1 and reported[1] == version:
+                    local_uv = candidate
+                    break
+        if not local_uv and os.environ.get('AGENTTX_DOMESTIC_ONLY') == '1':
+            raise FileNotFoundError('local uv '+version+' required before model launch')
+    if matches and local_uv:
+        replacement = (
             "mkdir -p \"$HOME/.local/bin\" && "
-            "install -m 755 /tmp/agenttx-uv \"$HOME/.local/bin/uv\"",
-        ).replace(
-            "source $HOME/.local/bin/env",
-            'export PATH="$HOME/.local/bin:$PATH"',
+            "install -m 755 /tmp/agenttx-uv \"$HOME/.local/bin/uv\" && "
+            "printf 'export PATH=\"$HOME/.local/bin:$PATH\"\\n' > \"$HOME/.local/bin/env\""
         )
+        script_text = pattern.sub(lambda match: replacement, script_text)
+    if source.name == 'download-youtube':
+        # OpenCV is imported by the verifier, but these shared libraries were
+        # absent from upstream's image/bootstrap. Do not install task outputs.
+        script_text = script_text.replace('apt-get update',
+            'apt-get update\napt-get install -y libgl1 libglib2.0-0', 1)
+    if os.environ.get('AGENTTX_DOMESTIC_ONLY') == '1':
+        prefix = '''export DEBIAN_FRONTEND=noninteractive
+export PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+export UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+unset UV_DEFAULT_INDEX
+export UV_PYTHON_DOWNLOADS=never
+for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
+ [ ! -f "$f" ] || sed -i -E 's|https?://archive.ubuntu.com/ubuntu|https://mirrors.tuna.tsinghua.edu.cn/ubuntu|g; s|https?://security.ubuntu.com/ubuntu|https://mirrors.tuna.tsinghua.edu.cn/ubuntu|g; s|https?://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g; s|https?://security.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' "$f"
+done
+'''
+        script_text = prefix + script_text
+    if script_text != original_text:
         with tempfile.NamedTemporaryFile(
             mode="w", prefix="agenttx-tb-tests-", suffix=".sh", delete=False,
-            dir="/tmp",
+            dir=os.environ.get('TMPDIR', '/tmp'),
         ) as handle:
             handle.write(script_text)
             return Path(handle.name), local_uv

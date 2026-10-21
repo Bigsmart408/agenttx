@@ -18,7 +18,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--instance-id", required=True)
     parser.add_argument("--workdir", type=Path, default=Path.cwd())
-    parser.add_argument("--cache-dir", type=Path, default=ROOT / "experiments" / "cache")
+    parser.add_argument("--cache-dir", type=Path, default=Path(os.environ.get("AGENTTX_SWE_VERIFIER_CACHE", str(ROOT / "experiments" / "cache"))))
     parser.add_argument("--image-id")
     parser.add_argument("--expected-python")
     args = parser.parse_args()

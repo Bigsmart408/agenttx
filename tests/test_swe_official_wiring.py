@@ -226,6 +226,12 @@ def test_eval_image_cleanup_requires_explicit_opt_in(monkeypatch):
 
 
 def test_docker_verifier_reports_image_pull_failure(monkeypatch, tmp_path):
+    interpreter=tmp_path/'.venv/bin/python'
+    interpreter.parent.mkdir(parents=True)
+    interpreter.write_text('live interpreter')
+    temporary=tmp_path/'.tmp/active-command'
+    temporary.parent.mkdir()
+    temporary.write_text('live command state')
     task = SWETask(
         instance_id="django__django-12708",
         scale="short",
@@ -250,6 +256,8 @@ def test_docker_verifier_reports_image_pull_failure(monkeypatch, tmp_path):
 
     assert verdict["tests_rc"] == "error"
     assert verdict["verifier_stderr"] == "pull failed"
+    assert interpreter.read_text()=='live interpreter'
+    assert temporary.read_text()=='live command state'
 
 
 def test_django_paren_ids_become_runtests_labels():

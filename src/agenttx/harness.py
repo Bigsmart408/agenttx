@@ -40,6 +40,7 @@ class CodingAgentHarness:
         auto_commit: bool = False,
         trace_reads: bool = True,
         trace_backend: str = "auto",
+        tool_user: Optional[str] = None,
         ephemeral_roots: Sequence[Path] = (),
     ) -> None:
         self.workdir = Path(workdir).resolve()
@@ -55,6 +56,7 @@ class CodingAgentHarness:
             session_dir=session_dir,
             trace_reads=trace_reads,
             trace_backend=trace_backend,
+            tool_user=tool_user,
             commit_policy=self.policy,
         )
         self.tools: Dict[str, ToolFn] = {
