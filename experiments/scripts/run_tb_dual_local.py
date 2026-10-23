@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -33,6 +34,7 @@ SWE=Path('/home/bfq/agenttx-deps/SWE-agent-3ea751c087f32b16e039a2233dd6eefecef32
 CODEX=Path('/home/bfq/.local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex')
 TOOLS=DATA/'validation/tb-validation-tools-20261018'
 CELL_TIMEOUT_S=2*MODEL_TIMEOUT_S+VERIFIER_TIMEOUT_S+600
+FULL_DISPATCH_HOLD=DATA/'validation/tb-full-dispatch-hold.json'
 
 
 def experiment_configuration():
@@ -73,6 +75,12 @@ def resume_protocol_changes(prior, allow_update):
 def now(): return datetime.now(timezone.utc).isoformat()
 
 
+def full_dispatch_blocked(canary=False):
+    # A user validation hold also applies to new cohorts and continuations.
+    # Its presence is sufficient; malformed metadata must not open dispatch.
+    return not canary and FULL_DISPATCH_HOLD.exists()
+
+
 def save(path,value):
     temp=path.with_suffix('.tmp');temp.write_text(json.dumps(value,indent=2)+'\n');temp.replace(path)
 
@@ -111,12 +119,40 @@ def infrastructure_issue(row,expected):
     return None
 
 
-def halts_dispatch(issue, result):
+def model_budget_failure_evidence(result, result_path):
+    """Accept only a structured terminal provider budget exit, never log text."""
+    if not (result.get('harness')=='codex' and result.get('completed')
+            and result.get('status')=='task_or_model_failed'
+            and result.get('model_returncode')==1 and result.get('container_returncode')==0):
+        return None
+    path=Path(result_path).parent/'model-result.json'
+    try:
+        raw=path.read_bytes();model=json.loads(raw)
+    except (OSError,ValueError):return None
+    events=model.get('events')
+    if model.get('returncode')!=1 or not isinstance(events,list) or not events:return None
+    terminal=events[-1]
+    if not isinstance(terminal,dict):return None
+    error=terminal.get('error')
+    reason='Incomplete response returned, reason: max_output_tokens'
+    if terminal.get('type')!='turn.failed' or not isinstance(error,dict) or error.get('message')!=reason:
+        return None
+    return dict(reason='provider_max_output_tokens',model_result_path=str(path),
+                model_result_sha256=hashlib.sha256(raw).hexdigest(),terminal_event=terminal,
+                usage_complete=False,exclude_from_complete_cost_comparisons=True)
+
+
+def halts_dispatch(issue, result, model_failure_evidence=None):
     # A recognized model deadline is a retained terminal exception. Missing
     # accounting still excludes this observation from complete-cost comparisons.
-    return bool(issue) and not (
+    known_timeout=(
         issue == 'incomplete_api_usage' and result.get('model_returncode') == 124
         and result.get('completed') and result.get('status') in {'task_or_model_failed','passed_after_model_timeout'})
+    known_budget=(issue=='incomplete_api_usage' and result.get('completed')
+        and result.get('status')=='task_or_model_failed' and result.get('model_returncode')==1
+        and model_failure_evidence is not None
+        and model_failure_evidence.get('reason')=='provider_max_output_tokens')
+    return bool(issue) and not (known_timeout or known_budget)
 
 
 def summarize_outcomes(by):
@@ -194,7 +230,13 @@ def main():
     parser.add_argument('--allow-protocol-update',action='store_true',
                         help='Register a user-authorized protocol change; never pool incompatible comparisons.')
     parser.add_argument('--inventory',type=Path,default=DATA/'validation/tb-usability-inventory-20261019.json')
+    parser.add_argument('--min-free-disk-gib',type=float,default=350,
+                        help='Stop new dispatches below this free space; 0 disables the disk guard.')
     args=parser.parse_args()
+    if args.min_free_disk_gib < 0 or not math.isfinite(args.min_free_disk_gib):
+        parser.error('--min-free-disk-gib must be finite and nonnegative')
+    if full_dispatch_blocked(args.canary):
+        raise RuntimeError('Full dispatch is held pending repair/trend validation: '+str(FULL_DISPATCH_HOLD))
     assert Path(args.name).name==args.name and args.name.startswith('tb-dual-native-')
     assert socket.gethostname()=='r760-ssd'
     assert os.environ['DOCKER_HOST']=='unix:///run/agenttx-docker/docker.sock'
@@ -230,6 +272,7 @@ def main():
     registration=dict(registered_at=now(),host=socket.gethostname(),cohort=args.name,
         expected_cells=len(cells),tasks=names,harnesses=['sweagent','codex'],policies=POLICIES,
         contexts=CONTEXTS,workers_total=8,model='gpt-5.6-luna',reasoning_effort='max',
+        min_free_disk_gib=args.min_free_disk_gib,disk_guard_enabled=args.min_free_disk_gib>0,
         model_session_wall_s=MODEL_TIMEOUT_S,verifier_wall_s=VERIFIER_TIMEOUT_S,cell_wall_s=CELL_TIMEOUT_S,
         protocol=PROTOCOL,completion_contract=COMPLETION_CONTRACT,success_policy=SUCCESS_POLICY,
         comparison_configuration=experiment_configuration(),max_steps=None,max_model_calls=None,
@@ -243,6 +286,7 @@ def main():
         old_results_inherited=bool(continuation),outcome_based_retry=False,continuation=continuation,
         verifier_filesystem='same_agent_transaction_view',publication_performed=False)
     registration['incomplete_timeout_usage_policy']='Retain infrastructure exception, record known usage lower bound, exclude from complete-cost comparisons, continue pending cells without retry.'
+    registration['incomplete_provider_budget_usage_policy']='Retain exception and raw failure; require hashed structured terminal max_output_tokens evidence; no zero imputation, complete-cost inclusion or outcome-based retry; continue pending cells.'
     save(root/'registration.json',registration);save(root/'source-manifest.json',manifest)
     save(DATA/'validation/active-tb-dual-native.json',dict(cohort=args.name,root=str(root),canary=args.canary,
         coordinator_pid=os.getpid(),activated_at=now()))
@@ -268,9 +312,13 @@ def main():
             issue='worker_wall_timeout' if timed_out else infrastructure_issue(result,row['expected_context'])
             row.update(state='infrastructure_error' if issue else 'completed',issue=issue,
                 result_path=str(path),finished_at=now(),worker_returncode=proc.returncode)
-            if halts_dispatch(issue,result):stop=f"{row['task']}/{row['harness']}/{row['policy']}: {issue}"
+            budget_evidence=model_budget_failure_evidence(result,path) if issue=='incomplete_api_usage' else None
+            if budget_evidence:row['model_failure_evidence']=budget_evidence
+            if halts_dispatch(issue,result,budget_evidence):stop=f"{row['task']}/{row['harness']}/{row['policy']}: {issue}"
             del active[key]
-        if shutil.disk_usage(DATA).free<350*2**30:stop=stop or 'data_disk_below_350_gib'
+        if args.min_free_disk_gib>0 and shutil.disk_usage(DATA).free<args.min_free_disk_gib*2**30:
+            stop=stop or f'data_disk_below_{args.min_free_disk_gib:g}_gib'
+        if full_dispatch_blocked(args.canary):stop='user_repair_and_trend_validation_hold'
         for row in cells:
             if stop or len(active)>=8:break
             if row['state']!='pending':continue

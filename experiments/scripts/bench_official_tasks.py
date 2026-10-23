@@ -1118,8 +1118,8 @@ def run_once(
             {} if direct_runtime else read_recovery_documents(agent, docs)
         )
         state_paths = {
-            str(injected.get("faulty_path") or "").lstrip("./"),
-            *[str(path).lstrip("./") for path in injected.get("derived_paths") or ()],
+            Path(str(injected["faulty_path"])).as_posix() if injected.get("faulty_path") else "",
+            *[Path(str(path)).as_posix() for path in injected.get("derived_paths") or ()],
         }
         state_paths.discard("")
         path_exists = (

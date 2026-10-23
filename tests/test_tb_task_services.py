@@ -30,46 +30,66 @@ def test_service_evidence_rejects_modified_source_or_effective_compose(tmp_path,
 def test_service_attachment_uses_owned_network_and_original_data_volumes():
     stack=object.__new__(services.TaskServices)
     stack.evidence=Path('/verified/evidence.json')
-    stack.network='private-unique-task-network';stack.client_id='owned-client'
+    stack.network='container:owned-client';stack.client_id='owned-client'
     stack.client=dict(environment=dict(DATABASE_URL='postgresql://db:5432/task'),
                       extra_hosts=['homeserver.local:127.0.0.1'])
     command=['docker','run','--network','host','--mount','type=bind,src=/code,dst=/code,readonly','image','worker']
     result=stack.apply(command)
-    assert result[result.index('--network')+1]=='private-unique-task-network'
+    assert result[result.index('--network')+1]=='container:owned-client'
     assert result[result.index('--volumes-from')+1]=='owned-client'
     assert 'DATABASE_URL=postgresql://db:5432/task' in result
-    assert 'homeserver.local:127.0.0.1' in result
+    assert '--add-host' not in result  # Already on the shared anchor's hosts file.
     assert command[command.index('--network')+1]=='host'
     assert result[-2:]==['image','worker']
     equals=stack.apply(['docker','run','--network=host','image','worker'])
-    assert '--network=private-unique-task-network' in equals and '--network=host' not in equals
+    assert '--network=container:owned-client' in equals and '--network=host' not in equals
 
 
-def test_task_firewall_is_scoped_and_rolls_back_partial_addition(monkeypatch):
+def test_standalone_task_never_inherits_host_network():
+    stack=object.__new__(services.TaskServices)
+    stack.evidence=None
+    stack.network='container:isolated-anchor'
+    stack.client_id=None;stack.client={}
+    result=stack.apply(['docker','run','--privileged','--network','none','image','worker'])
+    assert result[result.index('--network')+1]==stack.network
+    assert '--volumes-from' not in result
+    assert 'host' not in result
+
+
+def test_usermode_failure_cleans_only_owned_containers(tmp_path,monkeypatch):
+    monkeypatch.setattr(services,'service_evidence',lambda *a:None)
+    monkeypatch.setattr(subprocess,'check_output',lambda *a,**k:'owned-anchor\n')
     calls=[]
-    def run(command,**kwargs):
+    monkeypatch.setattr(subprocess,'run',lambda cmd,**kw:calls.append(cmd))
+    monkeypatch.setattr(services.TaskServices,'_start_usermode',lambda *a:(_ for _ in ()).throw(RuntimeError('failed network')))
+    stack=services.TaskServices(tmp_path,'example',tmp_path,'sha256:example')
+    with pytest.raises(RuntimeError):stack.start()
+    assert calls==[['docker','rm','-f','owned-anchor']]
+
+
+def test_network_start_script_never_writes_host_firewall():
+    assert 'iptables' not in services.USERMODE_START
+    assert '8080' not in services.USERMODE_START
+    assert "'/proc/self/ns/net'" in services.USERMODE_START
+    assert 'slirp4netns' in services.USERMODE_START
+
+
+def test_localstack_keeps_original_entrypoint_outside_tool_processes(tmp_path,monkeypatch):
+    monkeypatch.setattr(services,'service_evidence',lambda *a:None)
+    calls=[]
+    def output(command,**kw):
         calls.append(command)
-        if '-C' in command:return subprocess.CompletedProcess(command,1)
-        if '-I' in command and 'FORWARD' in command:raise RuntimeError('injected firewall failure')
-        return subprocess.CompletedProcess(command,0)
-    monkeypatch.setattr(subprocess,'run',run)
-    monkeypatch.setattr(sys,'argv',['rules','add','172.18.0.0/16','br-0123456789ab','agenttx-tb-01234567890123456789_task'])
-    with pytest.raises(RuntimeError,match='injected firewall failure'):
-        exec(services.NETWORK_RULES,{})
-    mutations=[c for c in calls if '-I' in c or '-D' in c]
-    assert [next(x for x in c if x in {'-I','-D'}) for c in mutations]==['-I','-I','-D']
-    assert all('--comment' in c and 'agenttx-tb-01234567890123456789_task' in c for c in mutations)
-    assert '-s' in mutations[-1] and '172.18.0.0/16' in mutations[-1]
-    assert all('-F' not in c and '-P' not in c for c in calls)
-
-
-@pytest.mark.parametrize('subnet,bridge,label',[
-    ('0.0.0.0/0','br-0123456789ab','agenttx-tb-01234567890123456789_task'),
-    ('172.18.0.0/16','docker0','agenttx-tb-01234567890123456789_task'),
-    ('172.18.0.0/16','br-0123456789ab','unowned-network')])
-def test_task_firewall_rejects_unowned_or_global_scope(monkeypatch,subnet,bridge,label):
-    calls=[]
-    monkeypatch.setattr(subprocess,'run',lambda *a,**k:calls.append(a))
-    monkeypatch.setattr(sys,'argv',['rules','add',subnet,bridge,label])
-    with pytest.raises(AssertionError):exec(services.NETWORK_RULES,{})
-    assert not calls
+        if command[:3]==['docker','image','inspect']:
+            return json.dumps([dict(Config=dict(Entrypoint=['docker-entrypoint.sh']))])
+        return 'owned-localstack-anchor\n'
+    monkeypatch.setattr(subprocess,'check_output',output)
+    monkeypatch.setattr(services.TaskServices,'_start_usermode',lambda self,anchor:setattr(self,'network','container:'+anchor))
+    checked=[]
+    monkeypatch.setattr(services.TaskServices,'_wait_original_localstack',lambda self:checked.append(self.anchor_id))
+    stack=services.TaskServices(tmp_path,'create-bucket',tmp_path,'sha256:original-task-image').start()
+    command=next(c for c in calls if c[:2]==['docker','run'])
+    assert '--entrypoint' not in command and '--entrypoint=/usr/bin/python3' not in command
+    assert 'sha256:original-task-image' in command
+    assert stack.client_id==stack.anchor_id=='owned-localstack-anchor'
+    assert checked==['owned-localstack-anchor']
+    assert 'sample-bucket' not in ' '.join(command)

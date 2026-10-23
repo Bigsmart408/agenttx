@@ -112,6 +112,11 @@ def test_terminal_cached_downloads_replace_only_known_instructions(tmp_path, mon
     original = "FROM ghcr.io/example/base:latest\n" + "\n".join(
         instruction for instruction, _, _, _ in downloads
     ) + "\nRUN true\n"
+    if task_id == "leelachess0-pytorch-conversion":
+        original += (
+            "RUN pip install torch==2.8.0 torchvision==0.23.0 "
+            "--index-url https://download.pytorch.org/whl/cpu\n"
+        )
     (source / "Dockerfile").write_text(original)
     cache = tmp_path / "assets"
     cache.mkdir()
@@ -1097,6 +1102,21 @@ def test_recovery_manifest_certifies_retained_state(tmp_path):
     assert len(artifact["sha256"]) == 64
     assert manifest["invalidated"][1]["current_state"] == "absent"
     assert recovery_manifest_json(manifest).endswith("\n")
+
+
+@pytest.mark.parametrize('source',['.agenttx_faults/case.txt','./.agenttx_faults/case.txt','.hidden.py'])
+def test_recovery_manifest_preserves_hidden_source_path_and_observed_state(tmp_path,source):
+    docs=[DocSpec('recovery_notes/design.md','design',1)]
+    ledger=Ledger()
+    note=ledger.add_step('note',[Effect(str(tmp_path/docs[0].path),EffectKind.WRITE)])
+    manifest=build_recovery_manifest(policy='causal',ledger=ledger,
+        injected=dict(faulty_path=source,independent_steps=[note.step_id],derived_paths=['./.derived/output']),
+        docs=docs,document_contents={docs[0].path:document_content('design',1,'case')},
+        workdir=tmp_path,rollback_targets=[],path_exists={source:True,'./.derived/output':False})
+    assert manifest['authoritative']
+    assert manifest['invalidated'][0]['path']==Path(source).as_posix()
+    assert manifest['invalidated'][0]['current_state']=='restored'
+    assert manifest['invalidated'][1]['path']=='.derived/output'
 
 
 def test_recovery_manifest_describes_final_replayed_state_not_old_loss(tmp_path):

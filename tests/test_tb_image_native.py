@@ -126,6 +126,46 @@ def test_runtime_git_preserves_available_image_git(tmp_path,monkeypatch):
     assert native.prepare_runtime_tools(tmp_path)==dict(git='image-provided')
 
 
+def test_official_verifier_exposes_redirected_diagnostics_and_preserves_exit(tmp_path):
+    import subprocess
+    import shlex
+    setup=tmp_path/'setup.sh'
+    setup.write_text('echo bootstrap\nprintf "assertion failed\\n" > '+shlex.quote(str(tmp_path/'verifier.stdout'))+
+                     '\nprintf "test diagnostic\\n" > '+shlex.quote(str(tmp_path/'verifier.stderr'))+'\nexit 7\n')
+    (tmp_path/'verifier.stdout').write_text('stale passing verdict')
+    wrapper=tmp_path/'verify.sh'
+    wrapper.write_text(native.verifier_entrypoint_script(True,tmp_path,setup))
+    verdict=subprocess.run(['bash',str(wrapper)],capture_output=True,text=True)
+    assert verdict.returncode==7
+    assert verdict.stdout=='bootstrap\nassertion failed\n'
+    assert verdict.stderr=='test diagnostic\n'
+    first=next((tmp_path/'verifier-invocations').iterdir())
+    assert (first/'previous.stdout').read_text()=='stale passing verdict'
+    assert (first/'test.stdout').read_text()=='assertion failed\n'
+    setup.write_text('echo bootstrap-failed >&2\nexit 3\n')
+    verdict=subprocess.run(['bash',str(wrapper)],capture_output=True,text=True)
+    assert verdict.returncode==3 and verdict.stdout==''
+    assert verdict.stderr=='bootstrap-failed\n'
+    assert (first/'test.stdout').read_text()=='assertion failed\n'
+
+
+def test_model_handoff_replaces_internal_controller_notice_without_changing_history():
+    from agenttx.conversation import ConversationLog
+    log=ConversationLog();log.seed('system','original')
+    log.append_turn([dict(role='assistant',content='recorded action'),dict(role='tool',content='retained observation')],
+                    step_ids=[1],tool_names=['run_shell'],kind='effect')
+    log.append_turn([dict(role='user',content='verifier:auto-localization-crash-verifier')],kind='recovery')
+    before=log.to_dict()
+    for policy in native.POLICIES:
+        prompt=native.codex_recovery_prompt(log,policy,native.completion_prompt('official task'))
+        assert 'retained observation' in prompt
+        assert 'auto-localization-crash-verifier' not in prompt
+        assert native.OFFICIAL_VERIFIER_COMMAND in prompt
+        assert prompt.index('retained observation')<prompt.index('Current authoritative task')
+        assert 'not shell commands' in prompt
+    assert log.to_dict()==before
+
+
 def test_runtime_missing_git_uses_only_local_fallback(tmp_path,monkeypatch):
     fallback=tmp_path/'fallback';fallback.write_text('local executable')
     target=tmp_path/'git'
@@ -243,3 +283,21 @@ def test_logged_api_usage_does_not_substitute_text_estimate(tmp_path):
     usage=native.logged_usage(tmp_path,'sweagent',dict(model_calls=1,total_tokens=76))
     assert usage['complete'] and usage['total_tokens']==100
     assert not native.logged_usage(tmp_path,'sweagent',dict(model_calls=2))['complete']
+
+
+def test_network_baseline_preserves_hosts_before_localhost_preflight(tmp_path,monkeypatch):
+    calls=[]
+    pool=SimpleNamespace(try_bin=Path('/try'),session_dir=tmp_path/'session',
+        refresh_summary=lambda:None,upperdir_digests=lambda:{'baseline':'preserved'})
+    harness=SimpleNamespace(tx=SimpleNamespace(pool=pool),workdir=tmp_path)
+    monkeypatch.setattr(native.shutil,'copyfile',lambda *args:None)
+    monkeypatch.setattr(native,'file_hash',lambda path:'source-hash')
+    def run(command,**kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0,stdout='127.0.0.1 STREAM localhost',stderr='')
+    monkeypatch.setattr(native.subprocess,'run',run)
+    evidence=native.prime_resolver(harness)
+    assert [c[-1] for c in calls[:2]]==['/etc/resolv.conf','/etc/hosts']
+    assert calls[-1][-3:]==['getent','ahostsv4','localhost']
+    assert evidence['localhost_resolution'] and set(evidence['files_sha256'])=={'hosts','resolv.conf'}
+    assert pool._cached_digests=={'baseline':'preserved'}

@@ -26,18 +26,62 @@ from experiments.scripts.experiment_provenance import source_manifest
 from experiments.scripts.experiment_credentials import private_values, purge_private_codex_auth
 from experiments.workloads import terminal_bench_suite as tb
 
-PROTOCOL = 'agenttx.tb-image-native-recovery/v6'
+PROTOCOL = 'agenttx.tb-image-native-recovery/v7'
 COMPLETION_CONTRACT = 'explicit-derived-cleanup/v1'
 SUCCESS_POLICY = 'accept-verified-model-timeout/v1'
 MODEL_TIMEOUT_S = 3600
 VERIFIER_TIMEOUT_S = 1800
 COORDINATOR_GIT = Path('/usr/local/bin/git')
+OFFICIAL_VERIFIER_COMMAND = 'bash /opt/agenttx-verifier/verify.sh'
 POLICIES = ('clean_recovery', 'crash_no_rollback', 'temporal_checkpoint', 'whole_branch_abort', 'causal', 'ideal_oracle')
 CONTEXTS = {p: ('compact' if p in ('causal', 'ideal_oracle', 'clean_recovery') else 'full') for p in POLICIES}
 
 
 def recovery_messages(conversation, policy):
-    return compact_recovery_messages(conversation) if CONTEXTS[policy] == 'compact' else conversation.active_messages()
+    # The current authoritative handoff replaces controller recovery notices.
+    # Those notices contain internal verifier labels, not executable tests.
+    from agenttx.conversation import ConversationLog
+    view = ConversationLog.from_dict(conversation.to_dict())
+    view.turns = [turn for turn in view.turns if turn.kind != 'recovery']
+    return compact_recovery_messages(view) if CONTEXTS[policy] == 'compact' else view.active_messages()
+
+
+def codex_recovery_prompt(conversation, policy, handoff):
+    return ('Retained task tool history (invalidated calls already removed):\n'
+            + json.dumps(recovery_messages(conversation,policy))
+            + '\n\nCurrent authoritative task and recovery handoff:\n' + handoff)
+
+
+def verifier_entrypoint_script(prepared, results_root=Path('/results'), script=None):
+    """Expose diagnostics from the unchanged bootstrap/test script to callers."""
+    import shlex
+    script=script or ('/opt/agenttx-verifier/setup.sh' if prepared else '/opt/agenttx-verifier/run-tests.sh')
+    return '''#!/bin/bash
+set -u
+results_root='''+shlex.quote(str(results_root))+'''
+mkdir -p "$results_root/verifier-invocations" || exit $?
+attempt=$(mktemp -d "$results_root/verifier-invocations/run.XXXXXX") || exit $?
+# The prepared scripts use fixed output paths. Archive previous evidence and
+# remove stale copies so an early bootstrap failure cannot show an old pass.
+for suffix in stdout stderr rc xml; do
+  file="$results_root/verifier.$suffix"
+  if [ -f "$file" ]; then cp -p "$file" "$attempt/previous.$suffix" || exit $?; fi
+  rm -f "$file" || exit $?
+done
+export TEST_DIR=/tests
+bash '''+shlex.quote(str(script))+''' >"$attempt/bootstrap.stdout" 2>"$attempt/bootstrap.stderr"
+rc=$?
+cat "$attempt/bootstrap.stdout"
+cat "$attempt/bootstrap.stderr" >&2
+'''+('''for suffix in stdout stderr rc xml; do
+  file="$results_root/verifier.$suffix"
+  if [ -f "$file" ]; then cp -p "$file" "$attempt/test.$suffix" || exit $?; fi
+done
+if [ -f "$attempt/test.stdout" ]; then cat "$attempt/test.stdout"; fi
+if [ -f "$attempt/test.stderr" ]; then cat "$attempt/test.stderr" >&2; fi
+''' if prepared else '')+'''printf '%s\\n' "$rc" > "$attempt/returncode"
+exit "$rc"
+'''
 
 
 def outcome_success(model_rc, verifier_rc, contracts_valid):
@@ -69,6 +113,15 @@ def completion_prompt(task_text):
         'A passing official test alone does not complete recovery while this '
         'artifact remains. Do not change official tests.\n'
         'Work in the original image working directory using its installed runtimes.'
+        '\n\nOfficial task verifier (executable shell command, for every policy):\n'
+        f'`{OFFICIAL_VERIFIER_COMMAND}`\n'
+        'Run this command to check the original task; it prints test and bootstrap diagnostics '
+        'and returns the official test exit code. Internal crash-guard/localization verifier '
+        'labels in recorded history are controller metadata, not shell commands or official '
+        'task acceptance tests. A recovered synthetic crash marker does not establish that '
+        'the original task has been solved. Do not change tests, the verifier entrypoint, or '
+        'your execution account to bypass a failure. If verification cannot start, report '
+        'the concrete environment error.'
     )
 
 
@@ -117,17 +170,28 @@ def tree_manifest(root):
 
 
 def prime_resolver(harness):
-    """Keep Docker's bind-mounted resolver in the transaction's baseline."""
-    source = Path('/etc/resolv.conf')
-    if not source.read_text().strip():
-        raise RuntimeError('task container has no DNS configuration')
-    template = Path('/var/tmp/agenttx-docker-resolv.conf')
-    shutil.copyfile(source, template)
+    """Keep Docker's network files in the private transaction baseline."""
     pool = harness.tx.pool
-    subprocess.run([str(pool.try_bin), '-N', str(pool.session_dir), '--', 'cp',
-                    str(template), '/etc/resolv.conf'], cwd=harness.workdir, check=True, timeout=30)
+    evidence = {}
+    for name in ('resolv.conf', 'hosts'):
+        source = Path('/etc')/name
+        if not source.read_text().strip():
+            raise RuntimeError('task container has no network configuration: '+name)
+        template = Path('/var/tmp')/('agenttx-docker-'+name)
+        shutil.copyfile(source, template)
+        subprocess.run([str(pool.try_bin), '-N', str(pool.session_dir), '--', 'cp',
+                        str(template), str(source)], cwd=harness.workdir, check=True, timeout=30)
+        evidence[name] = file_hash(source)
+    # localhost must resolve through hosts even when an original service later
+    # changes resolv.conf to its own DNS server. This is environment setup only.
+    probe = subprocess.run([str(pool.try_bin), '-N', str(pool.session_dir), '--',
+        'getent', 'ahostsv4', 'localhost'],
+        cwd=harness.workdir, capture_output=True, text=True, timeout=30)
+    if probe.returncode or '127.0.0.1' not in probe.stdout:
+        raise RuntimeError('transaction localhost resolution failed: '+probe.stderr[-2000:])
     pool.refresh_summary()
     pool._cached_digests = pool.upperdir_digests()
+    return dict(files_sha256=evidence, localhost_resolution=True)
 
 
 def compact_recovery_messages(conversation):
@@ -188,7 +252,7 @@ def official_tests_directory(source, output):
 
 def build_command(args, identity, cell, task_file, test_script, tests, local_uv):
     command = ['docker', 'run', '--rm', '--pull', 'never', '--privileged',
-               '--cidfile', str(cell/'container.cid'), '--network', 'host',
+               '--cidfile', str(cell/'container.cid'), '--network', 'none',
                '--tmpfs', '/tmp:exec', '--workdir', identity['workdir']]
     task_user=identity['user'] if identity['user'] not in {'root','0','0:0'} else None
     if task_user:command += ['--user','0']  # namespace coordinator only; pool drops every task command
@@ -220,6 +284,8 @@ def build_command(args, identity, cell, task_file, test_script, tests, local_uv)
         mount(command, source, destination)
     if getattr(args, 'verifier_setup', None):
         mount(command, args.verifier_setup, '/opt/agenttx-verifier/setup.sh')
+    if getattr(args, 'verifier_entrypoint', None):
+        mount(command, args.verifier_entrypoint, '/opt/agenttx-verifier/verify.sh')
     mount(command, local_uv, '/tmp/agenttx-uv')
     portable_git=getattr(args,'portable_git',None)
     if portable_git:
@@ -341,11 +407,14 @@ def run_host(args):
         local_uv = local_uv or args.uv
         if local_uv is None:
             raise ValueError('provide --uv for the official test bootstrap')
+        args.verifier_entrypoint=args.output_dir/'official-verifier.sh'
+        args.verifier_entrypoint.write_text(verifier_entrypoint_script(bool(args.verifier_setup)))
         task_file = args.output_dir/'task.json'
         task_file.write_text(json.dumps(dataclasses.asdict(task),indent=2))
         registration.update(image=identity, tests=tree_manifest(tests), test_layout=test_layout,
             original_test_script_sha256=file_hash(source/'run-tests.sh'),
             effective_test_script_sha256=file_hash(script), uv_sha256=file_hash(local_uv),
+            verifier_entrypoint_sha256=file_hash(args.verifier_entrypoint),
             profile_sha256=file_hash(args.profile_dir/('sweagent.toml' if args.harness=='sweagent' else 'config.toml')),
             codex_sha256=file_hash(args.codex_bin), code_mode_host_sha256=file_hash(args.codex_bin.parent/'codex-code-mode-host'))
         (args.output_dir/'registration.json').write_text(json.dumps(registration,indent=2))
@@ -488,7 +557,7 @@ def run_inside(args):
             tool_user=task_user,
             policy=CommitPolicy(workspace,allow_external_writes=True,ephemeral_roots=(Path('/root'),Path('/tmp'))))
         tx=h.tx
-        prime_resolver(h)
+        row['network_baseline']=prime_resolver(h)
         gate=tx.run_tool('runtime-preflight',['bash','-c','printf runtime-ok'],trace_reads=True,timeout_s=30)
         if gate.returncode or gate.stdout.strip()!='runtime-ok':
             raise RuntimeError(f'task image transaction preflight failed: {gate.stderr}')
@@ -576,7 +645,7 @@ def run_inside(args):
                            if injected else None)
                 result=adapter.run_in_transaction(h,prompt,native_context=context)
             else:
-                result=adapter.run_in_transaction(h,prompt+'\n'+json.dumps(recovery_messages(tx.conversation,args.policy)))
+                result=adapter.run_in_transaction(h,codex_recovery_prompt(tx.conversation,args.policy,prompt))
             row['timings']['model_wall_s']=time.perf_counter()-stamp
             (output/'model-result.json').write_text(json.dumps(dataclasses.asdict(result),indent=2))
             row.update(model_returncode=result.returncode,prompt_tokens=result.prompt_tokens,
@@ -601,8 +670,7 @@ def run_inside(args):
                 'bash','-c','rm -rf /tests && mkdir /tests && cp -a /opt/agenttx-verifier/tests/. /tests/'],
                 60)
             if restore.returncode:raise RuntimeError('official test asset restore failed: '+restore.stderr[-2000:])
-            verifier='/opt/agenttx-verifier/setup.sh' if args.prepared_verifier else '/opt/agenttx-verifier/run-tests.sh'
-            rc=verify_transaction_view(tx,['env','TEST_DIR=/tests','bash',verifier],output,args.verifier_timeout)
+            rc=verify_transaction_view(tx,['bash','/opt/agenttx-verifier/verify.sh'],output,args.verifier_timeout)
             row['timings']['verification_wall_s']=time.perf_counter()-stamp
             row['verifier_filesystem']='same_agent_transaction_view'
             row['verifier_user']='root'

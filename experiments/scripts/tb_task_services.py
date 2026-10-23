@@ -9,43 +9,16 @@ import yaml
 
 from experiments.scripts.validate_tb_ready_local import DATA, digest, save
 
-NETWORK_HELPER_IMAGE='sha256:ef8aa38c0d00b9d33be678a4a3af1271adea71b1e66bf9b092373eceee831187'
-NETWORK_RULES=r'''
-import ipaddress,json,re,subprocess,sys
-action,subnet,bridge,label=sys.argv[1:]
-network=ipaddress.ip_network(subnet,strict=True)
-assert network.version==4 and network.is_private and network.prefixlen>=16
-assert re.fullmatch(r'br-[0-9a-f]{12}',bridge)
-assert re.fullmatch(r'agenttx-tb-[0-9a-f]{20}_task',label)
-assert action in {'add','remove'}
-comment=['-m','comment','--comment',label]
-rules=[['-t','nat','POSTROUTING','-s',subnet,'!','-o',bridge,*comment,'-j','MASQUERADE'],
-       ['-t','filter','FORWARD','-i',bridge,*comment,'-j','ACCEPT'],
-       ['-t','filter','FORWARD','-o',bridge,'-m','conntrack','--ctstate','RELATED,ESTABLISHED',*comment,'-j','ACCEPT']]
-changed=[]
-try:
- for tableflag,table,chain,*rule in rules:
-  prefix=['/usr/sbin/iptables','-w','10',tableflag,table]
-  exists=subprocess.run([*prefix,'-C',chain,*rule],capture_output=True).returncode==0
-  if action=='add' and not exists:
-   subprocess.run([*prefix,'-I',chain,'1',*rule],check=True);changed.append([*prefix,'-D',chain,*rule])
-  elif action=='remove' and exists:subprocess.run([*prefix,'-D',chain,*rule],check=True)
-except Exception:
- if action=='add':
-  for command in reversed(changed):subprocess.run(command,capture_output=True)
- raise
-print(json.dumps(dict(action=action,subnet=subnet,bridge=bridge,comment=label,rules=rules)))
+# Pinned after the domestic-mirror-only helper build; no model proxy/listener.
+NETWORK_HELPER_IMAGE='sha256:10b423d23527e36da72c554fa82426553a0a8474926e5dcc80048dda358baf0c'
+USERMODE_START=r'''
+import os,subprocess,sys
+pid=int(sys.argv[1]);assert pid>1
+assert os.readlink('/proc/self/ns/net')!=os.readlink('/proc/%d/ns/net'%pid)
+# Only the target private namespace is changed; host firewall is never written.
+subprocess.run(['nsenter','-t',str(pid),'-n','--','ip','route','del','default'],capture_output=True)
+os.execvp('slirp4netns',['slirp4netns','--configure','--mtu=1500','--disable-host-loopback',str(pid),'tap0'])
 '''
-
-
-def configure_egress(action, subnet, bridge, network):
-    # The dedicated daemon deliberately does not manage host firewall rules.
-    # Enter the host only to add/remove rules scoped to this owned task bridge.
-    command=['docker','run','--rm','--pull=never','--privileged','--pid=host','--network=host',
-        '--entrypoint','/usr/bin/nsenter',NETWORK_HELPER_IMAGE,'-t','1','-m','-n','--',
-        '/usr/bin/python3','-c',NETWORK_RULES,action,subnet,bridge,network]
-    result=subprocess.run(command,check=True,capture_output=True,text=True,timeout=45)
-    return json.loads(result.stdout)
 
 
 def service_evidence(source, task):
@@ -73,11 +46,36 @@ class TaskServices:
         self.client_id=None
         self.client={}
         self.egress=None
+        self.anchor_id=None
+        self.egress_id=None
+        self.standalone_network=False
         self.image_id=image_id
         self.task=task
 
     def start(self):
-        if self.evidence is None:return self
+        if self.evidence is None:
+            self.folder.mkdir()
+            try:
+                if self.task=='create-bucket':
+                    # The original LocalStack image ENTRYPOINT starts its S3
+                    # daemon. Keep that original service outside tool process
+                    # groups while the agent/verifier share its private netns.
+                    image=json.loads(subprocess.check_output(['docker','image','inspect',self.image_id],text=True,timeout=30))[0]
+                    assert image['Config']['Entrypoint']==['docker-entrypoint.sh']
+                    command=['docker','run','-d','--rm','--pull=never','--network=none',
+                        '--dns=10.0.2.3',self.image_id,'sh','-c','sleep infinity']
+                else:
+                    command=['docker','run','-d','--rm','--pull=never',
+                        '--network=none','--dns=10.0.2.3','--entrypoint=/usr/bin/python3',NETWORK_HELPER_IMAGE,
+                        '-c','import time;time.sleep(20000)']
+                self.anchor_id=subprocess.check_output(command,text=True,timeout=30).strip()
+                self._start_usermode(self.anchor_id)
+                if self.task=='create-bucket':
+                    self.client_id=self.anchor_id
+                    self._wait_original_localstack()
+            except Exception:
+                self.close();raise
+            return self
         self.folder.mkdir()
         prior=json.loads(self.evidence.read_text())
         config=yaml.safe_load((self.evidence.parent/'compose.yaml').read_text())
@@ -113,47 +111,81 @@ class TaskServices:
             info=json.loads(subprocess.check_output(['docker','inspect',self.client_id],text=True,timeout=30))[0]
             networks=info['NetworkSettings']['Networks'];assert len(networks)==1
             self.network=next(iter(networks))
-            network_info=json.loads(subprocess.check_output(['docker','network','inspect',self.network],
-                                     text=True,timeout=30))[0]
-            subnet=network_info['IPAM']['Config'][0]['Subnet']
-            bridge='br-'+network_info['Id'][:12]
-            self.egress=configure_egress('add',subnet,bridge,self.network)
-            save(self.folder/'egress.json',self.egress)
+            self._start_usermode(self.client_id)
             save(self.folder/'runtime.json',dict(client_id=self.client_id,network=self.network,
-                client_environment=self.client.get('environment',{})))
+                client_environment=self.client.get('environment',{}),host_network_namespace=False,
+                egress='slirp4netns',host_firewall_modified=False))
         except Exception:
             self.close();raise
         return self
 
+    def _wait_original_localstack(self):
+        import time
+        # Health only: never create sample-bucket or apply its public ACL.
+        probe="import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:4566/_localstack/health',timeout=3).status)"
+        last=None
+        for _ in range(45):
+            health=subprocess.run(['docker','run','--rm','--pull=never','--network='+self.network,
+                '--entrypoint=/usr/bin/python3',NETWORK_HELPER_IMAGE,'-c',probe],capture_output=True,text=True,timeout=10)
+            if health.returncode==0 and health.stdout.strip()=='200':
+                save(self.folder/'original-service.json',dict(task=self.task,image_id=self.image_id,
+                    original_entrypoint=['docker-entrypoint.sh'],health_status=200,task_solution_created=False,
+                    service_outlives_tool_processes=True,private_network_namespace=True))
+                return
+            last=health.stderr[-2000:];time.sleep(1)
+        raise RuntimeError('Original LocalStack service did not become healthy: '+str(last))
+
+    def _start_usermode(self, anchor):
+        import time
+        info=json.loads(subprocess.check_output(['docker','inspect',anchor],text=True,timeout=30))[0]
+        self.network='container:'+anchor
+        self.egress_id=subprocess.check_output(['docker','run','-d','--rm','--pull=never',
+            '--privileged','--pid=host','--network=host','--entrypoint=/usr/bin/python3',
+            NETWORK_HELPER_IMAGE,'-c',USERMODE_START,str(info['State']['Pid'])],text=True,timeout=30).strip()
+        # This is a trusted network-stack helper, never the task container.
+        # It opens ordinary outbound sockets and never listens on host ports.
+        probe="import urllib.request,urllib.error\ntry:\n print(urllib.request.urlopen('http://10.249.44.127:8080/v1/models',timeout=5).status)\nexcept urllib.error.HTTPError as e: print(e.code)"
+        last=None
+        for _ in range(10):
+            ready=subprocess.run(['docker','run','--rm','--pull=never','--network='+self.network,
+                '--entrypoint=/usr/bin/python3',NETWORK_HELPER_IMAGE,'-c',probe],
+                capture_output=True,text=True,timeout=15)
+            if ready.returncode==0 and ready.stdout.strip() in {'200','401'}:break
+            last=ready.stderr[-2000:];time.sleep(.5)
+        else:raise RuntimeError('Isolated outbound network failed its API reachability check: '+str(last))
+        save(self.folder/'egress.json',dict(mode='slirp4netns',anchor_id=anchor,
+            helper_id=self.egress_id,network=self.network,host_network_namespace=False,
+            host_firewall_modified=False,host_ports_published=False,endpoint_proxy=False))
+        save(self.folder/'runtime.json',dict(network=self.network,host_network_namespace=False,
+            task=self.task,egress='slirp4netns',host_firewall_modified=False))
+
     def apply(self, command):
-        if self.evidence is None:return command
-        assert self.network and self.client_id
+        assert self.network and self.network.startswith('container:')
+        if self.evidence is not None:assert self.client_id
         result=list(command)
         if '--network' in result:
             index=result.index('--network');result[index+1]=self.network
         else:
             index=next(i for i,value in enumerate(result) if value.startswith('--network='))
             result[index]='--network='+self.network
-        options=['--volumes-from',self.client_id]
+        options=['--volumes-from',self.client_id] if self.client_id else []
         for key,value in self.client.get('environment',{}).items():
             options+=['--env',key+'='+str(value)]
-        for value in self.client.get('extra_hosts',[]):options+=['--add-host',value]
+        # Docker shares the anchor's hosts/resolv.conf in container network mode.
         return result[:2]+options+result[2:]
 
     def close(self):
+        if self.anchor_id and self.task=='create-bucket':
+            logs=subprocess.run(['docker','logs',self.anchor_id],capture_output=True,text=True,timeout=15)
+            (self.folder/'original-service.log').write_text(logs.stdout+logs.stderr)
+        for cid in (self.egress_id,self.anchor_id):
+            if cid:subprocess.run(['docker','rm','-f',cid],capture_output=True,text=True,timeout=30)
+        self.egress_id=None;self.anchor_id=None
         if self.command is None:return
         try:
             result=subprocess.run([*self.command,'logs','--no-color'],capture_output=True,text=True,timeout=30)
             (self.folder/'services.log').write_text(result.stdout+result.stderr)
         finally:
-            if self.egress:
-                try:
-                    save(self.folder/'egress-cleanup.json',configure_egress('remove',
-                        self.egress['subnet'],self.egress['bridge'],self.network))
-                    self.egress=None
-                except Exception as exc:
-                    save(self.folder/'egress-cleanup-error.json',dict(error=repr(exc),rules=self.egress))
             result=subprocess.run([*self.command,'down','--volumes','--remove-orphans','--timeout','5'],
                                   capture_output=True,text=True,timeout=60)
-            save(self.folder/'cleanup.json',dict(returncode=result.returncode,
-                stdout=result.stdout,stderr=result.stderr))
+            save(self.folder/'cleanup.json',dict(returncode=result.returncode,stdout=result.stdout,stderr=result.stderr))

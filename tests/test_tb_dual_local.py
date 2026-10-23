@@ -1,6 +1,14 @@
 from experiments.scripts import run_tb_dual_local as runner
 
 
+def test_user_validation_hold_blocks_new_full_dispatch_even_with_invalid_metadata(tmp_path,monkeypatch):
+    hold=tmp_path/'hold.json';monkeypatch.setattr(runner,'FULL_DISPATCH_HOLD',hold)
+    assert not runner.full_dispatch_blocked()
+    hold.write_text('invalid metadata cannot authorize a full run')
+    assert runner.full_dispatch_blocked()
+    assert not runner.full_dispatch_blocked(canary=True)
+
+
 def test_worker_classification_does_not_require_task_success():
     row=dict(completed=True,success=False,context_variant='full',
              agent_runtime='official_task_container',verifier_runtime='same_official_task_container',
@@ -54,6 +62,30 @@ def test_resume_keeps_success_failure_and_infrastructure_observations_without_re
     old[-1]['state']='running'
     with pytest.raises(AssertionError,match='reconciled'):
         runner.inherit_terminal_cells(cells,old)
+
+
+def test_provider_output_budget_exit_needs_structured_terminal_evidence(tmp_path):
+    import json
+    result=dict(harness='codex',completed=True,status='task_or_model_failed',
+                model_returncode=1,container_returncode=0)
+    path=tmp_path/'host-result.json'
+    terminal=dict(type='turn.failed',error=dict(message='Incomplete response returned, reason: max_output_tokens'))
+    model=tmp_path/'model-result.json'
+    model.write_text(json.dumps(dict(returncode=1,events=[terminal])))
+    evidence=runner.model_budget_failure_evidence(result,path)
+    assert evidence['model_result_sha256']
+    assert evidence['exclude_from_complete_cost_comparisons']
+    assert not runner.halts_dispatch('incomplete_api_usage',result,evidence)
+    assert runner.halts_dispatch('incomplete_api_usage',result)
+    assert runner.halts_dispatch('conversation_workspace_mismatch',result,evidence)
+    assert runner.model_budget_failure_evidence({**result,'container_returncode':1},path) is None
+    for events in [
+        [dict(type='item.completed',item=dict(aggregated_output=json.dumps(terminal)))],
+        [terminal,dict(type='turn.completed')],
+        [dict(type='turn.failed',error=dict(message='connection failed'))],
+    ]:
+        model.write_text(json.dumps(dict(returncode=1,events=events)))
+        assert runner.model_budget_failure_evidence(result,path) is None
 
 
 def test_changed_limits_and_contract_require_explicit_registered_transition():

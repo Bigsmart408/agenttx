@@ -1,0 +1,5 @@
+# TB实验数据保留策略
+
+**最新存储规则，2026-10-22 14:05（北京时间，用户明确授权）。** 已结束实验只保留关键信息，完整模型轨迹仅保留Clean（clean_recovery），两套harness均包含main与replay；其他五组删除完整轨迹，保留成功/失败、main+replay及逐调用token账单、模型错误/官方验收诊断、配置/源码清单、恢复摘要和原始host-result字节。所有组删除结束单元的事务工作快照、重复per-cell缓存及细粒度大ledger；Clean完整原生轨迹/模型结果/日志保留，Codex原生会话从事务快照提取后在原路径保留。非Clean会话只保留usage事件，冻结用量读取器仍可复算；非Clean模型原始stdout/events不再保留，accounting-summary保留必要模型计数与terminal error。正在运行及未开始的单元不清，单元结束后自动处理；原始输入数据、任务镜像、共享依赖缓存、环境准备证据完整保留，SWE-bench 按用户最新授权也执行仅 Clean 保留完整轨迹，详见 docs/SWE_STORAGE_RETENTION_20261022.md。此规则明确覆盖上文“保留所有原始轨迹/原归档副本完整不删”的旧承诺；不删除新失败的结果和诊断摘要，不按结果重跑。持久服务agenttx-tb-summary-retention-20261022已启动，代码在本机系统盘/home/bfq/agenttx-maintenance/，摘要及审计在数据盘validation/tb-summary-retention-20261022；4种Clean/非Clean×Codex/SWE隔离验证均通过，涵盖清理后token不变、原始host-result不变、Clean完整轨迹保留、非Clean轨迹删除及幂等。此前r15归档已于11:56完成全部内容/元数据校验，125条注册结果哈希不变；按新授权也缩为上述保留规则。另本次发现GPG主进程结束后，孤儿gpg-agent仍被strace跟踪，致8路等待；仅终止各自容器内该strace的唯一剩余daemon tracee，保留完整处理记录，未修改题目文件/测试/提示/模型。该题双harness六策略12/12完成且全部成功，阻塞解除。证据：validation/tb-gpg-daemon-repair-20261022/。
+
+保留服务当前扫描活动cohort的终态单元及其继承的r15原路径。原恢复数据/mnt/recovery-sdc/recovery-20261014/restored不在清理范围。数据盘空间继续上报，min-free-disk-gib仍为0，不新增停派门槛。

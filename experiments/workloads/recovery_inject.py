@@ -287,7 +287,7 @@ def _is_under_workspace(path: str, workdir: Path) -> bool:
 def _relative_path(path: str, workdir: Path) -> Optional[str]:
     candidate = Path(path)
     if not candidate.is_absolute():
-        return candidate.as_posix().lstrip("./")
+        return candidate.as_posix()
     try:
         return candidate.resolve().relative_to(Path(workdir).resolve()).as_posix()
     except ValueError:
@@ -401,7 +401,11 @@ def build_recovery_manifest(
             manifest_mismatch = True
 
     invalidated = []
-    faulty_path = str(injected.get("faulty_path") or "").lstrip("./")
+    faulty_path = str(injected.get("faulty_path") or "")
+    if faulty_path:
+        faulty_path = _relative_path(faulty_path,workdir)
+        if faulty_path is None:raise ValueError('fault source is outside the task workspace')
+    path_exists = {_relative_path(str(path),workdir):exists for path,exists in path_exists.items()}
     if faulty_path:
         invalidated.append(
             {
@@ -411,7 +415,9 @@ def build_recovery_manifest(
                 "must_stay_absent": False,
             }
         )
-    for path in sorted({str(item).lstrip("./") for item in injected.get("derived_paths") or ()}):
+    derived_paths={_relative_path(str(item),workdir) for item in injected.get("derived_paths") or ()}
+    if None in derived_paths:raise ValueError('derived artifact is outside the task workspace')
+    for path in sorted(derived_paths):
         invalidated.append(
             {
                 "path": path,
@@ -615,7 +621,7 @@ def retained_artifact_access(
     workdir: Path,
 ) -> dict:
     """Summarize new-session access to retained artifacts from ledger effects."""
-    retained = [str(Path(path)).lstrip("./") for path in retained_paths]
+    retained = [Path(path).as_posix() for path in retained_paths]
     reopened = set()
     modified = set()
     read_effects = 0

@@ -1,0 +1,69 @@
+{
+  "source_directory": "/home/bfq/agenttx-maintenance",
+  "files": [
+    {
+      "file": "interrupt_broken_localstack_attempts_20261023.py",
+      "sha256": "84af7cf45b50c3f42119d56d5c7dace70c1168a0b22abd136b873a2b4fccef6f"
+    },
+    {
+      "file": "retain_swe_summaries_20261022.py",
+      "sha256": "a33a8e5db4a459eddf6dfe1793e940db7f5e552722ffcb76e0b733b6df6907b0"
+    },
+    {
+      "file": "retain_tb_summaries_20261022.py",
+      "sha256": "6bc21c217d568ecad2d74459d6283ff490de129ee845741c44166936d3c50ce2"
+    },
+    {
+      "file": "run_tb_hosts_resume_20261023.py",
+      "sha256": "135d2e2c54241e1c1488a0c39d4d43c049c9f75bf4f9a721bdae0985b9f617c3"
+    },
+    {
+      "file": "run_tb_network_resume_20261023.py",
+      "sha256": "547aaf78dff2eea64fe41c2edb87f10fb53e582205b76a8e2a45b91801d77faf"
+    },
+    {
+      "file": "run_tb_original_service_resume_20261023.py",
+      "sha256": "19d10e0607408a14ed9802e2aad96b2f8e02e822515a001a9643e9a5ab68bc00"
+    },
+    {
+      "file": "run_tb_retry_queue_20261022.py",
+      "sha256": "7ad9598ab312591b36e779ec847148443f98a25f96ed88c66f7befdf5f6f3963"
+    },
+    {
+      "file": "test_tb_hosts_resume_20261023.py",
+      "sha256": "0b04bc9b7c9c1b37da5c3441c459e83188d97cb79e05d1584b86e7f244f07a98"
+    },
+    {
+      "file": "test_tb_network_resume_20261023.py",
+      "sha256": "a018076b439b451b2c66acaaee1fb7ecb0fb24dbaea0a951e866f6dc8fdc6365"
+    },
+    {
+      "file": "test_tb_original_service_resume_20261023.py",
+      "sha256": "3030635816e63f2082bdd03e19b1819a1ec7e8e699527056157bdf0c33d7fe21"
+    },
+    {
+      "file": "test_tb_retry_queue_20261022.py",
+      "sha256": "cb78f56518e38288552051f0414061d71413ff4981c64418af9dd378c399293e"
+    },
+    {
+      "file": "unblock_tb_gpg_daemons_20261022.py",
+      "sha256": "e981c116750c9455aba5537ffbfcffb321632e01bca7c92e58d5bd05f66f45f5"
+    },
+    {
+      "file": "verify_original_localstack_20261023.py",
+      "sha256": "fae89a47bcddde044cb15eda5253c681faaa29af286ae0ec86fde92f6cb09c2e"
+    },
+    {
+      "file": "verify_tb_hosts_baseline_20261023.py",
+      "sha256": "b772a41c82ca0f9c7bd20b0561d8c7e5c347dfc6e821762700928bc2a90ed707"
+    },
+    {
+      "file": "verify_tb_network_isolation_20261023.py",
+      "sha256": "903b694ea65ba6297b9e314a7ace96625b906eb3db81e0e16fe43b9d7f7d7d79"
+    },
+    {
+      "file": "verify_tb_sidecar_usermode_20261023.py",
+      "sha256": "3c28169377f6debb817c3b425b4b6545e3fa135f8be37cfeb2f2c590ba6ca6e1"
+    }
+  ]
+}

@@ -12,7 +12,7 @@ import shlex
 import subprocess
 import time
 from experiments.scripts.run_tb_dual_local import (
-    DATA,PYTHON,ROOT,save,now,infrastructure_issue,effects,resume_protocol_changes)
+    DATA,PYTHON,ROOT,save,now,infrastructure_issue,effects,resume_protocol_changes,full_dispatch_blocked)
 from experiments.scripts.validate_tb_ready_local import digest
 
 
@@ -28,6 +28,8 @@ def main():
     parser.add_argument('--audit',type=Path,required=True)
     parser.add_argument('--allow-protocol-update',action='store_true')
     args=parser.parse_args()
+    if full_dispatch_blocked():
+        raise RuntimeError('Full continuation is held pending repair/trend validation')
     old=DATA/'results'/args.from_cohort
     assert old.is_dir() and args.to_cohort.startswith('tb-dual-native-')
     assert Path(args.from_cohort).name==args.from_cohort and Path(args.to_cohort).name==args.to_cohort
