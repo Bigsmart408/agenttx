@@ -1488,37 +1488,35 @@
     }
   },
   "palette": {
-    "native": "#ffffff",
-    "overlay": "#c7c7c7",
-    "delta": "#8a8a8a",
-    "branch": "#484848",
-    "try": "#171717",
+    "white": "#ffffff",
+    "gray": "#999999",
+    "black": "#252525",
     "lancet": "#ed1c24"
   },
   "variants": {
     "native": [
       "Native FS",
-      "native",
-      ""
+      "white",
+      ".."
     ],
     "overlay-sync": [
       "OverlayFS",
-      "overlay",
-      ".."
+      "gray",
+      ""
     ],
     "deltafs": [
       "DeltaBox",
-      "delta",
+      "gray",
       "xx"
     ],
     "branchfs": [
       "BranchFS",
-      "branch",
-      "oo"
+      "black",
+      ""
     ],
     "try": [
       "try",
-      "try",
+      "black",
       "++"
     ],
     "agenttx-overlay": [

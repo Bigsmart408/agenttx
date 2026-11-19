@@ -11,6 +11,7 @@ import sys
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,15 +25,32 @@ SOURCES = {
     'try': ROOT/'review/rq5-try-20261117/summary.json',
 }
 OUTPUT = ROOT/'paper/figures/rq5-storage'
-RQ5_PALETTE = {'native': '#ffffff', 'overlay': '#c7c7c7', 'delta': '#8a8a8a',
-               'branch': '#484848', 'try': '#171717', 'lancet': '#ed1c24'}
-VARIANTS = {'native': ('Native FS', 'native', ''),
-            'overlay-sync': ('OverlayFS', 'overlay', '..'),
-            'deltafs': ('DeltaBox', 'delta', 'xx'),
-            'branchfs': ('BranchFS', 'branch', 'oo'),
-            'try': ('try', 'try', '++'),
+RQ5_PALETTE = {'white': '#ffffff', 'gray': '#999999', 'black': '#252525',
+               'lancet': '#ed1c24'}
+CONTROL_PATTERNS = {'white': '..', 'gray': 'xx', 'black': '++'}
+VARIANTS = {'native': ('Native FS', 'white', CONTROL_PATTERNS['white']),
+            'overlay-sync': ('OverlayFS', 'gray', ''),
+            'deltafs': ('DeltaBox', 'gray', CONTROL_PATTERNS['gray']),
+            'branchfs': ('BranchFS', 'black', ''),
+            'try': ('try', 'black', CONTROL_PATTERNS['black']),
             'agenttx-overlay': ('Lancet', 'lancet', '')}
 LAYERED = ('overlay-sync', 'deltafs', 'branchfs', 'try', 'agenttx-overlay')
+
+
+def save_style_options():
+    fig = plt.figure(figsize=(17.8*CM, 2.6*CM))
+    handles, labels = [], []
+    for color, pattern in CONTROL_PATTERNS.items():
+        for name, hatch in (('solid', ''), ('patterned', pattern)):
+            handles.append(Patch(facecolor=RQ5_PALETTE[color], hatch=hatch,
+                edgecolor='#f0f0f0' if color == 'black' else '#3f3f3f', linewidth=.4))
+            labels.append(f'{color.capitalize()} / {name}')
+    fig.legend(handles, labels, loc='center', ncol=3, fontsize=8.5,
+               handlelength=2.6, handleheight=1.5, columnspacing=2, labelspacing=1)
+    for suffix in ('pdf', 'png'):
+        fig.savefig(OUTPUT/f'style-options.{suffix}', dpi=300,
+                    bbox_inches='tight', pad_inches=.08)
+    plt.close(fig)
 
 
 def main():
@@ -94,7 +112,7 @@ def main():
                 highs = np.array([g['ci95'][1] for g in groups])/divisor
                 bars = ax.bar(x+(offset-(len(variants)-1)/2)*width, means, width=width*.96,
                     color=RQ5_PALETTE[color], hatch=hatch,
-                    edgecolor='#f0f0f0' if variant in ('branchfs', 'try') else '#3f3f3f',
+                    edgecolor='#f0f0f0' if color == 'black' else '#3f3f3f',
                     linewidth=.3,
                     yerr=np.maximum(0, [means-lows, highs-means]), zorder=3,
                     error_kw=dict(ecolor='#343434', elinewidth=.5, capsize=1.2, capthick=.5))
@@ -157,6 +175,7 @@ def main():
                  protocol={key: summary['protocol'] for key, summary in summaries.items()})
     (OUTPUT/'figure-data.json').write_text(json.dumps(audit, indent=2)+'\n')
     plt.close(fig)
+    save_style_options()
     print('Generated six RQ5 panels; partial-update measurements replace file-commit comparisons.')
 
 
