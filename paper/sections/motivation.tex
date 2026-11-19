@@ -26,8 +26,8 @@ without expanding to dependent calls.
 
 For \system, the user specifies the file whose changes should be rolled
 back, without identifying a faulty step. The runtime derives the
-affected-call set from that file's recorded mutations and their file and
-tool-result dependencies. The controls receive the exact faulty step; Crab
+affected-call set from the recorded mutations of that file and their file
+and tool-result dependencies. The controls receive the exact faulty step; Crab
 also receives the exact affected turns. For each control, we choose the
 smallest withdrawal set its rule permits, so localization errors do not
 reduce retention. We measure the affected work removed and the collateral

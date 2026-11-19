@@ -35,9 +35,10 @@ from agent context.
 To this end, we present \system, a causal recovery runtime for coding
 agents. The key idea is to \textbf{let dependencies among tool calls
 determine the recovery boundary across filesystem state and agent context}.
-A user reviewing an agent's work may find that a file does not meet their
-expectations and ask to undo its changes. \system traces file dependencies
-and tool-result reuse from those changes to derive one rollback set.
+When reviewing changes made by an agent, a user may find that a file does
+not meet their expectations and ask to undo its changes. \system traces
+file dependencies and tool-result reuse from those changes to derive one
+rollback set.
 An isolated trial checks the expected file state and command/result residue
 before live recovery. The runtime restores affected file objects and
 removes the corresponding calls and results from agent context while preserving

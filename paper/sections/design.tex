@@ -27,7 +27,7 @@ saved versions, and conversation log. The three challenges in
 Section~\ref{sec:recovery-challenges} lead to three design points:
 \begin{itemize}
 \item \textbf{Select and validate $S$ via file and result dependencies.}
-Start from the reported files' mutations and audit their joint dependency
+Start from the mutations of the reported files and audit their joint dependency
 closure in an isolated branch (Section~\ref{sec:rollback-set}).
 \item \textbf{Control filesystem recovery in user space.}
 Retain object history incrementally, manage explicit OverlayFS checkpoints,
@@ -43,7 +43,7 @@ observations within and across turns
 \label{sec:rollback-set}
 A fault can propagate through a file, a reused tool result, or both.
 Figure~\ref{fig:dependency-closure} expands step 2 of
-Figure~\ref{fig:overview}: the reported file's mutations seed joint
+Figure~\ref{fig:overview}: mutations of the reported file seed joint
 dependency closure, an isolated residue audit checks the resulting state,
 and the selected $S$ drives both filesystem restoration and agent-context synchronization.
 
@@ -80,7 +80,7 @@ The controller normalizes the reported paths, resolves known aliases, and
 selects all active mutations of those files after the reference checkpoint
 as roots $B$. It alternates forward expansion through file and result edges
 until neither adds a call. In Figure~\ref{fig:dependency-closure}, a report
-for f selects E3 and E4; file effects lead to E6, and E3's reused result
+for f selects E3 and E4; file effects lead to E6, and reuse of the result from E3
 leads to E7, whose output E8 reads. The resulting
 $S=\{\mathrm{E3},\mathrm{E4},\mathrm{E6},\mathrm{E7},\mathrm{E8}\}$
 preserves independent E5 and captures the chain across both graphs.
@@ -150,7 +150,7 @@ The controller groups overlapping paths mutated by $S$, placing a selected
 directory and its children together. For each group, it resolves the
 nearest compatible saved state before its earliest selected mutation and
 rejects retained mutations that overlap a group after its earliest selected
-mutation. Earlier retained writes remain in that group's saved state.
+mutation. Earlier retained writes remain in the saved state of that group.
 Groups may use different
 historical versions; paths outside them retain their current state.
 In Figure~\ref{fig:design-workflow}, f comes from V0 before E3, h from V1
@@ -218,11 +218,11 @@ dependencies within this managed state. State equality covers contents,
 supported metadata, presence, and active call/result records.
 Distinctive-string matching alone does not establish capture completeness.
 
-Algorithm~\ref{alg:causal-rollback} computes the report's scope and applies
+Algorithm~\ref{alg:causal-rollback} computes the scope of the report and applies
 it. $\operatorname{Audit}$ checks frozen expected versions, checkpoint
 files, active identifiers, retained entries, and the lower baseline as
 described in Section~\ref{sec:rollback-set}. Its acceptance condition is
-independent of the original task's test outcome.
+independent of the test outcome for the original task.
 Write $Z=(X,C,\operatorname{Active}(H))$. The fixed transformation $T_S$
 restores each group from $V_{m(p)}$, projects records onto $R$, and marks
 $S$ inactive. $\operatorname{Fresh}(A)$ checks the frozen history signature;
@@ -276,7 +276,8 @@ $p$, faithful $V_{m(p)}|_p$ contains all earlier retained writes and no
 selected mutation of $p$. A later retained mutation overlapping $p$ would
 trigger rejection at line~\ref{algline:conflict}, contrary to acceptance.
 Thus restoring $V_{m(p)}|_p$ cannot leave a selected effect or lose a
-retained one; disjoint groups cannot overwrite each other's restoration.
+retained one; restoring one group cannot overwrite the restored state of a
+disjoint group.
 In particular, $X^{+}|_F\ne X_c|_F$ would require a surviving post-$c$
 mutation of $F$ or an incorrect saved version. The former belongs to
 $B\subseteq S$ and is removed; the latter contradicts faithful history.

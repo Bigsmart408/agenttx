@@ -59,7 +59,7 @@ Terminal-Bench~\cite{tbench} covers all 241 tasks with SWE-agent and Codex under
 five policies and model.
 Its 2,410 unique task--harness--policy cells contain 3,121 recorded original,
 retry, and repair attempts.
-We report each cell's latest attempted outcome after one authorized ordinary
+We report the latest attempted outcome for each cell after one authorized ordinary
 failure retry and separately audited environment/provider repairs.
 The final model-session and verifier limits are 3,600\,s and 1,800\,s;
 historical configuration revisions remain separate in cost pairing.
@@ -70,8 +70,8 @@ checks; 2,154 cells pass this contract, versus 2,156 official verifier passes.
 Lancet and the clean reference use compact context;
 no rollback, temporal checkpoints, and whole-branch rollback use full context.
 Tokens use API-reported usage and include main execution and replay.
-For TB, each cell's cost sums all recorded original, failed, retry, and repair
-attempts, including attempts preceding the latest outcome.
+For TB, the cost of each cell is the sum over all recorded original, failed,
+retry, and repair attempts, including attempts preceding the latest outcome.
 We retain all known spend, totaling 4.804 billion TB tokens; 235 historical
 attempts have incomplete usage, which we leave unknown.
 
@@ -115,8 +115,8 @@ On SWE, Lancet succeeds on 285 tasks, compared with 282 for no rollback,
 284 for checkpoints, and 243 for whole-branch rollback.
 On TB/SWE-agent, Lancet and whole-branch rollback both succeed on 208 tasks;
 the other policies succeed on 203--206.
-On TB/Codex, Lancet succeeds on 223 tasks, below whole-branch rollback's 227
-and the clean reference's 225.
+On TB/Codex, Lancet succeeds on 223 tasks, below the 227 successes with
+whole-branch rollback and the 225 successes with the clean reference.
 
 \begin{table}[t]
 \centering
@@ -141,7 +141,7 @@ Clean reference & 14.38\% (264) & 36.57\% (172) & 17.90\% (198) \\
 \end{table}
 
 \textbf{Model cost.}
-On SWE's jointly successful pairs, Lancet reduces cumulative tokens by
+On jointly successful SWE pairs, Lancet reduces cumulative tokens by
 58.43\%, 17.55\%, and 27.86\% against no rollback, checkpoints, and
 whole-branch rollback, respectively (Table~\ref{tab:swe-paired-savings}).
 The corresponding TB reductions are 24.70\%, 44.69\%, and 35.91\% with

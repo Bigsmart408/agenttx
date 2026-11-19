@@ -56,7 +56,7 @@ Before each call, the runtime preserves the historical state needed for later
 recovery. During execution, \texttt{strace}~\cite{strace} records supported reads
 and failed lookups; comparing pre-call and post-call upper state identifies
 mutations. The runtime associates these observations with the completed step
-and connects it to earlier effects using Section~\ref{sec:effect-dag}'s rules.
+and connects it to earlier effects using the rules in Section~\ref{sec:effect-dag}.
 These edges follow observed state use rather than dependencies guessed from
 command text.
 
@@ -87,8 +87,8 @@ before-images for $f$ before $A$, $h$ before $D$, and $p$ before $E$.
 These prior upper entries are absent in this example.
 The version store preserves object contents and required metadata through
 upper-layer checkpoints and immutable content storage.
-Recovery can therefore retrieve the state before each affected object's
-earliest selected mutation.
+Recovery can therefore retrieve the state before the earliest selected
+mutation of each affected object.
 
 Recovery rejects a plan when reconstruction requires an unsupported identity
 relationship.
@@ -96,13 +96,13 @@ relationship.
 \subsection{Candidate Localization}
 
 When recovery is requested after a trusted verifier fails, the controller
-traces the failed check's dependencies backward to earlier active mutations.
+traces the dependencies of the failed check backward to earlier active mutations.
 Dependency distance and diagnostic references rank candidate starting steps
 for isolated validation.
 
 For each candidate, forward dependency expansion determines which effects
 must be removed together. Localization and expansion connect the failed
-observation to a recovery set that includes the candidate's dependent state.
+observation to a recovery set that includes state dependent on the candidate.
 
 \subsection{Isolated Recovery Validation}
 
@@ -125,7 +125,7 @@ conflicts with retained mutations.
 It forks the current upper state, history, and execution records into an
 isolated workspace.
 The candidate plan reconstructs selected paths there, and \trycmd runs the same
-verifier on the fork's merged view.
+verifier on the merged view of the fork.
 Failed probes are discarded.
 Within the probe budget, the runtime prefers passing plans that invalidate
 fewer active steps, using conversation loss as a secondary cost.
