@@ -28,7 +28,7 @@ SOURCES = {
 OUTPUT = ROOT/'paper/figures/rq5-storage'
 RQ5_PALETTE = {'white': '#ffffff', 'gray': '#999999', 'black': '#252525',
                'lancet': '#ed1c24'}
-CONTROL_PATTERNS = {'white': '//', 'gray': '--', 'black': '--'}
+CONTROL_PATTERNS = {'white': '//', 'gray': '//', 'black': '//'}
 VARIANTS = {'native': ('Native FS', 'white', CONTROL_PATTERNS['white']),
             'overlay-sync': ('OverlayFS', 'gray', ''),
             'deltafs': ('DeltaBox', 'gray', CONTROL_PATTERNS['gray']),

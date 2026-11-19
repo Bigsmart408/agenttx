@@ -1507,7 +1507,7 @@
     "deltafs": [
       "DeltaBox",
       "gray",
-      "--"
+      "//"
     ],
     "branchfs": [
       "BranchFS",
@@ -1517,7 +1517,7 @@
     "try": [
       "try",
       "black",
-      "--"
+      "//"
     ],
     "agenttx-overlay": [
       "Lancet",
