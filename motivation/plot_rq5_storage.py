@@ -12,6 +12,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
+from matplotlib.legend_handler import HandlerTuple
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,7 +28,7 @@ SOURCES = {
 OUTPUT = ROOT/'paper/figures/rq5-storage'
 RQ5_PALETTE = {'white': '#ffffff', 'gray': '#999999', 'black': '#252525',
                'lancet': '#ed1c24'}
-CONTROL_PATTERNS = {'white': '..', 'gray': 'xx', 'black': '++'}
+CONTROL_PATTERNS = {'white': '..', 'gray': '..', 'black': '..'}
 VARIANTS = {'native': ('Native FS', 'white', CONTROL_PATTERNS['white']),
             'overlay-sync': ('OverlayFS', 'gray', ''),
             'deltafs': ('DeltaBox', 'gray', CONTROL_PATTERNS['gray']),
@@ -35,6 +36,16 @@ VARIANTS = {'native': ('Native FS', 'white', CONTROL_PATTERNS['white']),
             'try': ('try', 'black', CONTROL_PATTERNS['black']),
             'agenttx-overlay': ('Lancet', 'lancet', '')}
 LAYERED = ('overlay-sync', 'deltafs', 'branchfs', 'try', 'agenttx-overlay')
+LEGEND_STYLE = dict(fontsize=7.7, handlelength=1.65, handleheight=1.0,
+                    handletextpad=.45, columnspacing=1.0, labelspacing=.8,
+                    borderaxespad=0, handler_map={tuple: HandlerTuple(ndivide=1, pad=0)})
+
+
+def legend_handle(color, hatch):
+    fill = Patch(facecolor=RQ5_PALETTE[color], hatch=hatch,
+                 edgecolor='#f0f0f0' if color == 'black' else '#3f3f3f', linewidth=0)
+    border = Patch(facecolor='none', edgecolor='#3f3f3f', linewidth=.35)
+    return fill, border
 
 
 def save_style_options():
@@ -42,11 +53,9 @@ def save_style_options():
     handles, labels = [], []
     for color, pattern in CONTROL_PATTERNS.items():
         for name, hatch in (('solid', ''), ('patterned', pattern)):
-            handles.append(Patch(facecolor=RQ5_PALETTE[color], hatch=hatch,
-                edgecolor='#f0f0f0' if color == 'black' else '#3f3f3f', linewidth=.4))
+            handles.append(legend_handle(color, hatch))
             labels.append(f'{color.capitalize()} / {name}')
-    fig.legend(handles, labels, loc='center', ncol=3, fontsize=8.5,
-               handlelength=2.6, handleheight=1.5, columnspacing=2, labelspacing=1)
+    fig.legend(handles, labels, loc='center', ncol=3, **LEGEND_STYLE)
     for suffix in ('pdf', 'png'):
         fig.savefig(OUTPUT/f'style-options.{suffix}', dpi=300,
                     bbox_inches='tight', pad_inches=.08)
@@ -66,7 +75,7 @@ def main():
     fig = plt.figure(figsize=(17.8*CM, 9.2*CM))
     grid = fig.add_gridspec(2, 3, wspace=.50, hspace=.90)
     axes = [fig.add_subplot(grid[row, col]) for row in range(2) for col in range(3)]
-    handles, evidence = {}, {fs: {} for fs in ('ext4', 'xfs-reflink')}
+    evidence = {fs: {} for fs in ('ext4', 'xfs-reflink')}
     panels = [
             ('partial', 'io', 'edit_write_kib', 1, 'KiB', 'Write I/O (KiB/edit)', 'Write I/O',
              ['1 MiB'], ('1024',), tuple(VARIANTS), ('ext4', 'xfs-reflink')),
@@ -110,13 +119,12 @@ def main():
                 means = np.array([g['mean'] for g in groups])/divisor
                 lows = np.array([g['ci95'][0] for g in groups])/divisor
                 highs = np.array([g['ci95'][1] for g in groups])/divisor
-                bars = ax.bar(x+(offset-(len(variants)-1)/2)*width, means, width=width*.96,
+                ax.bar(x+(offset-(len(variants)-1)/2)*width, means, width=width*.96,
                     color=RQ5_PALETTE[color], hatch=hatch,
                     edgecolor='#f0f0f0' if color == 'black' else '#3f3f3f',
                     linewidth=.3,
                     yerr=np.maximum(0, [means-lows, highs-means]), zorder=3,
                     error_kw=dict(ecolor='#343434', elinewidth=.5, capsize=1.2, capthick=.5))
-                handles[variant] = bars
                 evidence[key][letter]['groups'][variant] = {
                     case:dict(mean=float(mean), ci95=[float(low), float(high)], n=g['n'])
                     for case, mean, low, high, g in zip(cases, means, lows, highs, groups)}
@@ -155,9 +163,9 @@ def main():
             ax.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())
         if lower < 0:
             ax.axhline(0, color='#737373', linewidth=.35)
-    fig.legend([handles[v] for v in VARIANTS], [VARIANTS[v][0] for v in VARIANTS],
-        loc='upper center', bbox_to_anchor=(.53, .998), ncol=6, fontsize=7.7,
-        handlelength=1.65, handleheight=1.0, handletextpad=.45, columnspacing=1.0, borderaxespad=0)
+    fig.legend([legend_handle(color, hatch) for _, color, hatch in VARIANTS.values()],
+        [name for name, _, _ in VARIANTS.values()],
+        loc='upper center', bbox_to_anchor=(.53, .998), ncol=6, **LEGEND_STYLE)
     fig.subplots_adjust(left=.075, right=.995, bottom=.16, top=.885)
     OUTPUT.mkdir(parents=True, exist_ok=True)
     for suffix in ('pdf', 'png'):
