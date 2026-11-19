@@ -1488,12 +1488,12 @@
     }
   },
   "palette": {
-    "native": "#737373",
-    "overlay": "#575757",
-    "delta": "#3d3d3d",
-    "branch": "#666666",
-    "try": "#242424",
-    "lancet": "#b42318"
+    "native": "#ffffff",
+    "overlay": "#c7c7c7",
+    "delta": "#8a8a8a",
+    "branch": "#484848",
+    "try": "#171717",
+    "lancet": "#ed1c24"
   },
   "variants": {
     "native": [
@@ -1524,7 +1524,7 @@
     "agenttx-overlay": [
       "Lancet",
       "lancet",
-      "//"
+      ""
     ]
   },
   "annotations": [],

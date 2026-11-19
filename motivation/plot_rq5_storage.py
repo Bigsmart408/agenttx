@@ -15,7 +15,6 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from motivation.paper_palette import BAR_PALETTE
 from motivation.plot_motivation_four import CM, configure_style
 
 SOURCES = {
@@ -25,14 +24,14 @@ SOURCES = {
     'try': ROOT/'review/rq5-try-20261117/summary.json',
 }
 OUTPUT = ROOT/'paper/figures/rq5-storage'
-RQ5_PALETTE = {'native': '#737373', 'overlay': '#575757', 'delta': '#3d3d3d',
-               'branch': '#666666', 'try': '#242424', 'lancet': BAR_PALETTE['red']}
+RQ5_PALETTE = {'native': '#ffffff', 'overlay': '#c7c7c7', 'delta': '#8a8a8a',
+               'branch': '#484848', 'try': '#171717', 'lancet': '#ed1c24'}
 VARIANTS = {'native': ('Native FS', 'native', ''),
             'overlay-sync': ('OverlayFS', 'overlay', '..'),
             'deltafs': ('DeltaBox', 'delta', 'xx'),
             'branchfs': ('BranchFS', 'branch', 'oo'),
             'try': ('try', 'try', '++'),
-            'agenttx-overlay': ('Lancet', 'lancet', '//')}
+            'agenttx-overlay': ('Lancet', 'lancet', '')}
 LAYERED = ('overlay-sync', 'deltafs', 'branchfs', 'try', 'agenttx-overlay')
 
 
@@ -67,7 +66,7 @@ def main():
     for index, (ax, panel) in enumerate(zip(axes, panels)):
         campaign, section, metric, divisor, unit, ylabel, title, ticks, cases, variants, filesystems = panel
         letter = chr(ord('a')+index)
-        width, gap = .72/len(variants), .65
+        width, gap = .90/len(variants), .65
         lower, upper = 0., 0.
         positions = []
         for block, filesystem in enumerate(filesystems):
@@ -93,9 +92,9 @@ def main():
                 means = np.array([g['mean'] for g in groups])/divisor
                 lows = np.array([g['ci95'][0] for g in groups])/divisor
                 highs = np.array([g['ci95'][1] for g in groups])/divisor
-                bars = ax.bar(x+(offset-(len(variants)-1)/2)*width, means, width=width*.94,
+                bars = ax.bar(x+(offset-(len(variants)-1)/2)*width, means, width=width*.96,
                     color=RQ5_PALETTE[color], hatch=hatch,
-                    edgecolor='#3f3f3f' if variant == 'agenttx-overlay' else '#f0f0f0',
+                    edgecolor='#f0f0f0' if variant in ('branchfs', 'try') else '#3f3f3f',
                     linewidth=.3,
                     yerr=np.maximum(0, [means-lows, highs-means]), zorder=3,
                     error_kw=dict(ecolor='#343434', elinewidth=.5, capsize=1.2, capthick=.5))
