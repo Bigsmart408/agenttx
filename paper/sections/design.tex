@@ -116,9 +116,10 @@ and selective restoration.
 Figure~\ref{fig:version-capture} separates incremental object history from
 explicit checkpoints. Each logical recovery point references its parent
 and records changed paths, contents, metadata, and deletion state;
-unchanged state reuses its existing version. Immutable contents are shared
-in the version store, while the active upper keeps separate writable
-copies. E3 and E4 add f1 and f2; E5 adds g1 without copying earlier versions.
+unchanged state reuses its existing version. History records share immutable
+file versions through hard links, while the active upper keeps separate
+writable copies so later writes cannot modify saved versions.
+E3 and E4 add f1 and f2; E5 adds g1 without copying earlier versions.
 Recovery follows parent references to retrieve selected objects, applying
 deltas where needed. A complete historical tree is materialized only when
 requested, avoiding repeated directory cloning and a new mounted
@@ -313,5 +314,8 @@ completion is checked separately.
 Both implementations share the same user-space logic for dependency
 tracking, rollback selection, and agent-context synchronization.
 
-Ext4 uses ordinary file copying to retain versions. On XFS, \system reuses
-native reflink support to share unchanged data blocks across versions.
+Ext4 copies regular-file data when saving new contents or restoring a
+writable upper entry. Immutable history versions are shared through hard links;
+writable files remain separate from saved versions. On XFS, \system uses
+native reflink support for these copies to share unchanged data blocks
+across distinct inodes.
