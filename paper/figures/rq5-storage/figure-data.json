@@ -1497,7 +1497,7 @@
     "native": [
       "Native FS",
       "white",
-      ".."
+      "//"
     ],
     "overlay-sync": [
       "OverlayFS",
@@ -1507,7 +1507,7 @@
     "deltafs": [
       "DeltaBox",
       "gray",
-      ".."
+      "--"
     ],
     "branchfs": [
       "BranchFS",
@@ -1517,7 +1517,7 @@
     "try": [
       "try",
       "black",
-      ".."
+      "--"
     ],
     "agenttx-overlay": [
       "Lancet",
