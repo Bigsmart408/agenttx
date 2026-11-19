@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from motivation.plot_motivation_four import CM, configure_style
 from motivation.paper_labels import WORK_LABELS
-from motivation.paper_palette import BAR_POLICY_COLORS
+from motivation.paper_palette import BAR_PALETTE
 
 TIME = ROOT / "review/realworld-overlapped-search-20261118/time-analysis.json"
 BASELINE = Path("/mnt/data/agenttx-runtime/results/rq2-turn-checkpoint-20261111-r2/comparison-monitor/baseline.json")
@@ -32,9 +32,9 @@ COHORTS = ("swe_sweagent", "swe_codex", "tb_sweagent", "tb_codex")
 HEADINGS = ("SWE / SWE-agent", "SWE / Codex", "TB / SWE-agent", "TB / Codex")
 CONTROLS = ("turn_checkpoint", "temporal_checkpoint", "whole_branch_abort")
 STAGES = (
-    ("preparation_replay_s", "Setup / replay", "///"),
-    ("agent_execution_s", "Agent execution", ""),
-    ("verification_s", "Verification", "\\\\\\"),
+    ("preparation_replay_s", "Setup / replay", BAR_PALETTE["purple"]),
+    ("agent_execution_s", "Agent execution", BAR_PALETTE["orange"]),
+    ("verification_s", "Verification", BAR_PALETTE["teal"]),
 )
 
 
@@ -169,11 +169,10 @@ def plot(data):
         for y, control in zip(positions, controls):
             comparison = data["cohorts"][cohort][control]
             labels.append(f"{WORK_LABELS[control]}\n(n={comparison['n']})")
-            for side, offset in (("causal", .17), ("control", -.17)):
+            for side, offset, hatch in (("causal", .17, "///"), ("control", -.17, "")):
                 values = comparison["means"][side]
-                color = BAR_POLICY_COLORS["causal" if side == "causal" else control]
                 left = 0.0
-                for field, _, hatch in STAGES:
+                for field, _, color in STAGES:
                     ax.barh(y+offset, values[field], left=left, height=.28,
                             color=color, edgecolor="#3f3f3f", linewidth=.25,
                             hatch=hatch, zorder=3)
@@ -189,20 +188,14 @@ def plot(data):
         ax.tick_params(axis="y", length=0, pad=3)
         ax.grid(axis="x", color="#dddddd", linewidth=.4)
         ax.set_axisbelow(True)
-    methods = ("causal", *CONTROLS, "root_only")
-    method_handles = [Patch(facecolor=BAR_POLICY_COLORS[method],
-                            edgecolor="none", label=WORK_LABELS[method])
-                      for method in methods]
-    fig.legend(handles=method_handles, loc="upper center", bbox_to_anchor=(.54, 1.005),
-               ncol=3, fontsize=6.8, handlelength=1.25, handletextpad=.45,
+    handles = [Patch(facecolor=color, edgecolor="none", label=label) for _, label, color in STAGES]
+    handles.append(Patch(facecolor="white", edgecolor="#3f3f3f", linewidth=.4,
+                         hatch="///", label="Lancet"))
+    fig.legend(handles=handles, loc="upper center", bbox_to_anchor=(.54, 1.005),
+               ncol=2, fontsize=6.8, handlelength=1.25, handletextpad=.45,
                columnspacing=1.4, labelspacing=.5, borderpad=.1)
-    stage_handles = [Patch(facecolor="white", edgecolor="#3f3f3f", linewidth=.35,
-                           hatch=hatch, label=label) for _, label, hatch in STAGES]
-    fig.legend(handles=stage_handles, loc="upper center", bbox_to_anchor=(.54, .885),
-               ncol=3, fontsize=6.4, handlelength=1.25, handletextpad=.4,
-               columnspacing=1.0, borderpad=.1)
     fig.supxlabel("Mean workflow time (s)", fontsize=7.5, x=.56, y=.025)
-    fig.subplots_adjust(left=.16, right=.99, top=.75, bottom=.12,
+    fig.subplots_adjust(left=.16, right=.99, top=.82, bottom=.12,
                         wspace=.65, hspace=.48)
     outputs = {}
     for suffix in ("pdf", "png"):
@@ -214,9 +207,8 @@ def plot(data):
     plt.close(fig)
     (OUT / "figure-manifest.json").write_text(json.dumps(dict(
         outputs=outputs, group_by=["benchmark", "agent", "competitor"],
-        layout="Single column; 2 by 2; paired horizontal stacked bars; colors identify methods.",
-        colors={method: BAR_POLICY_COLORS[method] for method in methods},
-        stage_hatches={key: hatch for key, _, hatch in STAGES},
+        layout="Single column; 2 by 2; paired horizontal stacked bars; Lancet hatched.",
+        colors={key: color for key, _, color in STAGES},
         analysis_sha256=hashlib.sha256((OUT / "analysis.json").read_bytes()).hexdigest(),
     ), indent=2) + "\n")
 
