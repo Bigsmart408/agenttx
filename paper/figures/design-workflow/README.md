@@ -24,7 +24,7 @@ p 是返回文件名对应路径的简记。文件边为 E3→E4、E4→E6、E7�
 | Figure 6 / Dependency Closure | 展开总览步骤 2：文件访问/修改、结果/参数记录作为证据，用户报告文件 f 及参考 checkpoint C0，取此后的写入 E3、E4 为根，联合依赖图计算 S，隔离残留检查通过后把同一个 S 交给文件系统恢复与上下文同步；不重复绘制 OverlayFS 状态和逐轮展开框 |
 | Figure 7 / Version Capture | 区分增量对象历史与显式检查点，展示 retained mounts 的管理 |
 | Figure 8 / Filesystem Reconstruction | 承接步骤 2 的集合与方案验证，执行步骤 3：在当前 upper 上恢复 f/h/p，保留 g1，并同步更新上下文 |
-| Figure 9 / Implementation | 共享恢复控制器经 OverlayFS 使用 Ext4 文件复制或 XFS reflink |
+| Figure 9 / Implementation | Causal Excision 控制器经 OverlayFS 使用 Ext4 文件复制或 XFS reflink |
 
 Figure 8 中，各检查点展示同一 lower 上的 merged view：
 
@@ -83,7 +83,7 @@ make -C paper TECTONIC=/tmp/agenttx-paper-toolchain-20261027/tectonic
 
 ## Ext4 / XFS 实现图
 
-4.5 Implementation 使用 `Lancet-Implementation.pdf`，对应可编辑素材为 `Lancet-Implementation.pptx`，预览为 `implementation-visual.png` / `.svg`。图中仅保留四个框：共享用户态恢复控制器、原生 OverlayFS、Ext4 文件复制、XFS reflink，突出恢复逻辑与存储实现的解耦；不再展开文件版本和数据块。黑实线表示控制流程。生成器沿用现有 Times New Roman、线宽和箭头几何，并核对文字及画布边界。
+4.1 Causal Excision 介绍核心回滚机制：通过文件与工具结果依赖确定集合 S，在隔离分支验证后，将同一个集合应用于文件恢复和上下文同步。4.5 Implementation 使用 `Lancet-Implementation.pdf`，对应可编辑素材为 `Lancet-Implementation.pptx`，预览为 `implementation-visual.png` / `.svg`。图中仅保留四个框：Causal Excision Controller、原生 OverlayFS、Ext4 文件复制、XFS reflink，突出恢复逻辑与存储实现的解耦；不再展开文件版本和数据块。该控制器运行在用户态，由两个存储后端共享。黑实线表示控制流程。生成器沿用现有 Times New Roman、线宽和箭头几何，并核对文字及画布边界。
 
 ```sh
 /tmp/agenttx-paper-check-20261027/bin/python paper/figures/design-workflow/generate_implementation.py
