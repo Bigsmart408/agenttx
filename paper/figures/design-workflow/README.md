@@ -60,7 +60,7 @@ Figure 8 中，各检查点展示同一 lower 上的 merged view：
 
 总览中的 upper 和 lower 共同提供 merged view，不表示 lower 写入 upper；恢复箭头只指向 upper，lower 始终只读。布局报告记录路径、箭头头部尺寸以及各段文字的字体、字号和字重。
 
-图 6 的顶部文件依赖绕线与文件提示流程之间留出空间。正文使用 `[H]` 将图固定在 4.1 首段之后，避免图浮到小节标题前。图 8 的检查点行距为 0.43 英寸，格框之间留出 0.13 英寸间隔；验证和应用阶段相应下移，避免通过压缩行距容纳内容。图 6 简化前的素材与正文保存在 review/design-figure6-simplified-20261117/before/；补充流程衔接前的版本保存在 review/design-figure6-role-20261117/before/。
+图 6 的顶部文件依赖绕线与文件提示流程之间留出空间。正文中的单栏图和跨栏图均使用 `[t]`，由 LaTeX 安排在栏顶或页顶。图 8 的检查点行距为 0.43 英寸，格框之间留出 0.13 英寸间隔；验证和应用阶段相应下移，避免通过压缩行距容纳内容。图 6 简化前的素材与正文保存在 review/design-figure6-simplified-20261117/before/；补充流程衔接前的版本保存在 review/design-figure6-role-20261117/before/。
 
 图 7 的历史框与文件值框之间留出 0.34 英寸，横向历史框也保持 0.34 英寸间距，让箭头线身与边框分开。下方 RO + pin / Detach + mount 标注分列在流程线两侧；Checkpoint C1 与 Lower L 之间留出 0.18 英寸，检查点关联通过独立的平滑虚线接入只读 U0。曲线与间距调整前的源码、正文及所有素材保存在 review/design-curves-20261118T063857Z/before/。
 

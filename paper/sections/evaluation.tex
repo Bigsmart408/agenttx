@@ -11,7 +11,7 @@ Our evaluation aims to answer the following questions:
   \item Can \system keep filesystem overhead low?~(\S\ref{sec:eval-file-commit})
 \end{itemize}
 
-\begin{figure*}[!t]
+\begin{figure*}[t]
   \centering
   \includegraphics[width=\linewidth]{FIG-System-Micro-Recovery.pdf}
   \caption{\textbf{Recovery scope on fixed command trajectories.}
@@ -138,7 +138,7 @@ Table~\ref{tab:swe-full-results} reports task success. With SWE-agent and
 Codex, respectively, \system achieves success rates of 95.0\% and 96.0\% on
 SWE-Bench Lite, and 86.3\% and 92.5\% on Terminal-Bench.
 
-\begin{figure}[H]
+\begin{figure}[t]
   \centering
   \includegraphics[width=\linewidth]{FIG-Realworld-Token-Savings.pdf}
   \caption{\textbf{Token totals and savings on control-specific matched tasks.}
@@ -178,7 +178,7 @@ execution from recorded elapsed time. It retains setup, plan application,
 replay, model execution, and final verification across all attempts,
 excluding queue time.
 
-\begin{figure}[H]
+\begin{figure}[t]
   \centering
   \includegraphics[width=\linewidth]{FIG-Realworld-Time-Savings.pdf}
   \caption{\textbf{Workflow time and savings on matched tasks.}
@@ -218,7 +218,7 @@ workflow time from Section~\ref{sec:eval-time} into agent execution,
 final verification, and setup/replay. Agent execution includes model
 calls and tool use; verification measures final task grading.
 
-\begin{figure}[!t]
+\begin{figure}[t]
   \centering
   \includegraphics[width=\linewidth]{FIG-Realworld-Stage-Cost.pdf}
 \caption{\textbf{Workflow-time breakdown on real tasks.}
@@ -230,7 +230,7 @@ calls and tool use; verification measures final task grading.
 \end{figure}
 
 % Queue the wide storage figure early to place it alongside the RQ6 analysis.
-\begin{figure*}[!t]
+\begin{figure*}[t]
   \centering
   \includegraphics[width=\linewidth]{FIG-RQ5-Storage.pdf}
   \caption{\textbf{Filesystem costs.}

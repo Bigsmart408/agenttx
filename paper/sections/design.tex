@@ -8,7 +8,7 @@ selected call; the default is the committed boundary. The report identifies
 a file-history range to withdraw, without identifying a faulty step or
 deciding which edit was semantically wrong.
 
-\begin{figure}[H]
+\begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{FIG-Lancet-Overview.pdf}
 \caption{\textbf{Execution and selective recovery in \system.}
@@ -47,7 +47,7 @@ Figure~\ref{fig:overview}: mutations of the reported file seed joint
 dependency closure, an isolated residue audit checks the resulting state,
 and the selected $S$ drives both filesystem restoration and agent-context synchronization.
 
-\begin{figure}[H]
+\begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{figures/design-workflow/Lancet-Dependency-Closure.pdf}
 \caption{\textbf{Dependency capture and rollback-set selection.}
@@ -124,7 +124,7 @@ deltas where needed. A complete historical tree is materialized only when
 requested, avoiding repeated directory cloning and a new mounted
 checkpoint for every call.
 
-\begin{figure}[!t]
+\begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{figures/design-workflow/Lancet-Version-Capture.pdf}
 \caption{\textbf{Incremental history and explicit checkpoint creation.}
@@ -175,7 +175,7 @@ from the next model request. Shared identifiers let \system apply the same
 $S$ to file-effect records and agent-visible call/result pairs, retaining
 independent observations from partially withdrawn turns.
 
-\begin{figure}[!ht]
+\begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{figures/design-workflow/Lancet-Design-Workflow.pdf}
 \caption{\textbf{Applying one rollback set to files and agent context.}
@@ -318,7 +318,7 @@ data blocks between distinct versions. Support for additional backing
 filesystems is concentrated in storage operations, allowing the dependency
 graph, rollback selection, and agent integration to be reused.
 
-\begin{figure}[H]
+\begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{figures/design-workflow/Lancet-Implementation.pdf}
 \caption{\textbf{Ext4 and XFS implementations.}
