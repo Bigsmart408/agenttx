@@ -27,8 +27,8 @@ reported ``almost right, but not quite'' AI solutions~\cite{stackoverflow-survey
 requests underwent revision~\cite{watanabe-agentic-prs}.
 Users may want to roll back selected files while retaining other work,
 as reflected in file-level keep/undo controls~\cite{vscode-review-edits}.
-Checkpoint and branch rollback can discard that work; file-level undo
-alone does not remove dependent effects or agent observations.
+Existing rollback policies cannot meet this need: they typically revert
+the entire execution suffix to a checkpoint.
 
 Our motivational experiments (Section~\ref{sec:motivation}) show that
 the DeltaBox recovery scope discards 56.90\% of valid work on average across 400
