@@ -1,7 +1,7 @@
 # Motivation rollback example (Figure 1)
 
 Run `draw.py` with the paper figure environment to regenerate the editable
-`AgentTX-Motivation-Rollback-Example.pptx`, PDF, SVG, and PNG previews:
+`Lancet-Motivation-Rollback-Example.pptx`, PDF, SVG, and PNG previews:
 
 ```bash
 /tmp/agenttx-paper-check-20261027/bin/python paper/figures/motivation-example/draw.py

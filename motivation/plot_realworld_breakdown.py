@@ -103,7 +103,7 @@ def analyze():
             verification_s="SWE official_grade_wall_s or TB timings.verification_wall_s; final task grading.",
             preparation_replay_s="Adjusted workflow time minus agent execution and final grading; setup, fault-prefix execution, live recovery, replay, and cleanup.",
         ),
-        accounting="Use the same full localization deduction as RQ2 for every AgentTX attempt; live application is retained. Controls, pair populations, and raw results are unchanged.",
+        accounting="Use the same full localization deduction as RQ2 for every Lancet attempt; live application is retained. Controls, pair populations, and raw results are unchanged.",
         new_model_calls=0,
         cohorts={},
     )
@@ -190,7 +190,7 @@ def plot(data):
         ax.set_axisbelow(True)
     handles = [Patch(facecolor=color, edgecolor="none", label=label) for _, label, color in STAGES]
     handles.append(Patch(facecolor="white", edgecolor="#3f3f3f", linewidth=.4,
-                         hatch="///", label="AgentTX"))
+                         hatch="///", label="Lancet"))
     fig.legend(handles=handles, loc="upper center", bbox_to_anchor=(.54, 1.005),
                ncol=2, fontsize=6.8, handlelength=1.25, handletextpad=.45,
                columnspacing=1.4, labelspacing=.5, borderpad=.1)
@@ -207,7 +207,7 @@ def plot(data):
     plt.close(fig)
     (OUT / "figure-manifest.json").write_text(json.dumps(dict(
         outputs=outputs, group_by=["benchmark", "agent", "competitor"],
-        layout="Single column; 2 by 2; paired horizontal stacked bars; AgentTX hatched.",
+        layout="Single column; 2 by 2; paired horizontal stacked bars; Lancet hatched.",
         colors={key: color for key, _, color in STAGES},
         analysis_sha256=hashlib.sha256((OUT / "analysis.json").read_bytes()).hexdigest(),
     ), indent=2) + "\n")

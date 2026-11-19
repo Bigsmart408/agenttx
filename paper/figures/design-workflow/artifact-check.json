@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "file": "Agenttx overview.pptx",
+      "file": "Lancet overview.pptx",
       "editable_objects": 33,
       "slide_rasters": 0,
       "cubic_paths": 0,
@@ -38,7 +38,7 @@
       ]
     },
     {
-      "file": "AgentTX-Dependency-Closure.pptx",
+      "file": "Lancet-Dependency-Closure.pptx",
       "editable_objects": 140,
       "slide_rasters": 0,
       "cubic_paths": 2,
@@ -64,7 +64,7 @@
       ]
     },
     {
-      "file": "AgentTX-Design-Workflow.pptx",
+      "file": "Lancet-Design-Workflow.pptx",
       "editable_objects": 140,
       "slide_rasters": 0,
       "cubic_paths": 1,
@@ -94,7 +94,7 @@
       ]
     },
     {
-      "file": "AgentTX-Context-Alignment.pptx",
+      "file": "Lancet-Context-Alignment.pptx",
       "editable_objects": 69,
       "slide_rasters": 0,
       "cubic_paths": 2,

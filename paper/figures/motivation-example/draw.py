@@ -48,7 +48,7 @@ node borders, rounded paths and arrowheads aligned with the overview and
 implementation figures. Every object in the PPT is native and editable.
 """
     report = style.finish(
-        s, "AgentTX-Motivation-Rollback-Example.pptx",
+        s, "Lancet-Motivation-Rollback-Example.pptx",
         "FIG-Motivation-Rollback-Example.pdf", notes,
         dict(title="Whole-execution rollback discards independent work",
              calls=calls, turns=[[0, 1], [2, 3], [4, 5]],

@@ -1,0 +1,19 @@
+\section{Discussion}
+
+\textbf{Object identity and reconstruction.}
+OverlayFS \texttt{index=on} preserves session hard-link
+visibility~\cite{overlayfs}. Object identifiers and resolved paths link
+accesses in the dependency graph. For each affected group, reconstruction
+restores entries from the nearest compatible checkpoint preceding its earliest
+selected mutation while retaining independent changes.
+
+\textbf{Tracing backends.}
+Command strings can omit indirect reads, so \system uses \texttt{strace}.
+System-call tracing has workload-dependent cost and is Linux-specific.
+In a 12-step probe, \texttt{strace} and persistent eBPF capture the same reads
+and negative lookups, taking 25.60 and 61.39 ms/step, respectively.
+
+\textbf{Transaction state.}
+Transaction state covers workspace filesystem effects and tool-call history.
+Network effects need subsystem-specific compensation~\cite{sagas}; hidden
+provider state needs service support.

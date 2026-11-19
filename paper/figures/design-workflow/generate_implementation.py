@@ -25,7 +25,7 @@ def main():
                   ext4='Ordinary file copying.',
                   xfs='Reflink file cloning.',
                   simplification='Four boxes show shared recovery logic and two storage backends.')
-    g.finish(s, 'AgentTX-Implementation.pptx', 'AgentTX-Implementation.pdf',
+    g.finish(s, 'Lancet-Implementation.pptx', 'Lancet-Implementation.pdf',
              'A shared user-space recovery controller uses unmodified Linux '
              'OverlayFS over either Ext4 or XFS. Ext4 uses ordinary file copies, '
              'and XFS uses reflink. Solid arrows show the shared control path; '

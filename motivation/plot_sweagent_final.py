@@ -310,7 +310,7 @@ def plot_ratios(data):
         "tb_codex": "TB /\nCodex",
     }
     colors = [MOTIVATION_STYLES["turn_checkpoint_proxy"]["color"], "#6b7280", MOTIVATION_STYLES["temporal_step"]["color"]]
-    labels = ["AgentTX uses fewer tokens", "Same tokens", "AgentTX uses more tokens"]
+    labels = ["Lancet uses fewer tokens", "Same tokens", "Lancet uses more tokens"]
     ncols = 2
     nrows = (len(controls) + ncols - 1) // ncols
     fig, axes = plt.subplots(nrows, ncols, figsize=(17.8*CM, 4.8*nrows*CM),

@@ -1,5 +1,5 @@
 {
-  "title": "AgentTX additions to an OverlayFS execution view",
+  "title": "Lancet additions to an OverlayFS execution view",
   "diagram_scope": "existing OverlayFS versus added dependency, version and recovery capabilities",
   "shown_call_example": false,
   "execution_filesystem": {
@@ -36,7 +36,7 @@
     "selective object restoration",
     "synchronized agent context"
   ],
-  "extension_boundary": "dashed blue AgentTX additions frame",
+  "extension_boundary": "dashed blue Lancet additions frame",
   "overlayfs_kernel_modified": false,
   "history_is_mounted_layer": false,
   "legend_required": false,
@@ -72,7 +72,7 @@
     "bold_headings_only": true,
     "labels": [
       {
-        "text": "AgentTX additions",
+        "text": "Lancet additions",
         "size_pt": 21,
         "bold": true,
         "family": "Times New Roman"
@@ -845,5 +845,5 @@
   "paper_width_inches": 3.35,
   "body_font_at_paper_width_pt": 8.18,
   "text_words": 32,
-  "text_characters": 163
+  "text_characters": 162
 }

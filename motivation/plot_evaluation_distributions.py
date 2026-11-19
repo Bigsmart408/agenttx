@@ -106,7 +106,7 @@ def retained_and_redone(rows):
         box(axes[0],retention,i,COLORS[p]);box(axes[1],redo,i,COLORS[p])
         stats[p]=dict(retention_case_means=retention,redone=redo,
                       retained_mean_pct=float(np.mean(retention)),redone_mean=float(np.mean(redo)))
-    axes[0].set_yticks(range(5),['AgentTX','No rollback','Turn\ncheckpoint','Temporal\ncheckpoint','Whole branch'])
+    axes[0].set_yticks(range(5),['Lancet','No rollback','Turn\ncheckpoint','Temporal\ncheckpoint','Whole branch'])
     axes[0].set_ylim(4.6,-.6)
     for ax in axes:
         frame(ax)
@@ -143,7 +143,7 @@ def workflow_time():
     ax.axvline(0,color='#555555',linewidth=.7,linestyle='--')
     ax.set_yticks(range(4),['SWE /\nSWE-agent','SWE /\nCodex','TB /\nSWE-agent','TB /\nCodex'])
     ax.set_ylim(3.55,-.55);ax.set_xlim(-28,65);ax.set_xticks([-20,0,20,40,60])
-    ax.set_xlabel('AgentTX workflow-time savings (%)',fontsize=8,labelpad=4)
+    ax.set_xlabel('Lancet workflow-time savings (%)',fontsize=8,labelpad=4)
     frame(ax);ax.tick_params(axis='y',length=0,pad=4)
     fig.legend(handles=[Line2D([],[],color=c,marker=m,markerfacecolor='white',
                               linestyle='-',markersize=3.5,label=n)
@@ -181,7 +181,7 @@ def localization(rows):
     axes[0].legend(loc='lower right',fontsize=6.2,handlelength=1.3,
                    labelspacing=.3,handletextpad=.35,borderaxespad=.35)
     checks=[]
-    for p,label,color,marker,style in [('causal','AgentTX',RED,'s','-'),
+    for p,label,color,marker,style in [('causal','Lancet',RED,'s','-'),
                                      ('temporal_checkpoint','Temporal',ORANGE,'x',':')]:
         group=[r for r in rows if r['policy']==p]
         xx=sorted({int(r['operation_count']) for r in group})

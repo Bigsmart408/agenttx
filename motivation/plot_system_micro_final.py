@@ -120,7 +120,7 @@ def recovery(rows):
         group=[r for r in paired if r['family']==family]
         for row,metric in enumerate(('total_tokens','full_wall_s')):
             ax=axes[col,row]
-            # Draw AgentTX last so overlapping curves do not hide it.
+            # Draw Lancet last so overlapping curves do not hide it.
             for p in (*RECOVERY_POLICIES[1:], RECOVERY_POLICIES[0]):
                 x=sorted({r[xfield] for r in group}); means=[]; low=[]; high=[]
                 for value in x:
@@ -198,7 +198,7 @@ def phases(rows):
                 ax.bar(i,height,bottom=bottom,width=.56,facecolor=color,edgecolor=COLORS[p],
                        linewidth=.7,hatch=hatch);bottom+=height
             ax.text(i,bottom+8,f'{bottom:.1f}',ha='center',fontsize=7,color=COLORS[p])
-        ax.set_xticks([0,1],['AgentTX','Temporal'],fontsize=7)
+        ax.set_xticks([0,1],['Lancet','Temporal'],fontsize=7)
         ax.set_title(f'({chr(97+col)}) {TITLES[col]}',fontsize=8,pad=4)
         ax.set_ylim(0,495);ax.set_xlim(-.6,1.6);frame(ax)
     axes[0].set_ylabel('Mean stage time (s)')

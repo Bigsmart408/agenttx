@@ -1,0 +1,44 @@
+\section{Related Work}
+
+\textbf{Isolation and state restoration.}
+\trycmd lets callers selectively apply or discard program effects; Sandlock
+confines effects in a copy-on-write directory~\cite{try-osdi26,sandlock}.
+YoloFS stages filesystem changes and supports travel to saved
+checkpoints~\cite{yolofs}.
+BranchFS provides nested branches with commit/abort~\cite{branchfs}.
+Waypoint restores files and
+processes~\cite{waypoint}; DeltaBox pairs DeltaFS layer switching with
+DeltaCR process restoration~\cite{deltabox}. \system selects completed calls
+to withdraw and combines compatible historical object versions with current
+independent updates. Foundations
+include transactional updates~\cite{valor,txfs}, crash-consistency
+testing~\cite{crashmonkey}, and record/replay~\cite{revirt,rr}.
+
+\textbf{Checkpoint decisions and agent continuation.}
+Crab selects resources and overlaps checkpoint capture with execution;
+RippleCP selects checkpoints to materialize~\cite{crab,ripplecp}.
+AgentRewind restores environment/context checkpoints and retains lessons;
+Rollback-Induced Reflection reuses lessons after environment
+restoration~\cite{agentrewind,rir}. Planarian restores local and supported
+remote state while retaining context~\cite{planarian}. LogAct recovers
+interrupted operations through intention/result logs~\cite{logact}.
+
+\textbf{Dependency-guided recovery.}
+Taser and RETRO repair attack effects while preserving legitimate
+work~\cite{taser,retro}; BackTracker explains intrusions~\cite{backtracker}.
+Provenance systems record dependencies~\cite{pass,hifi,camflow}; BEEP
+reduces excessive dependencies through execution partitioning~\cite{beep}.
+hS schedules dependent subprocesses; Cordon validates composed effects
+through result lineage before commit and discards transaction shadow state on
+abort~\cite{hs-osdi26,cordon}. revGo rolls back and replays channel operations; AquaMend
+compares action-graph recovery choices~\cite{revgo,aquamend}. \system uses
+file and returned-value dependencies to select calls within and across turns,
+preserving independent work within partially withdrawn turns.
+Starting from user-reported files, one set guides object restoration and
+call/result withdrawal, with an isolated residue audit before live changes.
+
+\textbf{Agent memory and derived-state repair.}
+Reflexion retains feedback; MemGPT manages information across context and memory
+tiers~\cite{reflexion,memgpt}. MemoRepair repairs summaries, cached outputs,
+and procedures through influence dependencies~\cite{memorepair}.
+\system synchronizes retained call/result history with filesystem state.

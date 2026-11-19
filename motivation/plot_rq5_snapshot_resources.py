@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot retained snapshot resources for OverlayFS, DeltaFS and AgentTX."""
+"""Plot retained snapshot resources for OverlayFS, DeltaFS and Lancet."""
 import hashlib
 import json
 from pathlib import Path
@@ -27,7 +27,7 @@ def main():
     fig, axes = plt.subplots(1, 2, figsize=(8.5*CM, 4.15*CM))
     variants = [('overlay-sync', 'OverlayFS', 'purple', ''),
                 ('deltafs', 'DeltaFS', 'orange', ''),
-                ('agenttx-overlay', 'AgentTX', 'red', '//')]
+                ('agenttx-overlay', 'Lancet', 'red', '//')]
     metrics = [('storage_kib', 'Extra storage (MiB)', '(a) Retained storage'),
                ('memory_kib', 'Extra memory (MiB)', '(b) Retained memory')]
     handles = []

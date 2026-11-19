@@ -26,7 +26,7 @@ def main():
     assert data['verified_sessions'] == 192 and data['measured_sessions'] == 180
     variants = [('overlay-sync', 'OverlayFS (sync)', 'purple', ''),
                 ('overlay-retained', '+ retained mounts', 'orange', ''),
-                ('agenttx', 'AgentTX', 'red', '//')]
+                ('agenttx', 'Lancet', 'red', '//')]
     panels = [('per_checkpoint_ms', 'ms / checkpoint', '(a) Checkpoint creation'),
               ('lifecycle_ms', 'Workflow time (ms)', '(b) Complete workflow')]
     fig, axes = plt.subplots(1, 2, figsize=(8.5*CM, 4.15*CM))

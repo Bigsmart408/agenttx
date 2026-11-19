@@ -117,7 +117,7 @@ def draw():
         "Selected-effects control does not automatically withdraw read A. "
         "The fault is placed inside Turn 2 to make all four scopes distinct."
     )
-    result = style.finish(s, "AgentTX-Recovery-Granularity.pptx",
+    result = style.finish(s, "Lancet-Recovery-Granularity.pptx",
                           "FIG-Recovery-Granularity.pdf", notes, report)
     for ext in ("svg", "png"):
         shutil.copyfile(OUT/f"recovery-granularity.{ext}",

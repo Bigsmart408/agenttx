@@ -1,43 +1,23 @@
-# AgentTX paper draft
+# Lancet paper
 
-This directory contains a compilable, anonymous USENIX/OSDI-style first draft.
-The prose follows the argument structure documented in `REFERENCE_STRUCTURE.md`
-while using only AgentTX-specific design and measurements.
+The manuscript is synchronized with the standalone OSDI-2027 paper repository:
+https://github.com/Bigsmart408/OSDI-2027
 
-Build on the evaluation VM:
-
-```bash
-cd /home/pengpeng/agenttx/paper
-make
-```
-
-The build is self-contained: `main.tex`, `references.bib`,
-`usenix-2020-09.sty`, the figures under `img/`, and the editable design figure
-under `figures/design-workflow/` are all local.
-The design figure is included directly from its vector PDF; regenerate that
-file from the adjacent Python sources when updating the PPT.
-The checked-in `main.pdf` is a convenience preview; the source of
-truth is `main.tex` plus its bibliography and local figure assets.
-
-Statistical figures use Times New Roman, with principal labels at 8 pt
-against the 10 pt body text. To regenerate the figures, install the Microsoft
-Times New Roman regular, bold, italic, and bold italic fonts. The plotting
-setup registers `.ttf` files under `~/.local/share/fonts/TimesNewRoman/` and
-requires Times New Roman rather than silently substituting another family.
-The font is embedded in the generated PDFs; building the paper from those
-PDFs does not require a local font installation.
-
-The Makefile prefers `latexmk`/`pdflatex` and falls back to `tectonic`.  On the
-evaluation VM, the latter is installed in the `agenttx` conda environment:
+Build from the project root:
 
 ```bash
-cd /home/pengpeng/agenttx/paper
-conda run -n agenttx make
+make -C paper
 ```
 
-For a system-wide build, install `latexmk`/`pdflatex` or another
-USENIX-compatible LaTeX distribution and run `make` directly.
+The Makefile uses `latexmk`/`pdflatex` or `tectonic`; the output is `paper/main.pdf`.
+`main.tex` contains the shared formatting, title, and chapter inputs.
+Edit the abstract and chapters in `sections/`: `abstract.tex`, `introduction.tex`,
+`background.tex`, `motivation.tex`, `design.tex`, `evaluation.tex`,
+`discussion.tex`, `related-work.tex`, and `conclusion.tex`.
 
-Before submission, replace the anonymous author block, reconcile the venue's
-current page/blindness rules, add externally runnable baselines, and audit every
-claim against the latest result artifacts.
+The bibliography is `references.bib`. Local table and figure inputs are in
+`tables/`, `img/`, and `figures/design-workflow/`. Editable design diagrams and
+their generators are in `figures/design-workflow/`.
+
+Figure PDFs embed their fonts. Regenerating statistical and design figures
+requires Times New Roman fonts under `~/.local/share/fonts/TimesNewRoman/`.

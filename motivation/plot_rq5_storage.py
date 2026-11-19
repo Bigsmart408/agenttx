@@ -33,7 +33,7 @@ VARIANTS = {'native': ('Native FS', 'gray', ''),
             'deltafs': ('DeltaBox', 'orange', ''),
             'branchfs': ('BranchFS', 'teal', ''),
             'try': ('try', 'gold', ''),
-            'agenttx-overlay': ('AgentTX', 'red', '//')}
+            'agenttx-overlay': ('Lancet', 'red', '//')}
 LAYERED = ('overlay-sync', 'deltafs', 'branchfs', 'try', 'agenttx-overlay')
 
 

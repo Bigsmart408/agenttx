@@ -21,7 +21,7 @@ Section~\ref{sec:design} describes the Linux implementation.
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\linewidth]{FIG-AgentTX-Overview.pdf}
+\includegraphics[width=\linewidth]{FIG-Lancet-Overview.pdf}
 \caption{\textbf{Execution and selective recovery in \system.}
 \small\emph{Recorded dependencies determine the invalidation set.
 If a recovery plan selects E3, its descendants E4--E7 are also invalidated,
@@ -93,7 +93,7 @@ reconstruction guard.
 
 \begin{figure}[t]
 \centering
-\begin{lstlisting}[style=agenttxcode]
+\begin{lstlisting}[style=lancetcode]
 // Input: candidate steps B; effects and history.
 C = B;
 do {

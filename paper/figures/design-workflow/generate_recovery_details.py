@@ -92,8 +92,8 @@ in the other design figures.
 Solid black lines show workflow; dashed black lines show file dependencies;
 solid red lines show result reuse. Native PPT and vector exports match.
 '''
-    return g.finish(s, 'AgentTX-Dependency-Closure.pptx',
-                    'AgentTX-Dependency-Closure.pdf', notes, dict(
+    return g.finish(s, 'Lancet-Dependency-Closure.pptx',
+                    'Lancet-Dependency-Closure.pdf', notes, dict(
                         title='From execution evidence to a rollback set',
                         overview_steps=[2],
                         evidence={'file': ['E3', 'f1', 'E4'],
@@ -174,8 +174,8 @@ includes system/task, E1/r1,E2/r2,E5/r5 and a recovery notice. The original
 audit history remains available. This asset remains outside the main paper;
 the overview shows the same mixed-turn projection.
 '''
-    return g.finish(s, 'AgentTX-Context-Alignment.pptx',
-                    'AgentTX-Context-Alignment.pdf', notes, dict(
+    return g.finish(s, 'Lancet-Context-Alignment.pptx',
+                    'Lancet-Context-Alignment.pdf', notes, dict(
                         title='Filesystem and agent-context alignment',
                         selected_steps=g.EXAMPLE['selected_steps'],
                         retained_steps=g.EXAMPLE['retained_steps'],

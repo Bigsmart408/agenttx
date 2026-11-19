@@ -8,10 +8,10 @@
   \small\emph{Columns show SWE-Bench Lite/SWE-agent, Terminal-Bench/SWE-agent,
   and Terminal-Bench/Codex. Top: full-contract success rates over 300 SWE or
   241 TB tasks per policy. SWE uses one attempt; TB uses latest outcomes after
-  registered retries and repairs. Bottom: AgentTX token savings on matched
+  registered retries and repairs. Bottom: Lancet token savings on matched
   successful tasks with complete costs and 95\% paired bootstrap intervals.
   TB pairs share a compatible configuration and include every recorded attempt;
-  positive savings favor AgentTX.}}
+  positive savings favor Lancet.}}
   \label{fig:sweagent-full}
 \end{figure*}
 
@@ -32,9 +32,9 @@ an injection-specific marker verifier.
   \includegraphics[width=\linewidth]{FIG-Realworld-Token-Ratios.pdf}
   \caption{\textbf{Per-task changes in cumulative model cost.}
   \small\emph{Each point is one matched successful task; panels compare
-  AgentTX with the four controls. Token change is
-  $100(T_{\mathrm{AgentTX}}/T_{\mathrm{control}}-1)$; negative values favor
-  AgentTX. Horizontal jitter separates tasks within each workload/harness
+  Lancet with the four controls. Token change is
+  $100(T_{\mathrm{Lancet}}/T_{\mathrm{control}}-1)$; negative values favor
+  Lancet. Horizontal jitter separates tasks within each workload/harness
   group. The percentage axis is linear from $-100\%$ to $+100\%$ and
   logarithmic beyond that range, retaining every outlier.
   All pairs from Figure~\ref{fig:sweagent-full} are included.}}
@@ -67,7 +67,7 @@ Full recovery success requires official tests and the recovery-state/context
 checks; 2,154 cells pass this contract, versus 2,156 official verifier passes.
 
 \textbf{Comparison and accounting.}
-AgentTX and the clean reference use compact context;
+Lancet and the clean reference use compact context;
 no rollback, temporal checkpoints, and whole-branch rollback use full context.
 Tokens use API-reported usage and include main execution and replay.
 For TB, each cell's cost sums all recorded original, failed, retry, and repair
@@ -81,7 +81,7 @@ TB pairs share a compatible configuration across their entire histories;
 mixed configurations and documented environment exclusions are recorded
 separately.
 We aggregate disjoint pairs across compatible strata and report
-$1-\sum T_{\mathrm{AgentTX}}/\sum T_{\mathrm{control}}$.
+$1-\sum T_{\mathrm{Lancet}}/\sum T_{\mathrm{control}}$.
 The 95\% intervals use 20,000 paired task bootstrap samples, resampling within
 observed configuration strata for TB.
 
@@ -99,7 +99,7 @@ cells. SWE uses single attempts; TB reports latest registered attempts.}}
 Policy & SWE-agent & SWE-agent & Codex \\
  & /300 & /241 & /241 \\
 \midrule
-AgentTX & 285 & 208 & 223 \\
+Lancet & 285 & 208 & 223 \\
 Clean reference & 273 & 206 & 225 \\
 No rollback & 282 & 203 & 224 \\
 Temporal checkpoint & 284 & 206 & 224 \\
@@ -111,11 +111,11 @@ Whole-branch rollback & 243 & 208 & 227 \\
 \textbf{Task outcomes.}
 Figure~\ref{fig:sweagent-full} and Table~\ref{tab:swe-full-results} show that
 success differences depend on workload and harness.
-On SWE, AgentTX succeeds on 285 tasks, compared with 282 for no rollback,
+On SWE, Lancet succeeds on 285 tasks, compared with 282 for no rollback,
 284 for checkpoints, and 243 for whole-branch rollback.
-On TB/SWE-agent, AgentTX and whole-branch rollback both succeed on 208 tasks;
+On TB/SWE-agent, Lancet and whole-branch rollback both succeed on 208 tasks;
 the other policies succeed on 203--206.
-On TB/Codex, AgentTX succeeds on 223 tasks, below whole-branch rollback's 227
+On TB/Codex, Lancet succeeds on 223 tasks, below whole-branch rollback's 227
 and the clean reference's 225.
 
 \begin{table}[t]
@@ -141,7 +141,7 @@ Clean reference & 14.38\% (264) & 36.57\% (172) & 17.90\% (198) \\
 \end{table}
 
 \textbf{Model cost.}
-On SWE's jointly successful pairs, AgentTX reduces cumulative tokens by
+On SWE's jointly successful pairs, Lancet reduces cumulative tokens by
 58.43\%, 17.55\%, and 27.86\% against no rollback, checkpoints, and
 whole-branch rollback, respectively (Table~\ref{tab:swe-paired-savings}).
 The corresponding TB reductions are 24.70\%, 44.69\%, and 35.91\% with
@@ -150,19 +150,19 @@ All three operational-control comparisons have positive lower confidence
 bounds in each cohort.
 
 For scale, the 176 TB/SWE-agent pairs against no rollback consume 41.38
-million AgentTX tokens versus 54.95 million control tokens.
+million Lancet tokens versus 54.95 million control tokens.
 The corresponding 200 Codex pairs consume 425.41 million versus 578.58
 million tokens, including their full attempt histories.
-Across complete SWE runs, including failures, AgentTX averages 135,004 tokens
+Across complete SWE runs, including failures, Lancet averages 135,004 tokens
 versus 311,673 for no rollback.
 
 \textbf{Per-task variation.}
 Figure~\ref{fig:realworld-ratios} separates tasks with lower and higher
-token costs. Against temporal checkpoints, AgentTX uses fewer tokens on
+token costs. Against temporal checkpoints, Lancet uses fewer tokens on
 188/278 SWE tasks (67.6\%), 100/175 TB/SWE-agent tasks (57.1\%), and
 138/197 TB/Codex tasks (70.1\%). It uses more tokens on the remaining
 32.4\%, 42.9\%, and 29.9\%, respectively.
 On TB/Codex machine-learning/training tasks,
-AgentTX costs 10.54\% more than no rollback (19 pairs) and 6.48\% more than
+Lancet costs 10.54\% more than no rollback (19 pairs) and 6.48\% more than
 checkpoints (20 pairs).
 

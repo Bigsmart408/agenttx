@@ -82,7 +82,7 @@ def correctness():
     ax.set_ylabel('Checks per run',fontsize=8,labelpad=3)
     ax.set_title('(b) Validation checks',loc='left',fontsize=8,pad=7)
     frame(ax)
-    ax.legend(handles=[Line2D([],[],color=RED,marker='s',markersize=3,label='AgentTX'),
+    ax.legend(handles=[Line2D([],[],color=RED,marker='s',markersize=3,label='Lancet'),
                        Line2D([],[],color=ORANGE,marker='x',markersize=3,linestyle=':',label='Temporal checkpoint')],
               loc='upper left',fontsize=7,handlelength=1.8,
               handletextpad=.45,borderaxespad=.4,labelspacing=.3)

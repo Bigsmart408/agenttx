@@ -61,7 +61,7 @@ def finish_panels(fig: plt.Figure, axes: np.ndarray, handles: list, columns: int
 def causal_retention() -> None:
     data = rows(RESULTS / "causal_retention.csv")
     styles = {
-        "causal": ("AgentTX causal", LINES["agenttx"]),
+        "causal": ("Lancet causal", LINES["agenttx"]),
         "temporal": ("Temporal checkpoint", LINES["temporal"]),
         "whole_session": ("Whole branch", LINES["whole"]),
         "causal_without_dependencies": ("No dependencies", LINES["neutral"]),
@@ -98,7 +98,7 @@ def causal_retention() -> None:
 def token_recovery() -> None:
     data = rows(RESULTS / "deepseek" / "token_recovery.csv")
     modes = {
-        "causal": ("AgentTX causal", LINES["agenttx"]),
+        "causal": ("Lancet causal", LINES["agenttx"]),
         "temporal_checkpoint": ("Temporal checkpoint", LINES["temporal"]),
         "whole_branch_abort": ("Whole branch", LINES["whole"]),
     }

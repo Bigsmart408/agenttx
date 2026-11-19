@@ -22,9 +22,9 @@ C=dict(blue='2E62E8', pale='F5F8FF', purple='7E4AC6', purpale='F8F4FF', red='D64
 FONT='Times New Roman'
 SVG_FONT='DejaVu Serif'
 prs=Presentation(); prs.slide_width=Inches(W); prs.slide_height=Inches(H)
-prs.core_properties.title='AgentTX — Causal Recovery Design'
+prs.core_properties.title='Lancet — Causal Recovery Design'
 prs.core_properties.subject='Editable design figures aligned with the paper causal workflow'
-prs.core_properties.author='AgentTX'
+prs.core_properties.author='Lancet'
 issues=[]
 fontpaths={False:'/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf',True:'/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf'}
 

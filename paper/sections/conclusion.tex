@@ -1,0 +1,18 @@
+\section{Conclusion}
+
+An erroneous tool call can affect later calls through both files and reused
+results. Given a user-specified file, \system withdraws its post-checkpoint
+mutations and their joint file/result dependency closure. A residue audit
+checks the resulting state before model continuation. The selected set guides both
+object restoration and updates to agent context, preserving independent
+calls within and across turns. Recovery can thus reconstruct a file state
+absent from the saved checkpoints while the session remains speculative.
+
+Across 400 fixed trajectories with three repetitions per policy, totaling
+6,000 runs over five policies, \system removes all affected calls in its
+1,200 runs while retaining all independent work; Crab and DeltaBox
+discard 54.02\% and 56.90\% of valid work, respectively.
+On matched successful task pairs, \system reduces token use relative to
+DeltaBox by 17.55--23.45\% on SWE-Bench Lite and 25.39--44.69\% on
+Terminal-Bench. Real-task breakdowns show lower agent-execution and
+setup/replay costs relative to DeltaBox.

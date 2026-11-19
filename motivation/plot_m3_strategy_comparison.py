@@ -30,7 +30,7 @@ LABELS = {
     "turn_checkpoint_proxy": "Turn checkpoint",
     "temporal_step": "Temporal",
     "whole_branch": "Whole branch",
-    "agenttx_causal": "AgentTX causal",
+    "agenttx_causal": "Lancet causal",
     "ideal_oracle": "Ideal oracle",
 }
 BAR_STYLES = {

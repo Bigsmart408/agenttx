@@ -78,7 +78,7 @@ def write_bundle(bundle: dict, output_dir: Path) -> None:
         json.dumps(bundle, indent=2) + "\n", encoding="utf-8"
     )
     lines = [
-        "# AgentTX motivation: optimization chain",
+        "# Lancet motivation: optimization chain",
         "",
         "## Problem exposed by the baseline",
         "",

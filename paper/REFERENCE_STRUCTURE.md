@@ -1,4 +1,4 @@
-# `osdi25-pan.pdf` 结构解析与 AgentTX 映射
+# `osdi25-pan.pdf` 结构解析与 Lancet 映射
 
 ## 1. 文档边界
 
@@ -12,7 +12,7 @@ Conclusion 主要分布在 PDF 第 2--15 页；后续为参考文献和一致性
 
 ## 2. 章节功能与篇幅节奏
 
-| 参考论文部分 | 大致页码 | 叙事功能 | AgentTX 初稿中的映射 |
+| 参考论文部分 | 大致页码 | 叙事功能 | Lancet 初稿中的映射 |
 |---|---:|---|---|
 | Abstract + Introduction | 2--3 | 问题、旧方法缺陷、核心 insight、实现、数字、三项贡献 | 长轨迹副作用、粗粒度 rollback、causal effect transaction、核心结果 |
 | Background | 3--4 | 将 crash consistency 机制分类并统一符号 | agent tool trajectory、semisolate、temporal/branch recovery taxonomy |
@@ -34,10 +34,10 @@ Conclusion 主要分布在 PDF 第 2--15 页；后续为参考文献和一致性
 6. Discussion 主动陈述为什么没有采用看似自然的替代设计。
 7. 图大多使用双栏宽度，caption 自包含，读图时不依赖正文上下文。
 
-## 4. AgentTX 应保持的差异
+## 4. Lancet 应保持的差异
 
-AgentTX 不应复用参考论文的句子或文件系统术语。参考论文的中心是减少 PM metadata
-I/O；AgentTX 的中心是把长期 agent trajectory 转化为 durable causal effect
+Lancet 不应复用参考论文的句子或文件系统术语。参考论文的中心是减少 PM metadata
+I/O；Lancet 的中心是把长期 agent trajectory 转化为 durable causal effect
 transaction。初稿因此把核心贡献收敛为：
 
 - Dependency discovery：从 opaque tool calls 恢复 R/N/W/D effects 和 producer--consumer edges；

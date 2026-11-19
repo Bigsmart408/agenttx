@@ -36,7 +36,7 @@ def style() -> None:
 
 
 # Same family as plot_scaling.ipynb / plot.ipynb (OURS/BASE1/BASE2/REF).
-# No AgentTX series here; map existing systems onto that palette.
+# No Lancet series here; map existing systems onto that palette.
 STYLES = {
     "bare": dict(
         color="black", marker="x", linestyle="--", linewidth=0.9,

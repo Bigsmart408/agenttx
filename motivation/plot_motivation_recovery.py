@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Motivation recovery figure over existing policies only (no AgentTX).
+"""Motivation recovery figure over existing policies only (no Lancet).
 
-Uses the causal_retention CSV but drops AgentTX causal / ours series.
+Uses the causal_retention CSV but drops Lancet causal / ours series.
 Maps measured policies to Background-table recovery styles:
   temporal      -> checkpoint-style (Crab / DeltaBox)
   whole_session -> session/branch abort (YoloFS / BranchFS)
@@ -36,7 +36,7 @@ def main() -> None:
     plt.rcParams["legend.framealpha"] = 1.0
     plt.rcParams["legend.fancybox"] = False
 
-    # Distinct colors; no AgentTX red (#c00000).
+    # Distinct colors; no Lancet red (#c00000).
     STYLES = {
         "temporal": dict(
             color="#e78129", marker="x", linestyle=":", linewidth=0.9,
@@ -142,7 +142,7 @@ def main() -> None:
         fig.savefig(out.with_suffix(".png"), dpi=300, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
 
-    print("wrote FIG-Motivation-Recovery (no AgentTX)")
+    print("wrote FIG-Motivation-Recovery (no Lancet)")
     size64 = df[(df["sweep"] == "size")].copy()
     size64 = size64[pd.to_numeric(size64["x_value"], errors="coerce") == 64].set_index("mode")
     for mode in MODES:

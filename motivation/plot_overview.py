@@ -268,18 +268,18 @@ def draw(output_dirs: list[Path]) -> None:
     for out_dir in output_dirs:
         out_dir.mkdir(parents=True, exist_ok=True)
         fig.savefig(
-            out_dir / "FIG-AgentTX-Overview.pdf",
+            out_dir / "FIG-Lancet-Overview.pdf",
             bbox_inches="tight",
             pad_inches=0.02,
             metadata={"CreationDate": None, "ModDate": None},
         )
         fig.savefig(
-            out_dir / "FIG-AgentTX-Overview.png",
+            out_dir / "FIG-Lancet-Overview.png",
             dpi=300,
             bbox_inches="tight",
             pad_inches=0.02,
         )
-        print("wrote", out_dir / "FIG-AgentTX-Overview.pdf")
+        print("wrote", out_dir / "FIG-Lancet-Overview.pdf")
     plt.close(fig)
 
 

@@ -426,7 +426,7 @@
     "dashed_black_arrow": "file dependency",
     "solid_red_arrow": "tool-result reuse",
     "dashed_red_node": "selected effect or context to withdraw",
-    "dashed_frame": "isolated validation trial",
+    "dashed_frame": "isolated residue audit",
     "solid_frame": "normal stage or live application",
     "empty_node": "absence symbol with a solid gray outline"
   },
@@ -497,8 +497,13 @@
       "E7": "reuse report.json and create p1 at that path",
       "E8": "read p1"
     },
-    "candidate": [
-      "E3"
+    "reported_files": [
+      "f"
+    ],
+    "reference_checkpoint": "C0 before E3",
+    "file_roots": [
+      "E3",
+      "E4"
     ],
     "selected_steps": [
       "E3",

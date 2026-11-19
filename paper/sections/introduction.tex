@@ -1,0 +1,86 @@
+\section{Introduction}
+
+Coding agents are increasingly used to automate software-engineering tasks
+through extended interactions with development
+environments~\cite{sweagent,openhands,autocoderover,hyperagent}. In these
+workflows, agents edit code and execute commands, using the resulting
+observations to decide how to proceed~\cite{react,toolformer}. Yet an
+incorrect edit or command can disrupt the task and cause subsequent actions
+to build on an erroneous result. Worse still, the effects of the mistake can
+persist even after it is recognized, leaving the agent to repair affected work
+before making further progress~\cite{agentrewind,planarian}. Rollback is
+therefore essential for removing these effects and restoring a valid state
+from which the agent can continue~\cite{try-osdi26,branchfs,crab}.
+
+To support rollback, existing systems stage effects or restore checkpoints.
+In particular, effect-staging systems isolate filesystem changes for later
+application or discard~\cite{try-osdi26,branchfs,cordon}. When selecting
+file effects to discard, the caller also has to identify dependent calls
+and observations to remove. By comparison, checkpoint/restore systems save state for later
+restoration~\cite{rollbacksurvey,dmtcp,waypoint,deltabox}. Building on
+these mechanisms, recent agent runtimes select checkpoint state from turn effects~\cite{crab}, restore
+consistent environment versions~\cite{planarian}, or recover aligned
+filesystem and agent-context checkpoints while retaining lessons~\cite{agentrewind}.
+However, restoring an earlier checkpoint discards later independent updates,
+while rolling back a whole branch loses its independent changes.
+
+Our motivational experiments (Section~\ref{sec:motivation}) show that
+the DeltaBox recovery scope discards 56.90\% of valid work on average across 400
+fixed trajectories, even with exact fault information. Moreover, dependent
+calls interleave with independent work in 86.8\% of 946 complete clean agent
+traces. These observations show that existing recovery policies discard
+substantial valid work. Our goal is to retain independent progress while
+undoing affected file changes and removing the associated tool results
+from agent context.
+To this end, we present \system, a causal recovery runtime for coding
+agents. The key idea is to \textbf{let dependencies among tool calls
+determine the recovery boundary across filesystem state and agent context}.
+The user identifies the file whose changes should be rolled back.
+\system selects its mutations since a reference checkpoint and follows
+file dependencies and tool-result reuse to derive one rollback set.
+An isolated trial checks the expected file state and command/result residue
+before live recovery. The runtime restores affected file objects and
+removes the corresponding calls and results from agent context while preserving
+independent progress. Consequently, recovery can preserve independent calls
+within and across turns and combine earlier file versions with later valid
+updates, even when that combination never existed at a checkpoint.
+
+However, designing a filesystem that supports causal rollback poses three
+key challenges.
+1) A user can identify a problem file without knowing which calls depend
+on it. \system follows both file and result dependencies from the file's
+mutations, then checks the resulting rollback state before resuming execution.
+2) The desired file state may be absent from every checkpoint. To
+reconstruct it, \system restores selected object versions, metadata, and
+deletion state in OverlayFS while retaining independent updates.
+3) A single agent turn can contain both affected and independent calls.
+Accordingly, \system uses shared call identifiers to remove affected
+calls and results from the next model request while retaining independent
+pairs within the same turn.
+
+We implement \system on Linux OverlayFS and integrate it with SWE-agent
+and Codex. In controlled
+experiments on 400 workloads, with three
+repetitions per policy, \system removes all affected calls while retaining
+all independent work. Beyond these controlled workloads, \system reduces token consumption
+on real-world SWE-Bench Lite~\cite{swebench} and Terminal-Bench~\cite{tbench}
+tasks relative to DeltaBox by 17.55--23.45\% and 25.39--44.69\%,
+respectively, on matched successful task pairs across the two agents.
+On the same real tasks, the breakdown shows lower agent-execution and
+setup/replay time relative to DeltaBox.
+
+This paper makes three contributions:
+\begin{itemize}
+  \item We quantify the valid work lost when recovery boundaries include
+        calls independent of an error, and show that dependent calls
+        commonly interleave with independent work in real agent traces
+        (Section~\ref{sec:motivation}).
+  \item We design and implement \system, which combines file dependencies
+        and tool-result reuse to select and validate rollback sets. The
+        selected set guides selective object restoration and updates
+        agent context, preserving independent calls within and across turns
+        (Section~\ref{sec:design}).
+  \item We evaluate recovery correctness, preserved work, runtime overhead,
+        and model cost on controlled and real-world workloads
+        (Section~\ref{sec:eval}).
+\end{itemize}

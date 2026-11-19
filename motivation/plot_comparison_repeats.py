@@ -34,8 +34,8 @@ LABELS = {
     "shared_try": "shared try",
     "shared_checkpoint": "shared checkpoint",
     "bubblewrap": "bubblewrap",
-    "agenttx_without_read_tracing": "AgentTX no-trace",
-    "agenttx_full": "AgentTX full",
+    "agenttx_without_read_tracing": "Lancet no-trace",
+    "agenttx_full": "Lancet full",
 }
 
 # The paper's Table 2 predates comparison_repeats.csv and reports a separate
@@ -140,7 +140,7 @@ def main() -> None:
     ax.grid(True, axis="y", alpha=0.28)
     ax.legend(frameon=True, ncol=3, loc="upper left")
     ax.annotate(
-        f"AgentTX full\np50={p50[-1]:.1f}, p95={p95[-1]:.1f}",
+        f"Lancet full\np50={p50[-1]:.1f}, p95={p95[-1]:.1f}",
         xy=(x[-1], p95[-1]),
         xytext=(x[-1] - 1.9, p95[-1] * 1.8),
         arrowprops={"arrowstyle": "->", "color": "#b56d6d"},

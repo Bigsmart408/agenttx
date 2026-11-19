@@ -4,8 +4,8 @@ The experimental policy identifiers remain unchanged in all source data.
 """
 
 WORK_LABELS = {
-    "causal": "AgentTX",
-    "agenttx_causal": "AgentTX",
+    "causal": "Lancet",
+    "agenttx_causal": "Lancet",
     "root_only": "try",
     "temporal_step": "DeltaBox",
     "temporal_checkpoint": "DeltaBox",

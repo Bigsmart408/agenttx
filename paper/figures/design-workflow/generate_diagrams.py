@@ -68,7 +68,7 @@ def canvas(name, height):
     d.W, d.H = WIDTH, height
     d.prs = Presentation()
     d.prs.slide_width, d.prs.slide_height = Inches(d.W), Inches(d.H)
-    d.prs.core_properties.author = 'AgentTX'
+    d.prs.core_properties.author = 'Lancet'
     d.prs.core_properties.subject = 'Dependency selection and synchronized filesystem/context recovery'
     d.issues.clear()
     return d.Canvas(name)
@@ -461,7 +461,7 @@ def overview():
              openings={'top':[call_center],'right':[1.55,2.65]})
     boundary(3.75,.74,4.75,3.58,'blue',dash=True,
              openings={'left':[1.55,3.18]})
-    label(right_x,.96,4.20,'AgentTX additions',NODE_PT,'blue',bold=True,align='left')
+    label(right_x,.96,4.20,'Lancet additions',NODE_PT,'blue',bold=True,align='left')
     label(.32,.96,2.95,'OverlayFS',NODE_PT,bold=True,align='left')
     s.rect(left_x,.10,left_w,.50,'black','white',r=.045,lw=.75)
     label(left_x+.10,.35,left_w-.20,'Tool calls')
@@ -477,7 +477,7 @@ def overview():
             via=[(.27,rows[2]+node_h/2),(.27,ports['merged-left-lower'][1])],color='gray')
 
     operation(right_x,rows[0],right_edge-right_x,'Record',1)
-    # These are capabilities added by AgentTX, not OverlayFS primitives.
+    # These are capabilities added by Lancet, not OverlayFS primitives.
     # Two dependency channels remain distinct and object versions are explicit.
     record_cy=rows[0]+node_h/2
     for x,w,first,second in [(5.54,.76,'File','edges'),
@@ -508,7 +508,7 @@ def overview():
 
     notes = """The solid gray boundary contains the existing OverlayFS merged
 view, writable upper U and read-only lower L. The dashed blue boundary
-contains AgentTX additions around that filesystem, not new OverlayFS kernel
+contains Lancet additions around that filesystem, not new OverlayFS kernel
 primitives. Step 1 records file-access/mutation dependencies, tool-result
 reuse dependencies and historical object versions. The file and result
 histories share step identifiers. Step 2 selects dependency-closed rollback
@@ -530,8 +530,8 @@ Connections meet node outlines without gaps, and layer ports follow the
 slanted edges. Upper/lower composition and the two recovery outputs use
 separate routes and ports. Group borders open only where connections pass.
 """
-    report = finish(s, 'Agenttx overview.pptx', 'AgentTX-Overview.pdf', notes, dict(
-        title='AgentTX additions to an OverlayFS execution view',
+    report = finish(s, 'Lancet overview.pptx', 'Lancet-Overview.pdf', notes, dict(
+        title='Lancet additions to an OverlayFS execution view',
         diagram_scope='existing OverlayFS versus added dependency, version and recovery capabilities',
         shown_call_example=False,
         execution_filesystem=dict(type='OverlayFS',tool_process_view='merged',
@@ -547,7 +547,7 @@ separate routes and ports. Group borders open only where connections pass.
         added_capabilities=['file dependency capture','tool-result dependency capture',
             'historical object versions','dependency-closed plan selection and validation',
             'selective object restoration','synchronized agent context'],
-        extension_boundary='dashed blue AgentTX additions frame',
+        extension_boundary='dashed blue Lancet additions frame',
         overlayfs_kernel_modified=False,history_is_mounted_layer=False,
         legend_required=False,
         alignment_grid=dict(row_tops=rows,node_height=node_h,
@@ -566,8 +566,8 @@ separate routes and ports. Group borders open only where connections pass.
         paper_include_width_fraction=1.0,
         primary_font_at_actual_paper_width_pt=round(NODE_PT*3.35/d.W,2)))
     for dest in [ROOT/'paper/img', ROOT/'motivation']:
-        shutil.copyfile(OUT/'AgentTX-Overview.pdf', dest/'FIG-AgentTX-Overview.pdf')
-        shutil.copyfile(OUT/'overview-visual.png', dest/'FIG-AgentTX-Overview.png')
+        shutil.copyfile(OUT/'Lancet-Overview.pdf', dest/'FIG-Lancet-Overview.pdf')
+        shutil.copyfile(OUT/'overview-visual.png', dest/'FIG-Lancet-Overview.png')
     return report
 
 def design():
@@ -664,8 +664,8 @@ validation; 3 Apply S updates the filesystem and context.
 The selected entries are applied to the existing upperdir. History lives
 outside the mount. The native PPT and PDF share editable/vector coordinates.
 '''
-    report = finish(s, 'AgentTX-Design-Workflow.pptx', 'AgentTX-Design-Workflow.pdf', notes, dict(
-        title='AgentTX: checkpoint selection and selective filesystem reconstruction',
+    report = finish(s, 'Lancet-Design-Workflow.pptx', 'Lancet-Design-Workflow.pdf', notes, dict(
+        title='Lancet: checkpoint selection and selective filesystem reconstruction',
         overview_steps=[2,3],
         baseline=lower,
         states=[dict(title=q['title'], upper=q['upper'], merged=q['merged']) for q in states],

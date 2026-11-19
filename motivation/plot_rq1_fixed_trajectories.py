@@ -158,7 +158,7 @@ def plot(rows, summary):
         group = [r for r in rows if r["family"] == family]
         for row_index, metric in enumerate(metrics):
             ax = axes[row_index, index]
-            # A dashed try line over AgentTX's solid zero line keeps both visible.
+            # A dashed try line over Lancet's solid zero line keeps both visible.
             for policy in (*FIGURE_POLICIES[2:], "causal", "root_only"):
                 xs = sorted({r[xfield] for r in group})
                 means, lows, highs = [], [], []

@@ -1,4 +1,4 @@
-# AgentTX
+# Lancet
 
 Terminology / 中英文策略名称：[reference / 术语表](docs/terminology.md).
 
@@ -8,13 +8,13 @@ Transactional side-effect control for multi-step agentic workflows.
 
 Semisolates (`try`) capture filesystem effects of a *single* opaque command.
 Agents issue *multi-step, cross-tool* trajectories whose side effects have
-causal dependencies. AgentTX elevates effect capture into **effect
+causal dependencies. Lancet elevates effect capture into **effect
 transactions**: shared/incremental semisolates, a causal effect ledger,
 speculative execution, and cascade rollback / selective commit.
 
 ## Positioning vs `try`
 
-| | `try` | AgentTX |
+| | `try` | Lancet |
 |---|---|---|
 | Unit | one command | agent trajectory |
 | Visibility | single overlay | stacked / frontiered |

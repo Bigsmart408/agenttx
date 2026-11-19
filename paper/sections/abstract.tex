@@ -1,0 +1,20 @@
+\begin{abstract}
+Coding agents reuse files and tool results over long sequences of edits,
+commands, and tests. An error can therefore affect both filesystem state and
+agent context, making rollback necessary for continued execution.
+Unfortunately, checkpoint and branch rollback also discard independent work
+when affected and unaffected calls interleave.
+We present \system, a causal recovery runtime built on Linux OverlayFS.
+Given a user report naming the file to roll back, it follows file
+dependencies and tool-result reuse to select
+and validate a rollback set. This set guides filesystem reconstruction and
+the removal of corresponding call/result pairs from agent context,
+preserving independent work within and across turns. Recovery can therefore
+reconstruct file states absent from any temporal checkpoint.
+Across 400 controlled workloads with three repetitions per policy, \system
+removes all affected calls and retains all independent work. Furthermore,
+on matched successful tasks with SWE-agent and Codex, it reduces token use
+relative to DeltaBox by 17.55--23.45\% on SWE-Bench Lite
+and 25.39--44.69\% on Terminal-Bench. The real-task breakdown shows
+lower agent-execution time in all twelve comparisons.
+\end{abstract}

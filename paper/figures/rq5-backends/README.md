@@ -12,10 +12,10 @@ Bars show mean complete storage-workflow time (`lifecycle_ns`); error bars are
 95% bootstrap intervals with 10,000 resamples and a fixed seed.
 `figure-data.json` records every plotted mean, interval, and the input SHA-256.
 
-- OverlayFS: Ext4, OverlayFS, and AgentTX/OverlayFS for file commits;
-  OverlayFS and AgentTX/OverlayFS for checkpoint workflows.
-- YoloFS: Ext4, YoloFS, and AgentTX/YoloFS for file commits;
-  YoloFS and AgentTX/YoloFS for checkpoint workflows.
+- OverlayFS: Ext4, OverlayFS, and Lancet/OverlayFS for file commits;
+  OverlayFS and Lancet/OverlayFS for checkpoint workflows.
+- YoloFS: Ext4, YoloFS, and Lancet/YoloFS for file commits;
+  YoloFS and Lancet/YoloFS for checkpoint workflows.
 
 Both OverlayFS variants enable metacopy and redirect_dir. Both YoloFS variants
 use native checkpoints through in-process ioctl calls with persistent control FDs.

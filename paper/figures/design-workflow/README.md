@@ -1,6 +1,6 @@
-# AgentTX 的可编辑设计图
+# Lancet 的可编辑设计图
 
-正文使用五张单栏设计图：总览、依赖选择、版本保留、文件系统与上下文重建、Ext4/XFS 实现。总览区分 OverlayFS 原有结构与 AgentTX 增加的依赖记录、对象版本和选择性恢复功能；各细节图使用相同的八条调用展开对应过程。图片使用白底、Times New Roman 字体；细节图中红色表示撤销、绿色表示保留、蓝色表示恢复，箭头不用绿色。上下文同步的独立图保留为可编辑素材。
+正文使用五张单栏设计图：总览、依赖选择、版本保留、文件系统与上下文重建、Ext4/XFS 实现。总览区分 OverlayFS 原有结构与 Lancet 增加的依赖记录、对象版本和选择性恢复功能；各细节图使用相同的八条调用展开对应过程。图片使用白底、Times New Roman 字体；细节图中红色表示撤销、绿色表示保留、蓝色表示恢复，箭头不用绿色。上下文同步的独立图保留为可编辑素材。
 
 ## 贯穿三图的例子
 
@@ -20,7 +20,7 @@ p 是返回文件名对应路径的简记。文件边为 E3→E4、E4→E6、E7�
 
 | 图片 | 主要表达 |
 |---|---|
-| Figure 5 / Overview | 左侧实线框是原有 OverlayFS 执行视图；右侧蓝色虚线框标出 AgentTX 新增的文件/结果依赖、对象版本、集合选择与验证、选择性恢复及上下文同步 |
+| Figure 5 / Overview | 左侧实线框是原有 OverlayFS 执行视图；右侧蓝色虚线框标出 Lancet 新增的文件/结果依赖、对象版本、集合选择与验证、选择性恢复及上下文同步 |
 | Figure 6 / Dependency Closure | 展开总览步骤 2：文件访问/修改、结果/参数记录作为证据，用户报告文件 f 及参考 checkpoint C0，取此后的写入 E3、E4 为根，联合依赖图计算 S，隔离残留检查通过后把同一个 S 交给文件系统恢复与上下文同步；不重复绘制 OverlayFS 状态和逐轮展开框 |
 | Figure 7 / Version Capture | 区分增量对象历史与显式检查点，展示 retained mounts 的管理 |
 | Figure 8 / Filesystem Reconstruction | 承接步骤 2 的集合与方案验证，执行步骤 3：在当前 upper 上恢复 f/h/p，保留 g1，并同步更新上下文 |
@@ -41,7 +41,7 @@ Figure 8 中，各检查点展示同一 lower 上的 merged view：
 
 正文图共用固定的字体和连接线标准。图 6 展开文件提示、联合依赖选择及隔离残留检查，并标出输入与下游恢复组件，文件系统状态留在图 7、8 中说明。Flow 为黑实线、File 为黑虚线、Result 为红实线；层间映射改用无箭头的细灰线，避免短线中出现过大的箭头。
 
-线型只编码明确的区别：黑虚线箭头表示文件依赖，与黑实线流程、红实线结果复用区分；红虚线对象框表示待撤销效果，与实线保留/恢复对象区分。空对象已标为 ∅，使用灰实线框。图 6 的步骤 2 使用实线框，Residue audit 用蓝色虚线框表示隔离残留检查；图 8 仅隔离验证使用虚线分组框，实际 Apply S 使用实线框，图注说明验证框的含义。总览中的蓝虚线外框仍表示 AgentTX 新增功能的边界。
+线型只编码明确的区别：黑虚线箭头表示文件依赖，与黑实线流程、红实线结果复用区分；红虚线对象框表示待撤销效果，与实线保留/恢复对象区分。空对象已标为 ∅，使用灰实线框。图 6 的步骤 2 使用实线框，Residue audit 用蓝色虚线框表示隔离残留检查；图 8 仅隔离验证使用虚线分组框，实际 Apply S 使用实线框，图注说明验证框的含义。总览中的蓝虚线外框仍表示 Lancet 新增功能的边界。
 
 - 全部文字使用 Times New Roman。节点文字和分组标题为 21 pt，辅助标注及步骤编号为 18 pt；仅分组标题加粗。∅ 使用数学字体 Cambria Math。
 - 所有箭头的线宽为 1.60 pt，头部长 9.0 pt、宽 7.2 pt；方向、颜色、路径长度和转折均不改变头部尺寸。
@@ -50,13 +50,13 @@ Figure 8 中，各检查点展示同一 lower 上的 merged view：
 
 | 原生 PPT | 正文 PDF | 预览 |
 |---|---|---|
-| Agenttx overview.pptx | AgentTX-Overview.pdf | overview-visual.png / .svg |
-| AgentTX-Dependency-Closure.pptx | AgentTX-Dependency-Closure.pdf | dependency-closure-visual.png / .svg |
-| AgentTX-Version-Capture.pptx | AgentTX-Version-Capture.pdf | version-capture-visual.png / .svg |
-| AgentTX-Design-Workflow.pptx | AgentTX-Design-Workflow.pdf | design-visual.png / .svg |
-| AgentTX-Context-Alignment.pptx（素材） | AgentTX-Context-Alignment.pdf（素材） | context-alignment-visual.png / .svg |
+| Lancet overview.pptx | Lancet-Overview.pdf | overview-visual.png / .svg |
+| Lancet-Dependency-Closure.pptx | Lancet-Dependency-Closure.pdf | dependency-closure-visual.png / .svg |
+| Lancet-Version-Capture.pptx | Lancet-Version-Capture.pdf | version-capture-visual.png / .svg |
+| Lancet-Design-Workflow.pptx | Lancet-Design-Workflow.pdf | design-visual.png / .svg |
+| Lancet-Context-Alignment.pptx（素材） | Lancet-Context-Alignment.pdf（素材） | context-alignment-visual.png / .svg |
 
-总览 PDF/PNG 同步到 paper/img/FIG-AgentTX-Overview.* 和 motivation/FIG-AgentTX-Overview.*。其余正文图直接引用本目录 PDF。生成器检查文字宽度、行高与画布边界，输出 layout-check-*.json。正文图均按完整单栏宽度排版，节点文字约 8.2 pt、辅助标注约 7.0 pt。图 6 保留文件提示及其修改根、全部文件/结果边和最终集合，移除重复的文件系统状态与扩展框；图 8 保留上下层状态、完整检查点矩阵、隔离验证和同步恢复流程。细节图共用 generate_diagrams.py 中的 DetailStyle，字体和箭头几何与总览一致。独立的上下文素材保持原样式。
+总览 PDF/PNG 同步到 paper/img/FIG-Lancet-Overview.* 和 motivation/FIG-Lancet-Overview.*。其余正文图直接引用本目录 PDF。生成器检查文字宽度、行高与画布边界，输出 layout-check-*.json。正文图均按完整单栏宽度排版，节点文字约 8.2 pt、辅助标注约 7.0 pt。图 6 保留文件提示及其修改根、全部文件/结果边和最终集合，移除重复的文件系统状态与扩展框；图 8 保留上下层状态、完整检查点矩阵、隔离验证和同步恢复流程。细节图共用 generate_diagrams.py 中的 DetailStyle，字体和箭头几何与总览一致。独立的上下文素材保持原样式。
 
 总览中的 upper 和 lower 共同提供 merged view，不表示 lower 写入 upper；恢复箭头只指向 upper，lower 始终只读。布局报告记录路径、箭头头部尺寸以及各段文字的字体、字号和字重。
 
@@ -64,7 +64,7 @@ Figure 8 中，各检查点展示同一 lower 上的 merged view：
 
 图 7 的历史框与文件值框之间留出 0.34 英寸，横向历史框也保持 0.34 英寸间距，让箭头线身与边框分开。下方 RO + pin / Detach + mount 标注分列在流程线两侧；Checkpoint C1 与 Lower L 之间留出 0.18 英寸，检查点关联通过独立的平滑虚线接入只读 U0。曲线与间距调整前的源码、正文及所有素材保存在 review/design-curves-20261118T063857Z/before/。
 
-总览用两个对齐的边界区分原有文件系统与新增运行时功能。左侧实线框包含 merged view、可写 upper U 与只读 lower L；upper/lower 是扁平层片。右侧蓝色虚线框标为 AgentTX additions，步骤 1 明列 File edges、Result edges 与 Object versions；这些记录和版本由层外运行时维护，不是新加的挂载层或 OverlayFS 内核原语。步骤 2 从用户报告文件在 checkpoint 之后的修改出发，选择联合依赖闭包 S，并检查命令、文件效果和上下文残留，步骤 3 将同一个 S 应用于选择性对象恢复与 agent context 同步。蓝色分支分别标注 Selective restore 和 Sync。
+总览用两个对齐的边界区分原有文件系统与新增运行时功能。左侧实线框包含 merged view、可写 upper U 与只读 lower L；upper/lower 是扁平层片。右侧蓝色虚线框标为 Lancet additions，步骤 1 明列 File edges、Result edges 与 Object versions；这些记录和版本由层外运行时维护，不是新加的挂载层或 OverlayFS 内核原语。步骤 2 从用户报告文件在 checkpoint 之后的修改出发，选择联合依赖闭包 S，并检查命令、文件效果和上下文残留，步骤 3 将同一个 S 应用于选择性对象恢复与 agent context 同步。蓝色分支分别标注 Selective restore 和 Sync。
 
 三条主行的顶边、底边及主要文字基线对齐：Merged view / Record、Upper U / Select S / Apply S、Lower L / Agent context。主框和层片统一为 0.70 英寸高，Select S、Apply S 与 Agent context 等宽；Record、Apply S 和 Agent context 右边缘一致。左右分组边界的顶边和底边也相同。依赖扩展、隔离验证和版本恢复的具体算法由后两张细节图展开。
 
@@ -83,7 +83,7 @@ make -C paper TECTONIC=/tmp/agenttx-paper-toolchain-20261027/tectonic
 
 ## Ext4 / XFS 实现图
 
-4.5 Implementation 使用 `AgentTX-Implementation.pdf`，对应可编辑素材为 `AgentTX-Implementation.pptx`，预览为 `implementation-visual.png` / `.svg`。图中仅保留四个框：共享用户态恢复控制器、原生 OverlayFS、Ext4 文件复制、XFS reflink，突出恢复逻辑与存储实现的解耦；不再展开文件版本和数据块。黑实线表示控制流程。生成器沿用现有 Times New Roman、线宽和箭头几何，并核对文字及画布边界。
+4.5 Implementation 使用 `Lancet-Implementation.pdf`，对应可编辑素材为 `Lancet-Implementation.pptx`，预览为 `implementation-visual.png` / `.svg`。图中仅保留四个框：共享用户态恢复控制器、原生 OverlayFS、Ext4 文件复制、XFS reflink，突出恢复逻辑与存储实现的解耦；不再展开文件版本和数据块。黑实线表示控制流程。生成器沿用现有 Times New Roman、线宽和箭头几何，并核对文字及画布边界。
 
 ```sh
 /tmp/agenttx-paper-check-20261027/bin/python paper/figures/design-workflow/generate_implementation.py

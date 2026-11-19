@@ -50,7 +50,7 @@ def main():
                       history_column_gap_inches=.34,
                       checkpoint_to_lower_inches=.18,
                       mount_annotations_separate_from_association=True))
-    g.finish(s, 'AgentTX-Version-Capture.pptx', 'AgentTX-Version-Capture.pdf',
+    g.finish(s, 'Lancet-Version-Capture.pptx', 'Lancet-Version-Capture.pdf',
              'Object history uses the shared E3/E4/E5/E6 example. Parent references '
              'and changed entries retain versions without cloning full history '
              'directories. Independent E5 supplies g1. Explicit storage checkpoints '

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot the matched RQ5 Ext4, OverlayFS, DeltaFS and AgentTX comparison."""
+"""Plot the matched RQ5 Ext4, OverlayFS, DeltaFS and Lancet comparison."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ OUTPUT = ROOT / "paper/figures/rq5-backends"
 VARIANTS = {
     "ext4": ("Ext4", BAR_PALETTE["teal"], ""),
     "overlay-metacopy": ("OverlayFS", BAR_PALETTE["purple"], ""),
-    "agenttx-metacopy": ("AgentTX", BAR_PALETTE["red"], "//"),
+    "agenttx-metacopy": ("Lancet", BAR_PALETTE["red"], "//"),
     "deltafs": ("DeltaFS", BAR_PALETTE["orange"], ""),
 }
 

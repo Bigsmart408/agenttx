@@ -79,7 +79,7 @@ LINESTYLES = {
 PAPER_LABELS = {
     "clean_recovery": "Clean",
     "ideal_oracle": "Ideal",
-    "agenttx_causal": "AgentTX",
+    "agenttx_causal": "Lancet",
     "turn_checkpoint_proxy": "Checkpoint",
     "temporal_step": "Temporal",
     "crash_no_rollback": "No rollback",
@@ -160,7 +160,7 @@ def build_projection() -> tuple[list[dict[str, object]], list[dict[str, object]]
             key = (case.plan.trace_id, "agenttx_causal", repeat)
             rows = attempts.get(key, [])
             if len(rows) != 1 or rows[0]["usage_source"] != "stdout_jsonl":
-                raise ValueError(f"missing unambiguous AgentTX usage: {key}")
+                raise ValueError(f"missing unambiguous Lancet usage: {key}")
             causal_tokens[(case.plan.trace_id, repeat)] = int(rows[0]["replay_total_tokens"])
 
     ratios = {"agenttx_causal": 1.0}
@@ -255,10 +255,10 @@ def write_report(summary: list[dict[str, object]]) -> None:
         "",
         "Source: `motivation_replay_raw.csv`, Luna max, 400 manifests x 3 repeats.",
         "Each measured cell includes every recorded attempt and its replay tokens.",
-        "For each policy, the measured-token sum is divided by AgentTX tokens",
+        "For each policy, the measured-token sum is divided by Lancet tokens",
         "on those exact cells to obtain its central ratio. Missing cells use",
-        "that ratio times the measured AgentTX count, with a deterministic",
-        "case-level variation sampled from observed policy/AgentTX ratios.",
+        "that ratio times the measured Lancet count, with a deterministic",
+        "case-level variation sampled from observed policy/Lancet ratios.",
         "Sampled ratios are capped at their empirical 10th and 90th percentiles",
         "before normalization so one outlier cannot dominate a plotted point.",
         "The fault-position sweep samples its measured fault-position cells;",
