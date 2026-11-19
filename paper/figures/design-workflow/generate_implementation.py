@@ -10,7 +10,7 @@ import generate_diagrams as g
 def main():
     s = g.canvas('implementation-visual', 2.42)
     v = g.DetailStyle(s)
-    v.node(.24, .08, 8.12, .50, 'Causal Excision Controller',
+    v.node(.24, .08, 8.12, .50, 'Shared user-space recovery controller',
            state='restored')
     v.node(.24, .94, 8.12, .50, 'Linux OverlayFS')
     v.arrow([(4.30, .58), (4.30, .94)])
@@ -21,12 +21,12 @@ def main():
 
     report = v.report()
     report.update(title='Ext4 and XFS implementations',
-                  controller='Causal Excision controller in user space over unmodified OverlayFS',
+                  controller='shared user-space controller over unmodified OverlayFS',
                   ext4='Ordinary file copying.',
                   xfs='Reflink file cloning.',
                   simplification='Four boxes show shared recovery logic and two storage backends.')
     g.finish(s, 'Lancet-Implementation.pptx', 'Lancet-Implementation.pdf',
-             'The shared user-space Causal Excision controller uses unmodified Linux '
+             'A shared user-space recovery controller uses unmodified Linux '
              'OverlayFS over either Ext4 or XFS. Ext4 uses ordinary file copies, '
              'and XFS uses reflink. Solid arrows show the shared control path; '
              'the dependency graph, rollback selection, and agent integration '

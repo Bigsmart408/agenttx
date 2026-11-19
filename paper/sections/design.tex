@@ -1,9 +1,9 @@
 \section{Lancet Design}
 \label{sec:design}
 \label{sec:aet-model}
-\system uses \emph{Causal Excision} to coordinate filesystem and
-agent-context recovery through one rollback set $S$. Recovery starts with a
-user report naming the files to roll back. The reference checkpoint denotes the state after a
+\system coordinates filesystem and agent-context recovery through one
+rollback set $S$. Recovery starts with a user report naming the file or
+files to roll back. The reference checkpoint denotes the state after a
 selected call; the default is the committed boundary. The report identifies
 a file-history range to withdraw, without identifying a faulty step or
 deciding which edit was semantically wrong.
@@ -39,20 +39,13 @@ observations within and across turns
 (Section~\ref{sec:context-reconstruction}).
 \end{itemize}
 
-\subsection{Causal Excision}
+\subsection{Rollback Selection via File and Result Dependencies}
 \label{sec:rollback-set}
-\label{sec:causal-excision}
-Causal Excision withdraws selected mutations and their recorded dependent
-effects while preserving independent work. It computes a rollback set $S$
-through file and tool-result dependencies, validates the plan in an isolated
-branch, and applies the same set to filesystem state and agent-visible
-call/result pairs. Sections~\ref{sec:userspace-fs}
-and~\ref{sec:context-reconstruction} describe how file restoration and
-context synchronization apply this shared selection.
-
+A fault can propagate through a file, a reused tool result, or both.
 Figure~\ref{fig:dependency-closure} expands step 2 of
-Figure~\ref{fig:overview}, using mutations of the reported file as the roots
-of joint dependency closure.
+Figure~\ref{fig:overview}: mutations of the reported file seed joint
+dependency closure, an isolated residue audit checks the resulting state,
+and the selected $S$ drives both filesystem restoration and agent-context synchronization.
 
 \begin{figure}[t]
 \centering
@@ -225,9 +218,8 @@ dependencies within this managed state. State equality covers contents,
 supported metadata, presence, and active call/result records.
 Distinctive-string matching alone does not establish capture completeness.
 
-Algorithm~\ref{alg:causal-rollback} formalizes Causal Excision by computing
-the scope of the report and applying it. $\operatorname{Audit}$ checks
-frozen expected versions, checkpoint
+Algorithm~\ref{alg:causal-rollback} computes the scope of the report and applies
+it. $\operatorname{Audit}$ checks frozen expected versions, checkpoint
 files, active identifiers, retained entries, and the lower baseline as
 described in Section~\ref{sec:rollback-set}. Its acceptance condition is
 independent of the test outcome for the original task.
@@ -237,7 +229,7 @@ $S$ inactive. $\operatorname{Fresh}(A)$ checks the frozen history signature;
 $\bot$ denotes rejection or inconclusive recovery.
 
 \begin{algorithm}[H]
-\caption{Causal Excision}
+\caption{File-scoped recovery}
 \label{alg:causal-rollback}
 \footnotesize
 \textbf{Input:} $F,c,H,G,V,Z$
@@ -317,11 +309,10 @@ completion is checked separately.
 
 \subsection{Implementation}
 \label{sec:implementation}
-\system implements Causal Excision in a shared user-space controller,
-decoupling recovery policy and agent-context synchronization from the
-backing filesystem. The controller manages history, checkpoints, and
-restoration through native Linux interfaces over OverlayFS.
-Figure~\ref{fig:implementation} shows two implementations:
+\system decouples recovery policy and agent-context synchronization from
+the backing filesystem. A shared user-space controller manages history,
+checkpoints, and restoration through native Linux interfaces over
+OverlayFS. Figure~\ref{fig:implementation} shows two implementations:
 Ext4 uses ordinary file copying, while XFS uses reflink to share unchanged
 data blocks between distinct versions. Support for additional backing
 filesystems is concentrated in storage operations, allowing the dependency
@@ -331,7 +322,6 @@ graph, rollback selection, and agent integration to be reused.
 \centering
 \includegraphics[width=\linewidth]{figures/design-workflow/Lancet-Implementation.pdf}
 \caption{\textbf{Ext4 and XFS implementations.}
-The Causal Excision controller shares recovery logic across two storage
-backends.}
+Shared recovery logic with two storage backends.}
 \label{fig:implementation}
 \end{figure}
