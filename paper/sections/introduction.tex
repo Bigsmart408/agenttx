@@ -35,9 +35,9 @@ from agent context.
 To this end, we present \system, a causal recovery runtime for coding
 agents. The key idea is to \textbf{let dependencies among tool calls
 determine the recovery boundary across filesystem state and agent context}.
-The user identifies the file whose changes should be rolled back.
-\system selects its mutations since a reference checkpoint and follows
-file dependencies and tool-result reuse to derive one rollback set.
+A user reviewing an agent's work may find that a file does not meet their
+expectations and ask to undo its changes. \system traces file dependencies
+and tool-result reuse from those changes to derive one rollback set.
 An isolated trial checks the expected file state and command/result residue
 before live recovery. The runtime restores affected file objects and
 removes the corresponding calls and results from agent context while preserving
@@ -47,9 +47,9 @@ updates, even when that combination never existed at a checkpoint.
 
 However, designing a filesystem that supports causal rollback poses three
 key challenges.
-1) A user can identify a problem file without knowing which calls depend
-on it. \system follows both file and result dependencies from the file's
-mutations, then checks the resulting rollback state before resuming execution.
+1) Errors can propagate through both file accesses and reused tool results.
+\system combines these dependencies to select affected calls and checks
+the resulting rollback state before resuming execution.
 2) The desired file state may be absent from every checkpoint. To
 reconstruct it, \system restores selected object versions, metadata, and
 deletion state in OverlayFS while retaining independent updates.
