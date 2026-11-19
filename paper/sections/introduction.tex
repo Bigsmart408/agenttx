@@ -12,6 +12,14 @@ before making further progress~\cite{agentrewind,planarian}. Rollback is
 therefore essential for removing these effects and restoring a valid state
 from which the agent can continue~\cite{try-osdi26,branchfs,crab}.
 
+Whole-snapshot rollback can exceed the scope of a user request.
+When reviewing agent changes, a user may want to undo edits to one or more
+files while retaining other changes that meet their expectations.
+In a study involving 13 field observations and a survey of 99 experienced
+developers, Huang et al. found that nine observed developers carefully
+reviewed every agent change and revised code through follow-up prompts or
+manual edits~\cite{huang-agent-use}.
+
 To support rollback, existing systems stage effects or restore checkpoints.
 In particular, effect-staging systems isolate filesystem changes for later
 application or discard~\cite{try-osdi26,branchfs,cordon}. When selecting
@@ -35,10 +43,8 @@ from agent context.
 To this end, we present \system, a causal recovery runtime for coding
 agents. The key idea is to \textbf{let dependencies among tool calls
 determine the recovery boundary across filesystem state and agent context}.
-When reviewing changes made by an agent, a user may find that a file does
-not meet their expectations and ask to undo its changes. \system traces
-file dependencies and tool-result reuse from those changes to derive one
-rollback set.
+Given the files to roll back, \system traces file dependencies and
+tool-result reuse from their changes to derive one rollback set.
 An isolated trial checks the expected file state and command/result residue
 before live recovery. The runtime restores affected file objects and
 removes the corresponding calls and results from agent context while preserving
