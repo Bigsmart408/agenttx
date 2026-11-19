@@ -310,7 +310,8 @@ completion is checked separately.
 \subsection{Implementation}
 \label{sec:implementation}
 \system supports Ext4 and XFS as backing filesystems for OverlayFS.
-Ext4 uses ordinary file copying to retain versions, while XFS reuses native
-reflink support to share unchanged data blocks across versions.
 Both implementations share the same user-space logic for dependency
 tracking, rollback selection, and agent-context synchronization.
+
+Ext4 uses ordinary file copying to retain versions. On XFS, \system reuses
+native reflink support to share unchanged data blocks across versions.
