@@ -140,6 +140,26 @@ def test_neutral_handoff_does_not_claim_dirty_files_were_restored():
     assert 'restor' not in NOTICE.lower()
 
 
+def test_file_component_handoff_preserves_the_same_file_report_without_a_step_hint():
+    prompt=handoff(dict(authoritative=True,recovery_input='file',problem_files=['src/a.py'],
+                        reference_checkpoint_step=-1,retained=[],recreate_required=[]))
+    assert 'src/a.py' in prompt and 'Reference checkpoint: -1' in prompt
+    assert 'faulty step' not in prompt and 'Known faulty' not in prompt
+
+
+def test_three_arm_cost_comparison_excludes_failures_and_preserves_negative_benefits():
+    from experiments.scripts.analyze_rq5_components import compare
+    def row(tokens,success=True):
+        return dict(success=success,complete_usage=True,state='completed',tokens=tokens,duration_s=1.)
+    rows={'a':dict(context_only=row(100),filesystem_only=row(60),agenttx=row(80)),
+          'failed':dict(context_only=row(1000),filesystem_only=row(1000),agenttx=row(10,False))}
+    fs=compare(rows,'context_only')
+    context=compare(rows,'filesystem_only')
+    assert fs['pairs']==context['pairs']==1
+    assert fs['saved_tokens']==20 and fs['saving_pct']==20.
+    assert context['saved_tokens']==-20
+
+
 def test_native_swe_projector_sees_registered_context_treatment():
     from agenttx.agents.swe_agent import SWEAgentHistoryProjector, STEP_IDS_KEY
     before,aligned=logs()
@@ -151,3 +171,14 @@ def test_native_swe_projector_sees_registered_context_treatment():
         visible=SWEAgentHistoryProjector(adapter)(history)
         assert any(m.get('content')=='observation-1' for m in visible)==(not sync)
         assert any(m.get('content')=='observation-2' for m in visible)
+
+
+def test_micro_launch_preserves_original_native_namespace_contract(tmp_path):
+    from experiments.scripts.run_recovery_cross_ablation import micro_command
+    (tmp_path/'registration.json').write_text(json.dumps(dict(micro_reference=dict(
+        python_mounts=[],image_id='pinned-reference-image'))))
+    command=micro_command(tmp_path,dict(trace_id='trace',harness='sweagent',variant='agenttx'),
+                          tmp_path/'probe')
+    assert 'AGENTTX_MOTIVATION_BWRAP=1' in command
+    assert 'SWE_AGENT_LOG_STREAM_LEVEL=DEBUG' in command
+    assert 'pinned-reference-image' in command

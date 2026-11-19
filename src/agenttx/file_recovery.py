@@ -282,8 +282,13 @@ class FileRecoveryAudit:
                     and not any(tx._paths_overlap(path, p) for p in restored)}
         checkpoint_files = {}
         if plan.root_step_ids:
+            # Rolled-back calls leave no effects and may have had their saved
+            # versions collected. The first still-active call after the
+            # boundary has the same pre-state as that boundary.
+            reference_before = min(i for i in plan.active_step_ids
+                                   if i > plan.checkpoint_step)
             for path in plan.paths:
-                with tx.pool.layers._path_source(plan.checkpoint_step + 1, path) as source:
+                with tx.pool.layers._path_source(reference_before, path) as source:
                     checkpoint_files[path] = _upper_entry(source, path)
         lower = {path: _entry(Path(path)) for path in restored | set(plan.paths)}
         return cls(plan, expected, retained, checkpoint_files, lower)

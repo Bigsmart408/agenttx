@@ -175,6 +175,36 @@ def test_codex_command_pins_reasoning_effort(monkeypatch):
     assert "max" in command
 
 
+def test_large_codex_prompt_crosses_exec_boundary_without_truncation(monkeypatch, tmp_path):
+    import hashlib
+    import json
+    import shlex
+    import sys
+    from agenttx.semisolate import SharedSemisolate
+
+    fake = tmp_path/'capture.py'
+    fake.write_text('import hashlib,json,sys\n'
+                    'data=sys.stdin.buffer.read()\n'
+                    'print(json.dumps(dict(bytes=len(data),sha256=hashlib.sha256(data).hexdigest(),'
+                    'args=sys.argv[1:])))\n')
+    monkeypatch.setenv('AGENTTX_NO_PROXY','1')
+    monkeypatch.setenv('CODEX_AUTH_FILE',str(tmp_path/'absent-auth.json'))
+    monkeypatch.setenv('CODEX_CONFIG_FILE',str(tmp_path/'absent-config.toml'))
+    task = ("line with quotes ' \\\" ; $(touch injected) `touch injected` 中文\n" * 4000) + 'no trailing newline'
+    harness = CodexHarness(command=shlex.join([sys.executable,str(fake)]),model='gpt-test')
+    command = harness.command(task,tmp_path)
+    pool = object.__new__(SharedSemisolate)
+    pool._cmd_script=tmp_path/'cmd.sh'
+    pool._cmd_script.touch(mode=0o700)
+    pool.tool_user=None
+    script=pool._write_cmd_script(command)
+    assert script.read_text().startswith('#!/bin/bash -l\n')
+    result=subprocess.run([str(script)],capture_output=True,text=True,check=True)
+    evidence=json.loads(result.stdout)
+    assert evidence==dict(bytes=len(task.encode()),sha256=hashlib.sha256(task.encode()).hexdigest(),args=['-'])
+    assert not (tmp_path/'injected').exists()
+
+
 def test_external_timeout_preserves_byte_stream_usage(monkeypatch, tmp_path):
     harness = CodexHarness(command="/bin/true", model="gpt-test", timeout_s=1)
     partial = (

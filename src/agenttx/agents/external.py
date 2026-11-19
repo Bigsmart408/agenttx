@@ -720,6 +720,11 @@ class CodexHarness(ExternalHarness):
             os.environ.get("AGENTTX_CONDA_BIN")
             or Path.home() / "miniconda3" / "envs" / "agenttx" / "bin"
         )
+        # A retained history can exceed Linux's per-argument limit. printf is
+        # a shell builtin, so feed the identical prompt on stdin in that case.
+        stdin_prompt = len(task.encode("utf-8")) >= 48 * 1024
+        prompt_pipe = f"printf %s {shlex.quote(task)} | " if stdin_prompt else "printf '' | "
+        task_argument = "-" if stdin_prompt else task
         shell = [
             "bash",
             "-lc",
@@ -756,10 +761,9 @@ class CodexHarness(ExternalHarness):
             f'if [ "${{CODEX_AUTH_MODE:-auto}}" != "api" ] && [ -r {shlex.quote(str(codex_home / "auth.json"))} ]; '
             'then unset CODEX_API_KEY OPENAI_API_KEY; '
             'else export CODEX_API_KEY="${CODEX_API_KEY:-${OPENAI_API_KEY:-}}"; fi && '
-            # The transaction worker owns its stdin pipe.  Feed an explicit
-            # EOF to Codex so its non-interactive `exec` mode cannot wait for
-            # an additional prompt after the initial task argument.
-            "printf '' | "
+            # Close the worker pipe, or supply the complete long prompt and
+            # EOF explicitly to Codex's documented stdin prompt interface.
+            + prompt_pipe +
             f"CODEX_HOME={shlex.quote(str(codex_home))} "
             f"XDG_CACHE_HOME={shlex.quote(str(cache_home))} "
             f"XDG_CONFIG_HOME={shlex.quote(str(config_home))} "
@@ -772,7 +776,7 @@ class CodexHarness(ExternalHarness):
             f"TEMP={shlex.quote(str(tmp_home))} "
             f"TMP={shlex.quote(str(tmp_home))} "
             f"OPENAI_MODEL={shlex.quote(self.model)} "
-            f"{shlex.join(prefix + [task])}",
+            f"{shlex.join(prefix + [task_argument])}",
         ]
         return self._with_proxy(shell)
 

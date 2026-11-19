@@ -24,6 +24,9 @@ from experiments.scripts.experiment_provenance import source_manifest
 DATA = Path('/mnt/data/agenttx-runtime')
 PYTHON = '/home/bfq/.venvs/agenttx/bin/python'
 from experiments.scripts.recovery_cross_ablation import VARIANTS, install
+FILE_COMPONENTS = os.environ.get('AGENTTX_CROSS_FILE_REPORT') == '1'
+if FILE_COMPONENTS:
+    VARIANTS = {k: VARIANTS[k] for k in ('context_only', 'filesystem_only', 'agenttx')}
 import random
 SWE_REFERENCE = DATA / 'results/codex-swe-full-recovery-20261104-r1/registration.json'
 TB_REFERENCE = DATA / 'results/tb-dual-native-full-20261030-r72-reviewed-flink-causal-timeout/registration.json'
@@ -67,6 +70,16 @@ def prepare(cohort, workers):
         destination = frozen / entry['path']
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / entry['path'], destination)
+    if FILE_COMPONENTS:
+        from experiments.scripts.bench_external_recovery_artifacts import MOTIVATION_SOURCES
+        extras = [*MOTIVATION_SOURCES.values(), *(ROOT/'src').rglob('*.so'), *(ROOT/'src').rglob('*.c')]
+        auxiliary = []
+        for path in extras:
+            destination = frozen/path.relative_to(ROOT)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, destination)
+            auxiliary.append(dict(path=str(path.relative_to(ROOT)), sha256=sha(destination)))
+        save(cohort/'auxiliary-manifest.json', dict(files=auxiliary))
     assert source_manifest(frozen)['sha256'] == manifest['sha256']
     groups = [('swe', h, ['psf__requests-1963'] + sorted(
         r['task'] for r in swe['images'] if r['task'] != 'psf__requests-1963'))
@@ -83,9 +96,42 @@ def prepare(cohort, workers):
                     cells.append(dict(key=f'{benchmark}/{harness}/{tasks[index]}/{variant}', benchmark=benchmark,
                     harness=harness, task=tasks[index], policy=VARIANTS[variant][0], variant=variant, pair_key=f'{benchmark}/{harness}/{tasks[index]}', state='pending',
                     canary=index == 0, attempts=[]))
-    assert len(cells) == len({c['key'] for c in cells}) == 4328
+    assert len(cells) == len({c['key'] for c in cells}) == 541 * 2 * len(VARIANTS)
+    if FILE_COMPONENTS:
+        from experiments.scripts.bench_external_recovery_artifacts import motivation_400_cases
+        micro_cases = motivation_400_cases()
+        micro_reference = read(ROOT.parent/'agenttx-experiment-data/results/system-micro-codex-6000-20261107-r4/registration.json')
+        swe_micro_reference = read(DATA/'results/system-micro-canonical400-paired-20261030-r2/registration.json')
+        assert micro_reference['model'] == swe_micro_reference['model'] == 'gpt-5.6-luna'
+        assert micro_reference['repeats'] == swe_micro_reference['repeats'] == 3
+        assert micro_reference['model_wall_s'] == swe_micro_reference['model_wall_s'] == 3600
+        assert micro_reference['token_budget'] == swe_micro_reference['token_budget'] == 8_000_000
+        assert micro_reference['image_id'] == swe_micro_reference['image_id']
+        profile = Path('/home/bfq/.config/agenttx/experiment-20261017')
+        for reference in (micro_reference, swe_micro_reference, swe):
+            assert all(sha(profile/name) == digest for name,digest in reference.get('profile_sha256',{}).items())
+        reference_cells = read(Path(micro_reference['cohort'])/'cells.json')['main']
+        assert {c.plan.trace_id:c.plan.manifest_hash for c in micro_cases} == {
+            c['trace_id']:c['manifest_hash'] for c in reference_cells}
+        for repeat in range(3):
+            for index, case in enumerate(micro_cases):
+                for harness in ('sweagent', 'codex'):
+                    variants = list(VARIANTS)
+                    random.Random(20261118+index+repeat*400).shuffle(variants)
+                    for variant in variants:
+                        task = f'{case.plan.trace_id}/repeat-{repeat:02d}'
+                        cells.append(dict(key=f'micro/{harness}/{task}/{variant}', benchmark='micro',
+                            harness=harness, task=task, trace_id=case.plan.trace_id,
+                            manifest_hash=case.plan.manifest_hash, family=case.suite_slice,
+                            operation_count=len(case.plan.steps), repeat=repeat, variant=variant,
+                            policy=VARIANTS[variant][0], pair_key=f'micro/{harness}/{task}',
+                            state='pending', canary=index == repeat == 0, attempts=[]))
+        # Round robin families so all three benchmarks advance under one limit.
+        buckets = {b: [c for c in cells if c['benchmark'] == b] for b in ('micro','swe','tb')}
+        from itertools import zip_longest
+        cells = [c for group in zip_longest(*buckets.values()) for c in group if c is not None]
     profile = Path('/home/bfq/.config/agenttx/experiment-20261017')
-    registration = dict(protocol='agenttx.recovery-cross-ablation/v2', registered_at=now(),
+    registration = dict(protocol='agenttx.recovery-cross-ablation/v3' if FILE_COMPONENTS else 'agenttx.recovery-cross-ablation/v2', registered_at=now(),
         cohort=cohort.name, frozen_source=str(frozen), source_sha256=manifest['sha256'],
         expected_cells=len(cells), variants=VARIANTS, context='full', model='gpt-5.6-luna',
         reasoning_effort='max', workers=workers, canary_keys=[c['key'] for c in cells if c['canary']],
@@ -113,6 +159,17 @@ def prepare(cohort, workers):
         ordinary_outcome_retries=dict(swe=0, tb=0), automatic_infrastructure_retries=0,
         all_attempt_costs_retained=True, unknown_usage_imputed=False, formal_eligible=False,
         profile_sha256={p: sha(profile / p) for p in ('config.toml', 'auth.json', 'sweagent.toml')})
+    if FILE_COMPONENTS:
+        registration.update(benchmarks=['micro','swe','tb'], recovery_input='file',
+            task_count=dict(micro=400,swe=300,tb=241), repeats=dict(micro=3,swe=1,tb=1),
+            expected_cells_by_benchmark=dict(Counter(c['benchmark'] for c in cells)),
+            no_rollback_baseline=False, selection='FS only / agent context only / synchronized FS and context',
+            fault_hints='all component arms receive identical file reports; no verifier-guided step search',
+            checkpoint_configuration='unchanged runtime: capture before every tool call; committed reference boundary',
+            micro_reference=micro_reference, micro_swe_reference=swe_micro_reference,
+            benchmark_settings_unchanged=True,
+            invariant_settings=['task inventory','images','fault seeds','prefix generation','checkpoint capture',
+                'checkpoint reference','micro manifests','repetitions','model','reasoning effort','wall and token budgets'])
     save(cohort / 'registration.json', registration)
     save(cohort / 'source-manifest.json', manifest)
     save(cohort / 'cells.json', cells)
@@ -131,6 +188,39 @@ def worker_command(cohort, module, *arguments):
     return command
 
 
+def micro_command(cohort, cell, folder, *, runtime_only=False):
+    from experiments.scripts.run_system_microbenchmark import DOCKER, PROFILE, SWE
+    reg = read(cohort/'registration.json')['micro_reference']
+    source = ROOT
+    name = 'atx-rq5-micro-' + hashlib.sha256(str(folder).encode()).hexdigest()[:18]
+    command = DOCKER + ['run','--rm','--pull','never','--privileged','--name',name,
+        '--network','host','--tmpfs','/root:exec','--tmpfs','/tmp:exec',
+        '--tmpfs','/sys','--tmpfs','/run','--workdir',str(source)]
+    readonly = {source, PROFILE, SWE, *map(Path, reg['python_mounts'])}
+    cache = DATA/'tiktoken-cache'
+    readonly.add(cache)
+    for path in sorted(readonly):
+        command += ['--mount',f'type=bind,src={path},dst={path},readonly']
+    command += ['--mount',f'type=bind,src={cohort},dst=/results']
+    binary = Path('/home/bfq/.local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex')
+    for path in (binary,binary.parent/'codex-code-mode-host'):
+        command += ['--mount',f'type=bind,src={path},dst=/usr/local/bin/{path.name},readonly']
+    env = dict(PYTHONPATH=f'{source}/src:{source}',PYTHONDONTWRITEBYTECODE='1',
+        AGENTTX_WORKER_PYTHON=PYTHON,AGENTTX_TRACE_SPOOL_ROOT='/var/tmp',AGENTTX_SKIP_ORPHAN_REAP='1',
+        AGENTTX_MOTIVATION_BWRAP='1',SWE_AGENT_LOG_STREAM_LEVEL='DEBUG',
+        AGENTTX_NO_PROXY='1',AGENTTX_CROSS_FILE_REPORT='1',CODEX_BIN='/usr/local/bin/codex',
+        CODEX_CONFIG_FILE=str(PROFILE/'config.toml'),CODEX_AUTH_FILE=str(PROFILE/'auth.json'),
+        TIKTOKEN_CACHE_DIR=str(cache),TRY_BIND_READONLY=':'.join(map(str,readonly)))
+    for key,value in env.items():
+        command += ['--env',key+'='+value]
+    command += ['--entrypoint',PYTHON,reg['image_id'],'-u',str(ROOT/'experiments/scripts/run_recovery_cross_ablation.py'),
+        'micro-worker','--cohort','/results','--task',cell['trace_id'],'--harness',cell['harness'],
+        '--variant',cell['variant'],'--output-dir',str(Path('/results')/folder.relative_to(cohort))]
+    if runtime_only:
+        command += ['--runtime-only']
+    return command
+
+
 def swe_worker(cohort, task, harness, variant, folder):
     from experiments.scripts import run_swe_monitored_local as shared
     from experiments.scripts import bench_official_tasks as bench
@@ -145,7 +235,7 @@ def swe_worker(cohort, task, harness, variant, folder):
         trace_backend='strace', python=sys.executable, oracle=False, harness_backend=harness,
         harness_root=Path(os.environ['AGENTTX_SWE_AGENT_ROOT']) if harness == 'sweagent' else None,
         harness_timeout_s=900, harness_output_dir=folder, reasoning_effort='max',
-        swe_tasks=swe.load_tasks(shared.CACHE))
+        swe_tasks=swe.load_tasks(shared.CACHE), recovery_input='file' if FILE_COMPONENTS else 'legacy')
     row.update(cohort=cohort.name, source_sha256=read(cohort / 'registration.json')['source_sha256'],
                context_profile='full', expected_recovery_context_variant='full', formal_eligible=False,
                cross_variant=variant, cross_treatment=read(folder/'cross-treatment.json') if (folder/'cross-treatment.json').exists() else None)
@@ -199,12 +289,15 @@ def preflight(cohort):
     folder=cohort/'preflight'
     folder.mkdir(exist_ok=False)
     os.chown(folder,1003,1003)
+    treatment_groups = {}
     for variant in VARIANTS:
         output=folder/('swe-'+variant)
         command=worker_command(cohort,swe,PYTHON,str(Path(__file__).resolve()),'zero-swe-worker',
             '--cohort',str(cohort),'--task','psf__requests-1963','--variant',variant,'--output-dir',str(output))
         subprocess.run(command,check=True)
-        assert read(output/'proof.json')['passed']
+        proof = read(output/'proof.json')
+        assert proof['passed']
+        treatment_groups.setdefault('swe/psf__requests-1963', []).append(proof['treatment'])
     for task in ('hello-world','privilege-escalation'):
         for harness in ('sweagent','codex'):
             for variant,(policy,_) in VARIANTS.items():
@@ -214,25 +307,62 @@ def preflight(cohort):
                 output=folder/f'tb-{task}-{harness}-{variant}'
                 command=tb.cell_command(ROOT,output,cell,registration['tb_evidence'].get(task))
                 command[command.index(str(ROOT/'experiments/scripts/bench_tb_image_native.py'))]=str(ROOT/'experiments/scripts/bench_recovery_cross_tb.py')
+                if FILE_COMPONENTS:
+                    command += ['--recovery-input','file']
                 env=dict(os.environ,AGENTTX_CROSS_VARIANT=variant)
                 subprocess.run(['runuser','-u','bfq','--',*command,'--preflight-only'],env=env,check=True)
                 result=read(output/'clean_recovery'/'host-result.json')
                 assert result['completed'] and result['status']=='preflight_passed'
                 assert result['completion_contract_preflight']['cross_treatment']['original_observation_treatment_verified']
+                treatment_groups.setdefault(f'tb/{task}/{harness}', []).append(
+                    result['completion_contract_preflight']['cross_treatment'])
+    if FILE_COMPONENTS:
+        from experiments.scripts.bench_external_recovery_artifacts import motivation_400_cases
+        plans = motivation_400_cases()
+        selected = [next(c for c in plans if c.suite_slice == family) for family in
+                    ('mb2_task_length','mb3_fault_position','mb4_dependency')]+[plans[-1]]
+        for case in selected:
+            for variant in VARIANTS:
+                output = folder/'micro'/case.plan.trace_id/variant
+                output.parent.mkdir(parents=True,exist_ok=True)
+                cell = dict(trace_id=case.plan.trace_id,harness='sweagent',variant=variant)
+                subprocess.run(micro_command(cohort,cell,output,runtime_only=True),check=True)
+                result = read(output/'result.json')
+                if not result['completed']:
+                    raise RuntimeError('micro component preflight failed: '+str(result.get('error')))
+                treatment_groups.setdefault('micro/'+case.plan.trace_id, []).append(result['cross_treatment'])
+        for key, proofs in treatment_groups.items():
+            assert {p['variant'] for p in proofs} == set(VARIANTS), key
+            for field in ('checkpoint_configuration', 'selected_causal_ids', 'policy_input'):
+                assert len({json.dumps(p[field], sort_keys=True) for p in proofs}) == 1, (key, field)
     save(folder/'proof.json',dict(checked_at=now(),passed=True,external_model_calls=0,
         swe_variants=list(VARIANTS),tb_variants=list(VARIANTS),tb_harnesses=['sweagent','codex'],
-        tb_tasks=['hello-world','privilege-escalation']))
+        tb_tasks=['hello-world','privilege-escalation'],
+        component_settings_equal=FILE_COMPONENTS, paired_probe_groups=len(treatment_groups)))
 
 
 def result_status(cell, folder):
     from experiments.scripts import run_swe_monitored_local as swe
     from experiments.scripts import run_tb_dual_local as tb
-    path = folder / ('result.json' if cell['benchmark'] == 'swe' else 'native/' + cell['policy'] + '/host-result.json')
+    path = folder / ('result.json' if cell['benchmark'] in {'swe','micro'} else 'native/' + cell['policy'] + '/host-result.json')
     if not path.exists():
         return path, {}, 'missing_result', False
     result = read(path)
-    if cell['benchmark'] == 'swe':
-        issue = swe.infrastructure_issue(result, expected_context='full')
+    if cell['benchmark'] == 'micro':
+        issue = (result.get('error') or 'micro_runtime_error') if not result.get('completed') else None
+        usage = result.get('api_usage',{})
+        if not issue and (not usage.get('complete') or usage.get('budget_exceeded')):
+            issue = 'incomplete_api_usage'
+        success = bool(result.get('success'))
+    elif cell['benchmark'] == 'swe':
+        classified = dict(result)
+        if FILE_COMPONENTS:
+            if result.get('policy_recovery_input') != 'file' or result.get('fault_step_disclosed'):
+                return path,result,'component_recovery_input_mismatch',False
+            # This legacy classifier treats a disclosed file as a leaked step.
+            # Validate the new schema above; leave the saved row unchanged.
+            classified['fault_location_disclosed'] = False
+        issue = swe.infrastructure_issue(classified, expected_context='full')
         success = bool(result.get('success'))
     else:
         issue = tb.infrastructure_issue(result, 'full')
@@ -258,13 +388,15 @@ def run(cohort):
     images = {r['task']: r for r in registration['swe_images']}
     active, hydrated = [], set()
     stopped = None
+    infrastructure_streak = 0
     canary_passed = (cohort / 'canary-proof.json').exists()
 
     def report():
         save(cohort / 'cells.json', cells)
         save(cohort / 'progress.json', dict(updated_at=now(), coordinator_pid=os.getpid(),
-            stage='attention_required' if stopped else 'running' if canary_passed else 'sixteen_variant_combination_canary',
+            stage='attention_required' if stopped else 'running' if canary_passed else 'component_combination_canary',
             counts=dict(Counter(c['state'] for c in cells)), stop_reason=stopped,
+            consecutive_infrastructure_errors=infrastructure_streak,
             active=[dict(key=c['key'], pid=p.pid, started_at=c['started_at']) for c, p, _, _ in active],
             total=len(cells), workers=registration['workers'],
             disk_free_gib={'output':round(shutil.disk_usage(cohort).free/2**30,1),
@@ -272,7 +404,7 @@ def run(cohort):
                 'host':round(shutil.disk_usage('/home/bfq').free/2**30,1)},
             attempts=sum(len(c['attempts']) for c in cells),
             groups={f'{b}/{h}': dict(Counter(c['state'] for c in cells if c['benchmark'] == b and c['harness'] == h))
-                    for b in ('swe', 'tb') for h in ('sweagent', 'codex')}))
+                    for b in registration.get('benchmarks',('swe','tb')) for h in ('sweagent', 'codex')}))
 
     def stop(signum, frame):
         nonlocal stopped
@@ -297,8 +429,13 @@ def run(cohort):
                         finished_at=now(), result_path=str(path), infrastructure_issue=issue)
             # Preserve a registered timeout as terminal and continue other tasks.
             timeout = cell['benchmark'] == 'swe' and result.get('harness_returncode') == 124 and not result.get('host_leak_before_commit')
+            infrastructure_streak = infrastructure_streak + 1 if issue and not timeout else 0
             if issue and not timeout and not stopped:
-                stopped = cell['key'] + ':' + issue
+                # Retain an isolated task failure and advance unrelated cells.
+                # Consecutive infrastructure failures still stop dispatch.
+                threshold = registration.get('consecutive_infrastructure_error_limit', 1)
+                if infrastructure_streak >= threshold:
+                    stopped = cell['key'] + ':' + issue
             report()
             if cell['benchmark'] == 'tb' and path.exists():
                 from experiments.scripts.retain_recovery_cross_session import retain
@@ -327,7 +464,10 @@ def run(cohort):
                 folder = cohort / 'cells' / cell['benchmark'] / cell['harness'] / cell['task'] / cell['variant'] / f'attempt-{len(cell["attempts"]) + 1:03d}'
                 folder.mkdir(parents=True, exist_ok=False)
                 os.chown(folder, 1003, 1003)
-                if cell['benchmark'] == 'swe':
+                if cell['benchmark'] == 'micro':
+                    command = micro_command(cohort,cell,folder)
+                    limit = 4200
+                elif cell['benchmark'] == 'swe':
                     if cell['task'] not in hydrated:
                         image = images[cell['task']]
                         swe.hydrate(cell['task'], image['image_id'], image['base_commit'])
@@ -340,6 +480,8 @@ def run(cohort):
                         ROOT, folder / 'native', cell, registration['tb_evidence'].get(cell['task']))]
                     original_entry=str(ROOT/'experiments/scripts/bench_tb_image_native.py')
                     command[command.index(original_entry)]=str(ROOT/'experiments/scripts/bench_recovery_cross_tb.py')
+                    if FILE_COMPONENTS:
+                        command += ['--recovery-input','file']
                     limit = registration['tb_cell_timeout_s']
                 command = ['timeout', '--signal=TERM', '--kill-after=30', str(limit), *command]
                 save(folder / 'launch-command.json', command)
@@ -384,13 +526,14 @@ def monitor(cohort):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('prepare', 'preflight', 'run', 'swe-worker', 'zero-swe-worker', 'monitor'))
+    parser.add_argument('action', choices=('prepare', 'preflight', 'run', 'swe-worker', 'zero-swe-worker', 'micro-worker', 'monitor'))
     parser.add_argument('--cohort', type=Path, required=True)
     parser.add_argument('--workers', type=int, default=8)
     parser.add_argument('--task')
     parser.add_argument('--variant',choices=tuple(VARIANTS))
     parser.add_argument('--harness', choices=('sweagent', 'codex'))
     parser.add_argument('--output-dir', type=Path)
+    parser.add_argument('--runtime-only', action='store_true')
     args = parser.parse_args()
     if args.action == 'prepare':
         prepare(args.cohort, args.workers)
@@ -398,6 +541,10 @@ def main():
         swe_worker(args.cohort, args.task, args.harness, args.variant, args.output_dir)
     elif args.action == 'zero-swe-worker':
         zero_swe_probe(args.task,args.variant,args.output_dir)
+    elif args.action == 'micro-worker':
+        from experiments.scripts.bench_rq5_components_micro import run as micro_run
+        row = micro_run(args.task,args.harness,args.variant,args.output_dir,runtime_only=args.runtime_only)
+        return 0 if row['completed'] else 1
     else:
         return globals()[args.action](args.cohort)
     return 0

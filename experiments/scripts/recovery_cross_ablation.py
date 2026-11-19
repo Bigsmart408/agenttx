@@ -63,12 +63,19 @@ def handoff(manifest):
                         manifest.get('retained', [])), key=lambda x: x['path'])
     missing = sorted((dict(path=x['path'], contract=x['contract']) for x in
                       manifest.get('recreate_required', [])), key=lambda x: x['path'])
-    return ('Current checked recovery-note state:\n'
+    report = ''
+    if manifest.get('recovery_input') == 'file':
+        report = ('User report: the following file(s) are incorrect: '
+                  + json.dumps(manifest.get('problem_files', []))
+                  + '. Reference checkpoint: ' + str(manifest.get('reference_checkpoint_step')) + '.\n')
+    return (report + 'Current checked recovery-note state:\n'
             + json.dumps(dict(completed_notes=completed, missing_notes=missing), ensure_ascii=False)
             + '\nCompleted notes are valid: preserve them without reopening or rewriting them. '
               'Recreate listed missing notes only when absent. Continue the original task '
               'using its official verifier. The recovery decision has already been made; '
-              'do not invoke rollback tools. No fault location is supplied in this handoff.')
+              'do not invoke rollback tools. '
+            + ('No command index is supplied in this handoff.' if report else
+               'No fault location is supplied in this handoff.'))
 
 
 def history_prompt(conversation, prompt):
@@ -187,16 +194,79 @@ class Treatment:
         self.applied = True
 
 
+class FileTreatment(Treatment):
+    """Ablate application of one file-derived plan, without changing capture."""
+
+    def capture(self, function):
+        # Legacy preflight call sites provide the report through their injected
+        # fixture. Production benchmark calls enter capture_report directly.
+        def call(agent, injected, *args, **kwargs):
+            return self.capture_report(agent, [injected['faulty_path']], self.policy,
+                                       injected=injected)
+        return call
+
+    def capture_report(self, agent, problem_files, mode, *, injected, checkpoint_step=None):
+        from agenttx.file_recovery import FileRecoveryAudit, apply_file_recovery_plan
+        tx = agent.harness.tx
+        self.tx, self.before, self.injected = tx, copy.deepcopy(tx.conversation.to_dict()), copy.deepcopy(injected)
+        self.injected_files = self.file_state()
+        plan = tx.plan_file_recovery(problem_files, checkpoint_step=checkpoint_step)
+        audit = FileRecoveryAudit.capture(tx, plan)
+        # All arms verify exactly the same file-derived scope. Only application
+        # of its filesystem and context components differs between arms.
+        with tx.fork() as trial:
+            apply_file_recovery_plan(trial, plan)
+            trial_audit = audit.check(trial)
+        if not trial_audit['valid']:
+            raise RuntimeError('file-derived component plan failed its isolated audit')
+        self.report = dict(kind='file', files=list(problem_files), checkpoint_step=plan.checkpoint_step)
+        self.checkpoint_configuration = dict(
+            capture='before every tool call', history_end=plan.history_end,
+            reference_checkpoint_step=plan.checkpoint_step,
+            recorded_point_count=len(list(tx.pool.layers.root.glob('before_*'))))
+        self.targets = self.planned_targets = list(plan.rollback_targets)
+        self.rollback_ids = apply_file_recovery_plan(tx, plan) if self.restore_files else []
+        self.policy_files = self.file_state()
+        self.applied = False
+        checked = audit.check(tx)
+        self.output.mkdir(parents=True, exist_ok=True)
+        (self.output/'cross-precrash-conversation.json').write_text(json.dumps(self.before, indent=2))
+        return self.rollback_ids, dict(
+            recovery_input='file', recovery_protocol='agenttx.file-report-step-controls/v1',
+            problem_files=[str(Path(p).relative_to(tx.workspace)) for p in plan.paths],
+            reference_checkpoint_step=plan.checkpoint_step, file_recovery_audit=checked,
+            isolated_scope_audit=trial_audit, candidate_probe_count=0,
+            localized_root_steps=[], localization_matches_injected_root=None,
+            localization_validation='component_scope_audit_passed',
+            localization_confidence='recorded_dependency_scope',
+            fault_location_source='user_file_report', fault_location_disclosed=True,
+            fault_step_disclosed=False)
+
+    def apply(self):
+        if self.applied:
+            return
+        super().apply()
+        if self.tx is None:
+            return
+        self.proof.update(recovery_protocol='agenttx.file-report-component-ablation/v1',
+                          policy_input=self.report,
+                          checkpoint_configuration=self.checkpoint_configuration)
+        (self.output/'cross-treatment.json').write_text(json.dumps(self.proof, indent=2)+'\n')
+
+
 def install(variant, output, *, harness):
     """Install hooks in this experiment worker, never in another running cohort."""
     from experiments.scripts import bench_official_tasks as bench
     from experiments.workloads import recovery_inject as injection
     from experiments.workloads import swe_bench_suite as swe
     os.environ['AGENTTX_RECOVERY_CONTEXT'] = 'full'
-    treatment = Treatment(variant, output)
+    file_protocol = os.environ.get('AGENTTX_CROSS_FILE_REPORT') == '1'
+    treatment = (FileTreatment if file_protocol else Treatment)(variant, output)
     treatment.localize = bench._auto_localize_policy
     bench._auto_localize_policy = treatment.capture(bench._auto_localize_policy)
     bench._apply_blind_policy = treatment.capture(bench._apply_blind_policy)
+    if file_protocol:
+        bench._reported_recovery_policy = treatment.capture_report
     original_build = injection.build_recovery_manifest
 
     @functools.wraps(original_build)

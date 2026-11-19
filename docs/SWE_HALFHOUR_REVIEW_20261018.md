@@ -1,10 +1,10 @@
 # SWE-agent 每半小时巡检
 
-核验时间：2026-11-19 09:30:02（北京时间）；当前批次 `sweagent-swe-local-monitored-20261018-selective-auto-20261019T064657Z`。
+核验时间：2026-11-19 22:30:01（北京时间）；当前批次 `sweagent-swe-local-monitored-20261018-selective-auto-20261019T064657Z`。
 
 状态：`{'completed': 1799, 'infrastructure_error': 1}`；新增终止尝试：0；主进程存活：False。
 
-评估：`infrastructure_attention_required`；基础设施告警：`['disk_near_200_gib_guard', 'infrastructure_errors:1']`；数据盘剩余 97.9 GiB。
+评估：`infrastructure_attention_required`；基础设施告警：`['infrastructure_errors:1']`；数据盘剩余 283.9 GiB。
 
 ## Causal 对本批对照组
 

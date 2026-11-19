@@ -12,7 +12,8 @@ def main():
     p.add_argument('--cohort',type=Path,required=True)
     args=p.parse_args()
     cohort=args.cohort.resolve()
-    source=Path(json.loads((cohort/'registration.json').read_text())['frozen_source'])
+    registration=json.loads((cohort/'registration.json').read_text())
+    source=Path(registration['frozen_source'])
     python='/home/bfq/.venvs/agenttx/bin/python'
     name='atx-'+cohort.name+'-'+args.action
     command=['docker','--host','unix:///run/agenttx-docker/docker.sock','run','--rm','--pull=never',
@@ -43,6 +44,8 @@ def main():
         TMPDIR=str(cohort/'scratch'),AGENTTX_TRACE_SPOOL_ROOT=str(cohort/'scratch'),
         TIKTOKEN_CACHE_DIR='/mnt/data/agenttx-runtime/tiktoken-cache',
         PIP_CACHE_DIR='/mnt/data/agenttx-runtime/pip-cache',UV_CACHE_DIR='/mnt/data/agenttx-runtime/uv-cache')
+    if registration.get('recovery_input') == 'file':
+        env['AGENTTX_CROSS_FILE_REPORT']='1'
     for key,value in env.items():
         command+=['--env',key+'='+value]
     command+=['--entrypoint',python,'sha256:22feb19c04e4b8e8439ecafdfa0cba6430c415e0a8edea86c10e706a2646fed7','-u',

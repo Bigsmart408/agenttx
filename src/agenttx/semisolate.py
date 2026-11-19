@@ -766,7 +766,13 @@ class SharedSemisolate:
                 cmd_dir.chmod(0o755)
                 self._cmd_script.chmod(0o755)
         script = self._cmd_script
-        if len(argv) >= 3 and Path(argv[0]).name == "bash" and argv[1] == "-c":
+        large_login = (len(argv) == 3 and Path(argv[0]).name == "bash"
+                       and argv[1] == "-lc" and len(argv[2].encode("utf-8")) >= 64 * 1024)
+        if large_login:
+            # Execute the login shell from a file instead of passing its body
+            # as an exec argument. Preserve login initialization and its flags.
+            body = "#!/bin/bash -l\n" + argv[2] + "\n"
+        elif len(argv) >= 3 and Path(argv[0]).name == "bash" and argv[1] == "-c":
             body = "#!/bin/bash\nset -e\n" + argv[2] + "\n"
         else:
             body = "#!/bin/bash\nset -e\n" + " ".join(shlex.quote(a) for a in argv) + "\n"

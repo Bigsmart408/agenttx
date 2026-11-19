@@ -19,7 +19,8 @@ def digest(path):
 def retain(cohort, cell_folder):
     cohort, cell_folder = Path(cohort).resolve(), Path(cell_folder).resolve()
     registration = json.loads((cohort/'registration.json').read_text())
-    assert registration['protocol'] in ('agenttx.recovery-cross-ablation/v1', 'agenttx.recovery-cross-ablation/v2')
+    assert registration['protocol'] in ('agenttx.recovery-cross-ablation/v1', 'agenttx.recovery-cross-ablation/v2',
+                                        'agenttx.recovery-cross-ablation/v3')
     assert cell_folder.is_relative_to(cohort/'cells'/'tb')
     variants=list((cell_folder/'native').glob('*/host-result.json'))
     assert len(variants)==1

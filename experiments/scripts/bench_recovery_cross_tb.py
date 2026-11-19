@@ -27,6 +27,9 @@ def main():
         command[command.index(str(Path(native.__file__).resolve()))] = str(Path(__file__).resolve())
         command[command.index('--entrypoint'):command.index('--entrypoint')] = [
             '-e', 'AGENTTX_CROSS_VARIANT='+variant]
+        if os.environ.get('AGENTTX_CROSS_FILE_REPORT') == '1':
+            command[command.index('--entrypoint'):command.index('--entrypoint')] = [
+                '-e', 'AGENTTX_CROSS_FILE_REPORT=1']
         return command
 
     native.build_command = build_command

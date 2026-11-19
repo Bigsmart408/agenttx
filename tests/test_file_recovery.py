@@ -131,6 +131,31 @@ def test_multiple_writes_are_scoped_by_checkpoint_without_guessing_faulty_step(h
     assert outcome.audit['valid'] and outcome.applied
 
 
+def test_initial_reference_survives_discarded_infrastructure_probe(tmp_path):
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    (workspace / 'problem.txt').write_text('base\n')
+    tx = AgentTX.begin(workspace, session_dir=tmp_path/'session', trace_reads=False)
+    try:
+        probe = _run(tx, "printf 'probe\n' > problem.txt")
+        tx.rollback(probe.step_id)
+        assert not (tx.pool.layers.root / 'before_0000').exists()
+        root = _run(tx, "printf 'wrong\n' > problem.txt")
+        keep = _run(tx, "printf 'keep\n' > keep.txt")
+        count = len(list(tx.pool.layers.root.glob('before_*')))
+        plan = tx.plan_file_recovery(['problem.txt'], checkpoint_step=-1)
+        audit = FileRecoveryAudit.capture(tx, plan)
+        assert len(list(tx.pool.layers.root.glob('before_*'))) == count
+        assert plan.checkpoint_step == -1 and plan.rollback_targets == (root.step_id,)
+        apply_file_recovery_plan(tx, plan)
+        assert audit.check(tx)['valid']
+        assert tx.conversation.active_step_ids() == [keep.step_id]
+        checked = tx.run_tool('inspect', ['bash', '-c', 'cat problem.txt keep.txt'], trace_reads=False)
+        assert checked.stdout == 'base\nkeep\n'
+    finally:
+        tx.close(destroy=True)
+
+
 def test_unknown_file_is_inconclusive_and_stale_plan_is_rejected(history):
     tx, checkpoint, *_ = history
     outcome = tx.recover_file(['unknown.txt'], checkpoint_step=checkpoint.step_id)
