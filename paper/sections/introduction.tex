@@ -12,14 +12,6 @@ before making further progress~\cite{agentrewind,planarian}. Rollback is
 therefore essential for removing these effects and restoring a valid state
 from which the agent can continue~\cite{try-osdi26,branchfs,crab}.
 
-Whole-snapshot rollback can exceed the scope of a user request.
-When reviewing agent changes, a user may want to undo edits to one or more
-files while retaining other changes that meet their expectations.
-In a study involving 13 field observations and a survey of 99 experienced
-developers, Huang et al. found that nine observed developers carefully
-reviewed every agent change and revised code through follow-up prompts or
-manual edits~\cite{huang-agent-use}.
-
 To support rollback, existing systems stage effects or restore checkpoints.
 In particular, effect-staging systems isolate filesystem changes for later
 application or discard~\cite{try-osdi26,branchfs,cordon}. When selecting
@@ -29,8 +21,18 @@ restoration~\cite{rollbacksurvey,dmtcp,waypoint,deltabox}. Building on
 these mechanisms, recent agent runtimes select checkpoint state from turn effects~\cite{crab}, restore
 consistent environment versions~\cite{planarian}, or recover aligned
 filesystem and agent-context checkpoints while retaining lessons~\cite{agentrewind}.
-However, restoring an earlier checkpoint discards later independent updates,
-while rolling back a whole branch loses its independent changes.
+In practice, developers frequently revise AI output: 66\% of respondents
+($n=31{,}476$) to the AI-frustrations question in the 2025 Stack Overflow
+Developer Survey reported solutions that were ``almost right, but not
+quite''~\cite{stackoverflow-survey-2025}.
+A study of 567 Claude Code-assisted pull requests across 157 projects found
+that 45.1\% of merged requests underwent revision~\cite{watanabe-agentic-prs}.
+Agent interfaces already expose file-level keep/undo
+controls~\cite{vscode-review-edits}: a user reviewing changes may want to
+roll back one or more files while retaining the rest. Checkpoint and
+whole-branch recovery can discard independent changes outside that selection,
+while file-level undo alone does not remove dependent calls and
+observations from agent context.
 
 Our motivational experiments (Section~\ref{sec:motivation}) show that
 the DeltaBox recovery scope discards 56.90\% of valid work on average across 400
