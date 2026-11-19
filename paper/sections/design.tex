@@ -309,19 +309,8 @@ completion is checked separately.
 
 \subsection{Implementation}
 \label{sec:implementation}
-\system decouples recovery policy and agent-context synchronization from
-the backing filesystem. A shared user-space controller manages history,
-checkpoints, and restoration through native Linux interfaces over
-OverlayFS. Figure~\ref{fig:implementation} shows two implementations:
-Ext4 uses ordinary file copying, while XFS uses reflink to share unchanged
-data blocks between distinct versions. Support for additional backing
-filesystems is concentrated in storage operations, allowing the dependency
-graph, rollback selection, and agent integration to be reused.
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\linewidth]{figures/design-workflow/Lancet-Implementation.pdf}
-\caption{\textbf{Ext4 and XFS implementations.}
-Shared recovery logic with two storage backends.}
-\label{fig:implementation}
-\end{figure}
+\system supports Ext4 and XFS as backing filesystems for OverlayFS.
+Ext4 uses ordinary file copying to retain versions, while XFS reuses native
+reflink support to share unchanged data blocks across versions.
+Both implementations share the same user-space logic for dependency
+tracking, rollback selection, and agent-context synchronization.

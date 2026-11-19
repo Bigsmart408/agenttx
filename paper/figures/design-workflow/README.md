@@ -1,6 +1,6 @@
 # Lancet 的可编辑设计图
 
-正文使用五张单栏设计图：总览、依赖选择、版本保留、文件系统与上下文重建、Ext4/XFS 实现。总览区分 OverlayFS 原有结构与 Lancet 增加的依赖记录、对象版本和选择性恢复功能；各细节图使用相同的八条调用展开对应过程。图片使用白底、Times New Roman 字体；细节图中红色表示撤销、绿色表示保留、蓝色表示恢复，箭头不用绿色。上下文同步的独立图保留为可编辑素材。
+正文使用四张单栏设计图：总览、依赖选择、版本保留、文件系统与上下文重建。Ext4/XFS 实现在正文中用文字说明，原实现图保留为可编辑素材。总览区分 OverlayFS 原有结构与 Lancet 增加的依赖记录、对象版本和选择性恢复功能；各细节图使用相同的八条调用展开对应过程。图片使用白底、Times New Roman 字体；细节图中红色表示撤销、绿色表示保留、蓝色表示恢复，箭头不用绿色。上下文同步的独立图保留为可编辑素材。
 
 ## 贯穿三图的例子
 
@@ -24,7 +24,7 @@ p 是返回文件名对应路径的简记。文件边为 E3→E4、E4→E6、E7�
 | Figure 6 / Dependency Closure | 展开总览步骤 2：文件访问/修改、结果/参数记录作为证据，用户报告文件 f 及参考 checkpoint C0，取此后的写入 E3、E4 为根，联合依赖图计算 S，隔离残留检查通过后把同一个 S 交给文件系统恢复与上下文同步；不重复绘制 OverlayFS 状态和逐轮展开框 |
 | Figure 7 / Version Capture | 区分增量对象历史与显式检查点，展示 retained mounts 的管理 |
 | Figure 8 / Filesystem Reconstruction | 承接步骤 2 的集合与方案验证，执行步骤 3：在当前 upper 上恢复 f/h/p，保留 g1，并同步更新上下文 |
-| Figure 9 / Implementation | 共享恢复控制器经 OverlayFS 使用 Ext4 文件复制或 XFS reflink |
+| Implementation（素材） | 原实现图，正文不再引用；4.5 用文字介绍 Ext4 文件复制与 XFS reflink |
 
 Figure 8 中，各检查点展示同一 lower 上的 merged view：
 
@@ -83,7 +83,7 @@ make -C paper TECTONIC=/tmp/agenttx-paper-toolchain-20261027/tectonic
 
 ## Ext4 / XFS 实现图
 
-4.5 Implementation 使用 `Lancet-Implementation.pdf`，对应可编辑素材为 `Lancet-Implementation.pptx`，预览为 `implementation-visual.png` / `.svg`。图中仅保留四个框：共享用户态恢复控制器、原生 OverlayFS、Ext4 文件复制、XFS reflink，突出恢复逻辑与存储实现的解耦；不再展开文件版本和数据块。黑实线表示控制流程。生成器沿用现有 Times New Roman、线宽和箭头几何，并核对文字及画布边界。
+4.5 Implementation 以文字说明 Ext4 和 XFS 两种底层文件系统，以及复用 XFS reflink 的版本保留方式。`Lancet-Implementation.pdf` 不再用于正文，对应可编辑素材为 `Lancet-Implementation.pptx`，预览为 `implementation-visual.png` / `.svg`。素材中有四个框：Lancet、原生 OverlayFS、Ext4 文件复制、XFS reflink，突出恢复逻辑与存储实现的解耦；不再展开文件版本和数据块。黑实线表示控制流程。生成器沿用现有 Times New Roman、线宽和箭头几何，并核对文字及画布边界。
 
 ```sh
 /tmp/agenttx-paper-check-20261027/bin/python paper/figures/design-workflow/generate_implementation.py
