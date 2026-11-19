@@ -74,10 +74,18 @@ def _kill_process_group(process: subprocess.Popen) -> None:
         pass
 
 
+def _tracer_pid() -> int:
+    with open("/proc/self/status", encoding="ascii") as stream:
+        for line in stream:
+            if line.startswith("TracerPid:"):
+                return int(line.split()[1])
+    return 0
+
+
 def main() -> int:
     stdin = sys.stdin.buffer
     protocol_stdout = sys.stdout.buffer
-    _write_frame(protocol_stdout, {"ready": True})
+    _write_frame(protocol_stdout, {"ready": True, "tracer_pid": _tracer_pid()})
     while True:
         request = _read_frame(stdin)
         if request is None:
@@ -88,7 +96,10 @@ def main() -> int:
         argv = request.get("argv")
         cwd = request.get("cwd")
         if not isinstance(argv, list) or not all(isinstance(item, str) for item in argv):
-            _write_frame(stdout, {"error": "invalid argv"})
+            _write_frame(protocol_stdout, {"error": "invalid argv"})
+            continue
+        if request.get("require_tracer") and not _tracer_pid():
+            _write_frame(protocol_stdout, {"error": "session tracer exited before dispatch"})
             continue
         hold_marker = request.get("hold_marker")
         if isinstance(hold_marker, str):
@@ -152,6 +163,8 @@ def main() -> int:
             }
         except OSError as exc:
             response = {"returncode": 127, "stdout": "", "stderr": str(exc)}
+        if request.get("require_tracer") and not _tracer_pid():
+            response = {"error": "session tracer exited during command; execution outcome uncertain"}
         _write_frame(protocol_stdout, response)
 
 

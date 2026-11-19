@@ -1,0 +1,24 @@
+\begin{table}[!ht]
+\centering
+\caption{\textbf{Dependency rules between tool calls.}
+\small\emph{For $i<j$, $\checkmark$ adds $E_i\rightarrow E_j$;
+$\times$ means the pair alone adds no edge. File accesses refer to related state.}}
+\label{tab:dependency-rules}
+\footnotesize
+\setlength{\tabcolsep}{2pt}
+\renewcommand{\arraystretch}{1.12}
+\begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}lcc@{}}
+\toprule
+Relation & Access order & Edge \\
+\midrule
+Write--read (WR) & $W_i,\ R_j$ & $\checkmark$ \\
+Write--write (WW) & $W_i,\ W_j$ & $\checkmark$ \\
+Read--write (RW) & $R_i,\ W_j$ & $\times$ \\
+Read--read (RR) & $R_i,\ R_j$ & $\times$ \\
+Mutation--lookup & $W_i,\ N_j$ & $\checkmark$ \\
+Lookup--write & $N_i,\ W_j$ & $\checkmark$ \\
+\midrule
+Result reuse & Result string in arguments & $\checkmark$ \\
+\bottomrule
+\end{tabular*}
+\end{table}

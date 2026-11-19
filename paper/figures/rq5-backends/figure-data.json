@@ -1,0 +1,336 @@
+{
+  "sources": {
+    "review/rq5-deltafs-comparison-20261117/summary.json": "bce7828c59bd5e44b23eba64ff2d346cb63ac00be7c6bbaf7a2f5d23d6e41d28",
+    "review/rq5-deltafs-commit-20261117/summary.json": "bc92a1b79925c28f61a5477c157b91bd9f3277e491eb63c83cfe7a92f9498464"
+  },
+  "error_bars": "95% session-bootstrap intervals for mean; 10,000 resamples",
+  "baseline_protocol": {
+    "overlay_checkpoint": "Synchronous unmount/remount; no retained mounts.",
+    "agenttx_overlay_checkpoint": "Retained read-only mounts and generation records.",
+    "deltafs_checkpoint": "Recovered paper kernel module; native checkpoint ioctl, same kernel and Ext4."
+  },
+  "palette": {
+    "red": "#b42318",
+    "orange": "#d97706",
+    "teal": "#16837a",
+    "purple": "#7c5aa6"
+  },
+  "figures": {
+    "OverlayFS": {
+      "commit/create": {
+        "ext4": {
+          "mean": 0.19622298,
+          "ci95": [
+            0.18417545950500003,
+            0.2083473440125
+          ],
+          "n": 10,
+          "unit": "s",
+          "metric": "lifecycle_ns",
+          "source": "review/rq5-deltafs-commit-20261117/summary.json",
+          "source_variant": "ext4"
+        },
+        "overlay-metacopy": {
+          "mean": 0.7653801302,
+          "ci95": [
+            0.74241704434,
+            0.78664407659
+          ],
+          "n": 10,
+          "unit": "s",
+          "metric": "lifecycle_ns",
+          "source": "review/rq5-deltafs-commit-20261117/summary.json",
+          "source_variant": "overlay-metacopy"
+        },
+        "deltafs": {
+          "mean": 0.748574901,
+          "ci95": [
+            0.7223486776,
+            0.7716038211625
+          ],
+          "n": 10,
+          "unit": "s",
+          "metric": "lifecycle_ns",
+          "source": "review/rq5-deltafs-commit-20261117/summary.json",
+          "source_variant": "deltafs"
+        },
+        "agenttx-metacopy": {
+          "mean": 0.736131775,
+          "ci95": [
+            0.715753928255,
+            0.755230284035
+          ],
+          "n": 10,
+          "unit": "s",
+          "metric": "lifecycle_ns",
+          "source": "review/rq5-deltafs-commit-20261117/summary.json",
+          "source_variant": "agenttx-metacopy"
+        }
+      },
+      "commit/overwrite": {
+        "ext4": {
+          "mean": 0.4802876085,
+          "ci95": [
+            0.461455329165,
+            0.49872773495250006
+          ],
+          "n": 10,
+          "unit": "s",
+          "metric": "lifecycle_ns",
+          "source": "review/rq5-deltafs-commit-20261117/summary.json",
+          "source_variant": "ext4"
+        },
+        "overlay-metacopy": {
+          "mean": 1.2686333743,
+          "ci95": [
+            1.24581230907,
+            1.2921807534125
+          ],
+          "n": 10,
+          "unit": "s",
+          "metric": "lifecycle_ns",
+          "source": "review/rq5-deltafs-commit-20261117/summary.json",
+          "source_variant": "overlay-metacopy"
+        },
+        "deltafs": {
+          "mean": 1.2088560362,
+          "ci95": [
+            1.1596315881400001,
+            1.25801890706
+          ],
+          "n": 10,
+          "unit": "s",
+          "metric": "lifecycle_ns",
+          "source": "review/rq5-deltafs-commit-20261117/summary.json",
+          "source_variant": "deltafs"
+        },
+        "agenttx-metacopy": {
+          "mean": 1.2429913063,
+          "ci95": [
+            1.1957211118200002,
+            1.287054342015
+          ],
+          "n": 10,
+          "unit": "s",
+          "metric": "lifecycle_ns",
+          "source": "review/rq5-deltafs-commit-20261117/summary.json",
+          "source_variant": "agenttx-metacopy"
+        }
+      },
+      "commit/rename": {
+        "ext4": {
+          "mean": 0.3853732853,
+          "ci95": [
+            0.3760925178949999,
+            0.3938987641475
+          ],
+          "n": 10,
+          "unit": "s",
+          "metric": "lifecycle_ns",
+          "source": "review/rq5-deltafs-commit-20261117/summary.json",
+          "source_variant": "ext4"
+        },
+        "overlay-metacopy": {
+          "mean": 2.8281979693000006,
+          "ci95": [
+            2.7732389888349998,
+            2.878218049185
+          ],
+          "n": 10,
+          "unit": "s",
+          "metric": "lifecycle_ns",
+          "source": "review/rq5-deltafs-commit-20261117/summary.json",
+          "source_variant": "overlay-metacopy"
+        },
+        "deltafs": {
+          "mean": 2.8266041575,
+          "ci95": [
+            2.77837583105,
+            2.8797080071675003
+          ],
+          "n": 10,
+          "unit": "s",
+          "metric": "lifecycle_ns",
+          "source": "review/rq5-deltafs-commit-20261117/summary.json",
+          "source_variant": "deltafs"
+        },
+        "agenttx-metacopy": {
+          "mean": 2.7719443340999996,
+          "ci95": [
+            2.7304060666425,
+            2.8115830033525
+          ],
+          "n": 10,
+          "unit": "s",
+          "metric": "lifecycle_ns",
+          "source": "review/rq5-deltafs-commit-20261117/summary.json",
+          "source_variant": "agenttx-metacopy"
+        }
+      },
+      "commit/unlink": {
+        "ext4": {
+          "mean": 0.28762991899999996,
+          "ci95": [
+            0.27085319816250003,
+            0.3066187129725
+          ],
+          "n": 10,
+          "unit": "s",
+          "metric": "lifecycle_ns",
+          "source": "review/rq5-deltafs-commit-20261117/summary.json",
+          "source_variant": "ext4"
+        },
+        "overlay-metacopy": {
+          "mean": 0.9340526187,
+          "ci95": [
+            0.9042965725000001,
+            0.9635235562399999
+          ],
+          "n": 10,
+          "unit": "s",
+          "metric": "lifecycle_ns",
+          "source": "review/rq5-deltafs-commit-20261117/summary.json",
+          "source_variant": "overlay-metacopy"
+        },
+        "deltafs": {
+          "mean": 0.9455184209,
+          "ci95": [
+            0.9032415352375,
+            0.982150697305
+          ],
+          "n": 10,
+          "unit": "s",
+          "metric": "lifecycle_ns",
+          "source": "review/rq5-deltafs-commit-20261117/summary.json",
+          "source_variant": "deltafs"
+        },
+        "agenttx-metacopy": {
+          "mean": 0.9011626243000002,
+          "ci95": [
+            0.84864106098,
+            0.9564571548999998
+          ],
+          "n": 10,
+          "unit": "s",
+          "metric": "lifecycle_ns",
+          "source": "review/rq5-deltafs-commit-20261117/summary.json",
+          "source_variant": "agenttx-metacopy"
+        }
+      },
+      "snapshot/1": {
+        "overlay-metacopy": {
+          "mean": 3.6140170000000005,
+          "ci95": [
+            3.0413840162499994,
+            4.4863522175
+          ],
+          "n": 20,
+          "unit": "ms",
+          "metric": "snapshot_ms",
+          "source": "review/rq5-deltafs-comparison-20261117/summary.json",
+          "source_variant": "overlay-sync"
+        },
+        "deltafs": {
+          "mean": 0.42293034999999995,
+          "ci95": [
+            0.3884410225,
+            0.4602837949999999
+          ],
+          "n": 20,
+          "unit": "ms",
+          "metric": "snapshot_ms",
+          "source": "review/rq5-deltafs-comparison-20261117/summary.json",
+          "source_variant": "deltafs"
+        },
+        "agenttx-metacopy": {
+          "mean": 0.4163956000000001,
+          "ci95": [
+            0.36643354625,
+            0.47888313875
+          ],
+          "n": 20,
+          "unit": "ms",
+          "metric": "snapshot_ms",
+          "source": "review/rq5-deltafs-comparison-20261117/summary.json",
+          "source_variant": "agenttx-overlay"
+        }
+      },
+      "snapshot/10": {
+        "overlay-metacopy": {
+          "mean": 2.0660833499999995,
+          "ci95": [
+            1.8796041992499999,
+            2.2796689801250003
+          ],
+          "n": 20,
+          "unit": "ms",
+          "metric": "snapshot_ms",
+          "source": "review/rq5-deltafs-comparison-20261117/summary.json",
+          "source_variant": "overlay-sync"
+        },
+        "deltafs": {
+          "mean": 0.26208918,
+          "ci95": [
+            0.227337078125,
+            0.30807929662499994
+          ],
+          "n": 20,
+          "unit": "ms",
+          "metric": "snapshot_ms",
+          "source": "review/rq5-deltafs-comparison-20261117/summary.json",
+          "source_variant": "deltafs"
+        },
+        "agenttx-metacopy": {
+          "mean": 0.35414605499999996,
+          "ci95": [
+            0.31432075724999997,
+            0.40094815775
+          ],
+          "n": 20,
+          "unit": "ms",
+          "metric": "snapshot_ms",
+          "source": "review/rq5-deltafs-comparison-20261117/summary.json",
+          "source_variant": "agenttx-overlay"
+        }
+      },
+      "snapshot/30": {
+        "overlay-metacopy": {
+          "mean": 2.1905698449999997,
+          "ci95": [
+            2.0170869041666672,
+            2.3934019371666664
+          ],
+          "n": 20,
+          "unit": "ms",
+          "metric": "snapshot_ms",
+          "source": "review/rq5-deltafs-comparison-20261117/summary.json",
+          "source_variant": "overlay-sync"
+        },
+        "deltafs": {
+          "mean": 0.32139714,
+          "ci95": [
+            0.2868332811666667,
+            0.3641462314166667
+          ],
+          "n": 20,
+          "unit": "ms",
+          "metric": "snapshot_ms",
+          "source": "review/rq5-deltafs-comparison-20261117/summary.json",
+          "source_variant": "deltafs"
+        },
+        "agenttx-metacopy": {
+          "mean": 0.4379710066666666,
+          "ci95": [
+            0.3708542483333333,
+            0.5232517020833334
+          ],
+          "n": 20,
+          "unit": "ms",
+          "metric": "snapshot_ms",
+          "source": "review/rq5-deltafs-comparison-20261117/summary.json",
+          "source_variant": "agenttx-overlay"
+        }
+      }
+    }
+  }
+}

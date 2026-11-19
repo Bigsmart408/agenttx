@@ -50,7 +50,7 @@ def records(t):
     return out
 
 def accounting_audit():
-    spec = importlib.util.spec_from_file_location('swe_usage', '/home/bfq/agenttx/experiments/scripts/audit_swe_token_usage.py')
+    spec = importlib.util.spec_from_file_location('swe_usage', '/home/bfq/agenttx-workspace/agenttx/experiments/scripts/audit_swe_token_usage.py')
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
     return module.audit(json.loads((DATA/'validation/active-swe-full-cohort.json').read_text())['cohort'])
 

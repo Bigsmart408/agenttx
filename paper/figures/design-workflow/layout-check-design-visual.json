@@ -1,0 +1,861 @@
+{
+  "title": "AgentTX: checkpoint selection and selective filesystem reconstruction",
+  "overview_steps": [
+    2,
+    3
+  ],
+  "baseline": [
+    "f0",
+    "g0",
+    "h0",
+    "\u2205"
+  ],
+  "states": [
+    {
+      "title": "Current",
+      "upper": [
+        "f2",
+        "g1",
+        "WH",
+        "p1"
+      ],
+      "merged": [
+        "f2",
+        "g1",
+        "\u2205",
+        "p1"
+      ]
+    },
+    {
+      "title": "Recovered",
+      "upper": [
+        "\u2205",
+        "g1",
+        "\u2205",
+        "\u2205"
+      ],
+      "merged": [
+        "f0",
+        "g1",
+        "h0",
+        "\u2205"
+      ]
+    }
+  ],
+  "selected_steps": [
+    "E3",
+    "E4",
+    "E6",
+    "E7",
+    "E8"
+  ],
+  "retained_steps": [
+    "E1",
+    "E2",
+    "E5"
+  ],
+  "filesystem_edges": [
+    [
+      "E3",
+      "E4"
+    ],
+    [
+      "E4",
+      "E6"
+    ],
+    [
+      "E7",
+      "E8"
+    ],
+    [
+      "E3",
+      "E6"
+    ]
+  ],
+  "message_edges": [
+    [
+      "E3",
+      "E7"
+    ]
+  ],
+  "shown_dependency_edges": false,
+  "checkpoint_views": [
+    {
+      "id": "V0",
+      "before": "E3",
+      "view": [
+        "f0",
+        "g0",
+        "h0",
+        "\u2205"
+      ]
+    },
+    {
+      "id": "V1",
+      "before": "E6",
+      "view": [
+        "f2",
+        "g1",
+        "h0",
+        "\u2205"
+      ]
+    },
+    {
+      "id": "V2",
+      "before": "E7",
+      "view": [
+        "f2",
+        "g1",
+        "\u2205",
+        "\u2205"
+      ]
+    }
+  ],
+  "selected_checkpoint_versions": {
+    "f": "V0",
+    "h": "V1",
+    "p": "V2"
+  },
+  "checkpoint_view_semantics": "merged view over the shared lower baseline",
+  "restoration_base": "current filesystem state",
+  "selection_rule": "latest compatible checkpoint before the first selected mutation per path group",
+  "before_images": [
+    {
+      "object": "f",
+      "before": "E3",
+      "prior_upper": null
+    },
+    {
+      "object": "h",
+      "before": "E6",
+      "prior_upper": null
+    },
+    {
+      "object": "p",
+      "before": "E7",
+      "prior_upper": null
+    }
+  ],
+  "history_is_mounted_layer": false,
+  "baseline_commit": false,
+  "atomic_probe_swap": false,
+  "synchronized_outputs": [
+    "live upperdir",
+    "agent context"
+  ],
+  "routing_clearance": {
+    "checkpoint_row_pitch_inches": 0.43,
+    "checkpoint_cell_vertical_gap_inches": 0.13,
+    "upper_cell_horizontal_gap_inches": 0.11
+  },
+  "original_layout_preserved": true,
+  "typography": {
+    "family": "Times New Roman",
+    "node_pt": 21,
+    "annotation_pt": 18,
+    "heading_pt": 21,
+    "bold_headings_only": true,
+    "math_symbol_font": "Cambria Math",
+    "labels": [
+      {
+        "text": "OverlayFS",
+        "size_pt": 21,
+        "bold": true,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Current",
+        "size_pt": 21,
+        "bold": true,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Merged",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "f2",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "g1",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "\u2205",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Cambria Math"
+      },
+      {
+        "text": "p1",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Upper U",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "f2",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "g1",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "WH",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "p1",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Recovered",
+        "size_pt": 21,
+        "bold": true,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Merged",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "f0",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "g1",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "h0",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "\u2205",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Cambria Math"
+      },
+      {
+        "text": "Upper U",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "\u2205",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Cambria Math"
+      },
+      {
+        "text": "g1",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "\u2205",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Cambria Math"
+      },
+      {
+        "text": "\u2205",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Cambria Math"
+      },
+      {
+        "text": "Lower L",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "f0",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "g0",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "h0",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "\u2205",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Cambria Math"
+      },
+      {
+        "text": "2",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Select S",
+        "size_pt": 21,
+        "bold": true,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "S = {E3, E4, E6\u2013E8}",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "E5",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Choose checkpoints",
+        "size_pt": 21,
+        "bold": true,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Checkpoint",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "f",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "g",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "h",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "p",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "V0",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "f0",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "g0",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "h0",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "\u2205",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Cambria Math"
+      },
+      {
+        "text": "V1",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "f2",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "g1",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "h0",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "\u2205",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Cambria Math"
+      },
+      {
+        "text": "V2",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "f2",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "g1",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "\u2205",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Cambria Math"
+      },
+      {
+        "text": "\u2205",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Cambria Math"
+      },
+      {
+        "text": "Validate",
+        "size_pt": 21,
+        "bold": true,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Residue audit",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "3",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Apply S",
+        "size_pt": 21,
+        "bold": true,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "pass",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "FS",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "f0",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "h0",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "\u2205",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Cambria Math"
+      },
+      {
+        "text": "g1",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Context",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "drop S",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "E5/r5",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Selected",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Retained",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Restored",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      }
+    ]
+  },
+  "connectors": {
+    "shaft_pt": 1.6,
+    "head_length_pt": 9.0,
+    "head_width_pt": 7.2,
+    "routed_geometry": "smooth cubic Bezier",
+    "gap_inches": 0,
+    "arrows": [
+      {
+        "role": "flow",
+        "color": "black",
+        "dash": false,
+        "points": [
+          [
+            3.95,
+            1.58
+          ],
+          [
+            4.65,
+            1.58
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "flow",
+        "color": "black",
+        "dash": false,
+        "points": [
+          [
+            3.05,
+            4.2
+          ],
+          [
+            3.65,
+            4.2
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "flow",
+        "color": "black",
+        "dash": false,
+        "points": [
+          [
+            6.07,
+            5.4
+          ],
+          [
+            6.07,
+            5.73
+          ],
+          [
+            1.575,
+            5.73
+          ],
+          [
+            1.575,
+            6.11
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "flow",
+        "color": "black",
+        "dash": false,
+        "points": [
+          [
+            3.05,
+            7.03
+          ],
+          [
+            3.65,
+            7.03
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      }
+    ]
+  },
+  "line_styles": {
+    "flow": {
+      "color": "black",
+      "lw": 1.6,
+      "dash": false
+    },
+    "file": {
+      "color": "black",
+      "lw": 1.6,
+      "dash": true
+    },
+    "result": {
+      "color": "red",
+      "lw": 1.6,
+      "dash": false
+    }
+  },
+  "line_semantics": {
+    "solid_black_arrow": "workflow",
+    "dashed_black_arrow": "file dependency",
+    "solid_red_arrow": "tool-result reuse",
+    "dashed_red_node": "selected effect or context to withdraw",
+    "dashed_frame": "isolated residue audit",
+    "solid_frame": "normal stage or live application",
+    "empty_node": "absence symbol with a solid gray outline"
+  },
+  "paper_include_width_fraction": 1.0,
+  "primary_font_at_actual_paper_width_pt": 8.18,
+  "native_shapes": 141,
+  "text_fit_issues": [],
+  "bounds_issues": [],
+  "canvas_inches": [
+    8.6,
+    8.3
+  ],
+  "font": "Times New Roman",
+  "preview_font": "Times New Roman",
+  "reference": {
+    "paper": "Don't Let AI Agents YOLO Your Files: Information and Control in Agent-Native Filesystems",
+    "venue": "SOSP 2026",
+    "version": "arXiv:2604.13536v5",
+    "figures": [
+      1,
+      2,
+      7
+    ],
+    "url": "https://arxiv.org/pdf/2604.13536v5",
+    "use": "Thin black structure, compact aligned blocks, circled operations, semantic red/green/blue accents."
+  },
+  "palette": {
+    "blue": "0066CC",
+    "pale": "F3F7FC",
+    "purple": "000000",
+    "purpale": "F5F5F5",
+    "red": "8C0000",
+    "redpale": "FFEBEB",
+    "green": "008000",
+    "greenpale": "E6FFE6",
+    "black": "000000",
+    "gray": "707070",
+    "light": "B0B0B0",
+    "white": "FFFFFF"
+  },
+  "running_example": {
+    "name": "shared-eight-call-trajectory",
+    "steps": {
+      "E1": "inspect the baseline",
+      "E2": "inspect the baseline",
+      "E3": "write f1 and return report.json",
+      "E4": "read f1 and overwrite f with f2",
+      "E5": "independently write g1 between affected calls",
+      "E6": "read f2 and delete h",
+      "E7": "reuse report.json and create p1 at that path",
+      "E8": "read p1"
+    },
+    "reported_files": [
+      "f"
+    ],
+    "reference_checkpoint": "C0 before E3",
+    "file_roots": [
+      "E3",
+      "E4"
+    ],
+    "selected_steps": [
+      "E3",
+      "E4",
+      "E6",
+      "E7",
+      "E8"
+    ],
+    "retained_steps": [
+      "E1",
+      "E2",
+      "E5"
+    ],
+    "filesystem_edges": [
+      [
+        "E3",
+        "E4"
+      ],
+      [
+        "E4",
+        "E6"
+      ],
+      [
+        "E7",
+        "E8"
+      ],
+      [
+        "E3",
+        "E6"
+      ]
+    ],
+    "file_edge_objects": [
+      "f1",
+      "f2",
+      "p1",
+      "f history"
+    ],
+    "message_edges": [
+      [
+        "E3",
+        "E7"
+      ]
+    ],
+    "objects": [
+      "f",
+      "g",
+      "h",
+      "p"
+    ],
+    "lower": [
+      "f0",
+      "g0",
+      "h0",
+      "\u2205"
+    ],
+    "upper_before": [
+      "f2",
+      "g1",
+      "WH",
+      "p1"
+    ],
+    "upper_after": [
+      "\u2205",
+      "g1",
+      "\u2205",
+      "\u2205"
+    ],
+    "merged_before": [
+      "f2",
+      "g1",
+      "\u2205",
+      "p1"
+    ],
+    "merged_after": [
+      "f0",
+      "g1",
+      "h0",
+      "\u2205"
+    ],
+    "before_images": [
+      [
+        "f",
+        "E3"
+      ],
+      [
+        "h",
+        "E6"
+      ],
+      [
+        "p",
+        "E7"
+      ]
+    ],
+    "turns": [
+      [
+        "E1",
+        "E2",
+        "E3"
+      ],
+      [
+        "E4"
+      ],
+      [
+        "E5",
+        "E6",
+        "E7",
+        "E8"
+      ]
+    ]
+  },
+  "paper_width_inches": 3.35,
+  "body_font_at_paper_width_pt": 8.18,
+  "text_words": 81,
+  "text_characters": 264
+}

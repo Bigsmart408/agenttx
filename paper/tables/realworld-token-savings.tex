@@ -1,0 +1,31 @@
+\begin{table*}[t]
+\centering
+\caption{\textbf{Token totals and savings on control-specific matched tasks.}
+Each row uses tasks with successful outcomes and complete costs for AgentTX and that control.
+Totals include all accounted attempts; M denotes one million tokens.
+Task sets differ between controls, so AgentTX totals may differ within a workload group.}
+\label{tab:realworld-token-savings}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}llrrrrr@{}}
+\toprule
+Workload / agent & Control & Pairs & AgentTX (M) & Control (M) & Saved (M) & Saved (\%) \\
+\midrule
+SWE / SWE-agent & Temporal checkpoint & 278 & 32.59 & 39.53 & 6.94 & \textbf{17.55} \\
+ & Whole branch & 239 & 25.17 & 34.89 & 9.72 & \textbf{27.86} \\
+ & Clean reference & 264 & 30.50 & 35.63 & 5.12 & \textbf{14.38} \\
+\midrule
+SWE / Codex & Temporal checkpoint & 284 & 80.00 & 104.50 & 24.50 & \textbf{23.45} \\
+ & Whole branch & 277 & 80.62 & 103.23 & 22.61 & \textbf{21.90} \\
+ & Clean reference & 281 & 81.32 & 90.17 & 8.85 & \textbf{9.82} \\
+\midrule
+TB / SWE-agent & Temporal checkpoint & 175 & 36.18 & 65.43 & 29.24 & \textbf{44.69} \\
+ & Whole branch & 177 & 39.39 & 61.46 & 22.07 & \textbf{35.91} \\
+ & Clean reference & 172 & 33.47 & 52.76 & 19.30 & \textbf{36.57} \\
+\midrule
+TB / Codex & Temporal checkpoint & 197 & 400.12 & 536.25 & 136.13 & \textbf{25.39} \\
+ & Whole branch & 200 & 420.22 & 587.18 & 166.96 & \textbf{28.43} \\
+ & Clean reference & 198 & 398.56 & 485.47 & 86.91 & \textbf{17.90} \\
+\bottomrule
+\end{tabular*}
+\end{table*}

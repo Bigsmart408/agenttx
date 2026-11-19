@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd /home/bfq/agenttx-executions/swe-local-monitored-20261018-full-r1/project
+cd /home/bfq/agenttx-workspace/agenttx-executions/swe-local-monitored-20261018-full-r1/project
 source scripts/agenttx-local-env.sh
 export PATH=/home/bfq/.venvs/agenttx/bin:/home/bfq/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PYTHONPATH="$PWD/src:$PWD"
 export CODEX_CONFIG_FILE=/home/bfq/.config/agenttx/experiment-20261017/config.toml
 export CODEX_AUTH_FILE=/home/bfq/.config/agenttx/experiment-20261017/auth.json
 export AGENTTX_SWE_PROFILE=/home/bfq/.config/agenttx/experiment-20261017/sweagent.toml
-export AGENTTX_SWE_AGENT_ROOT=/home/bfq/agenttx-deps/SWE-agent-3ea751c087f32b16e039a2233dd6eefecef325d5
+export AGENTTX_SWE_AGENT_ROOT=/home/bfq/agenttx-workspace/agenttx-deps/SWE-agent-3ea751c087f32b16e039a2233dd6eefecef325d5
 export SWE_AGENT_TRAJECTORY_DIR=/mnt/data/agenttx-runtime/logs/sweagent-trajectories
 export AGENTTX_HTTPBIN_IMAGE=sha256:462caaba497ce310ec1584e6e6021e66710570bcd815b2b7df80713b8d14683b
 export AGENTTX_SWE_MONITORED_RUN=sweagent-swe-local-monitored-20261018-full-r1

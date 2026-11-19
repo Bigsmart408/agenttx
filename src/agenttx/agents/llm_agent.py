@@ -32,6 +32,14 @@ TOOLS = [
         {},
     ),
     _tool(
+        "rollback_file",
+        "Recover reported problem files and dependent commands since a reference checkpoint. "
+        "Audits file state and command/result residue before live recovery; needs no faulty-step hint.",
+        {"paths": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+         "checkpoint_step": {"type": "integer", "minimum": -1}},
+        ["paths"],
+    ),
+    _tool(
         "rollback_causal",
         "Roll back one faulty step and every ledger descendant while retaining independent later work.",
         {"step_id": {"type": "integer"}},
@@ -39,7 +47,7 @@ TOOLS = [
     ),
     _tool("finish", "Finish the task and optionally request commit.", {"summary": {"type": "string"}, "commit": {"type": "boolean"}}, ["summary"]),
 ]
-SYSTEM = "You are a coding agent in an AgentTX-protected workspace. Use tools for edits. When recovering from a failed action, inspect the effect ledger and prefer causal rollback so independent later work survives. Call finish when done."
+SYSTEM = "You are a coding agent in an AgentTX-protected workspace. Use tools for edits. When the user reports a problem file, use rollback_file with that file and the reference checkpoint, preserving independent work. For other failed actions, inspect the effect ledger and prefer causal rollback. Call finish when done."
 
 
 @dataclass
@@ -327,6 +335,19 @@ class LLMToolAgent:
             }
             self.control_events.append(event)
             return json.dumps({"ok": True, **event})
+        if name == "rollback_file":
+            try:
+                outcome = self.harness.tx.recover_file(
+                    args["paths"], checkpoint_step=args.get("checkpoint_step"),
+                )
+            except (OSError, ValueError) as error:
+                event = dict(tool=name, status='inconclusive', applied=False,
+                             reason=f'{type(error).__name__}: {error}')
+                self.control_events.append(event)
+                return json.dumps(dict(ok=False, **event))
+            event = {"tool": name, **outcome.to_dict()}
+            self.control_events.append(event)
+            return json.dumps({"ok": outcome.audit['valid'], **event})
         if name == "run_tests" and "cmd" not in args:
             args = {**args, "cmd": "PYTHONPATH=. python -m pytest -q"}
         rec = self.harness.call_tool(name, args)
@@ -405,7 +426,7 @@ class LLMToolAgent:
                 args = json.loads(tc["function"]["arguments"] or "{}")
             except json.JSONDecodeError:
                 args = {}
-            if name == "rollback_causal":
+            if name in {"rollback_causal", "rollback_file"}:
                 if finished:
                     continue
                 deferred_rollback = (tc, args)
@@ -493,7 +514,19 @@ class LLMToolAgent:
                 )
             if batch["deferred_rollback"] is not None:
                 _tc, rb_args = batch["deferred_rollback"]
-                self._dispatch("rollback_causal", rb_args)
+                recovery_result = self._dispatch(_tc['function']['name'], rb_args)
+                if _tc['function']['name'] == 'rollback_file':
+                    # The recovery may be inconclusive, in which case no
+                    # rewind notice was added. Always deliver its outcome to
+                    # the next model request, with a valid tool-call pair.
+                    self._record_turn(
+                        {'role': 'assistant', 'content': '', 'tool_calls': [_tc]},
+                        [{'role': 'tool', 'tool_call_id': _tc['id'], 'content': recovery_result}],
+                        [], ['rollback_file'], kind='control',
+                    )
+                    if not json.loads(recovery_result)['ok']:
+                        batch['finished'] = False
+                        want_commit = False
             if batch["finished"]:
                 finished = True
                 summary = batch["summary"]

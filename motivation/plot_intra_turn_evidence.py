@@ -39,10 +39,10 @@ DISPLAY_POLICIES = (
     "ideal_oracle",
 )
 POLICY_LABELS = {
-    "no_recovery": "No recovery",
-    "root_only": "Root only",
+    "no_recovery": "No rollback",
+    "root_only": "Selected effects",
     "turn_checkpoint_proxy": "Turn checkpoint",
-    "temporal_step": "Temporal step",
+    "temporal_step": "Temporal checkpoint",
     "whole_branch": "Whole branch",
     "ideal_oracle": "Ideal oracle",
 }
@@ -542,8 +542,8 @@ def plot_m4_real_turns() -> tuple[Path, Path]:
     policy_labels = {
         "ideal_oracle": "ideal oracle",
         "turn_checkpoint_proxy": "turn checkpoint",
-        "temporal_step": "temporal step",
-        "whole_branch": "whole branch",
+        "temporal_step": "temporal checkpoint",
+        "whole_branch": "Whole branch",
     }
 
     fig, axes = plt.subplots(1, 2, dpi=300, figsize=(17.8 * CM, 6.0 * CM))

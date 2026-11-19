@@ -164,6 +164,7 @@ class AgentTXSWEEnvironment:
         self._cwd_writer_step_id: Optional[int] = None
         self._cwd_versions: Dict[int, Path] = {}
         self._environment_variables: Dict[str, str] = {}
+        self._task_user_tools = None
         self._pending: List[tuple[ToolCallRecord, str]] = []
         self._marker = f"__AGENTTX_CWD_{uuid.uuid4().hex}__"
 
@@ -223,10 +224,19 @@ class AgentTXSWEEnvironment:
             self._environment_variables[decoded_name] = value.decode(
                 "utf-8", errors="surrogateescape"
             )
+        user = getattr(self._harness.tx.pool, 'tool_user', None)
+        if user:
+            from .swe_task_user_tools import TaskUserSWETools
+            self._task_user_tools = TaskUserSWETools(user, self._environment_variables)
+            policy = self._harness.tx.commit_policy
+            policy.ephemeral_roots = (*policy.ephemeral_roots, self._task_user_tools.root)
         self._active = True
 
     def deactivate(self) -> None:
         self._active = False
+        if self._task_user_tools is not None:
+            self._task_user_tools.close()
+            self._task_user_tools = None
 
     def begin_step(self) -> None:
         if self._pending:
@@ -382,7 +392,7 @@ class AgentTXSWEEnvironment:
     ) -> str:
         if not self._active:
             return self._environment.read_file(path, encoding=encoding, errors=errors)
-        logical = Path(path)
+        logical = self._task_user_tools.path(path) if self._task_user_tools else Path(path)
         relative = not logical.is_absolute()
         if relative:
             logical = self._cwd / logical
@@ -413,7 +423,7 @@ class AgentTXSWEEnvironment:
         if not self._active:
             self._environment.write_file(path, content)
             return
-        logical = Path(path)
+        logical = self._task_user_tools.path(path) if self._task_user_tools else Path(path)
         relative = not logical.is_absolute()
         if relative:
             logical = self._cwd / logical
@@ -467,7 +477,7 @@ class AgentTXSWEEnvironment:
                 "AgentTX's SWE-agent adapter requires shell=True for execute_command"
             )
         record = self._record_command(
-            command,
+            self._task_user_tools.command(command) if self._task_user_tools else command,
             timeout=None,
             tool_name="sweagent:execute",
             cwd=Path(cwd) if cwd else self._cwd,

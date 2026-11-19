@@ -1,0 +1,158 @@
+\section{Selective Recovery Model}
+\label{sec:recovery-model}
+
+Rollback wastes valid work when its boundary follows execution order rather
+than dependency. As Section~\ref{sec:motivation} shows, affected results and
+independent work can interleave within a turn, checkpoint interval, or branch.
+We therefore separate the speculative execution unit from the recovery unit.
+The complete trajectory shares speculative state; a dependency subgraph
+determines which effects recovery removes.
+
+\subsection{Overview and Goals}
+\label{sec:aet-model}
+
+We describe this separation as an \emph{Agent Effect Transaction} (AET).
+An AET records tool steps, their observed effects, historical object states,
+and associated agent-visible messages throughout execution.
+Figure~\ref{fig:overview} shows the workflow: capture evidence, select a
+candidate recovery set, reconstruct affected state, and continue with
+independent work retained.
+Section~\ref{sec:design} describes the Linux implementation.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{FIG-AgentTX-Overview.pdf}
+\caption{\textbf{Execution and selective recovery in \system.}
+\small\emph{Recorded dependencies determine the invalidation set.
+If a recovery plan selects E3, its descendants E4--E7 are also invalidated,
+while independent E8 remains in the workspace and visible context.}}
+\label{fig:overview}
+\end{figure}
+
+Consider an interleaved trajectory: $s_0$ modifies a formatter, $s_1$ uses it
+to generate a report, $s_2$ edits independent documentation, and $s_3$ checks
+the report.
+If a recovery plan selects $s_0$, retaining the report would retain its
+affected result, whereas restoring an earlier checkpoint would discard the
+documentation.
+The dependency graph can select $s_0$, $s_1$, and $s_3$ while preserving $s_2$.
+
+The design has three goals corresponding to the preceding challenges.
+First, discover recovery dependencies from observed execution and result
+flow, so invalid results are removed without automatically discarding later
+work.
+Second, associate effects with objects and versions consistently across
+dependency discovery and restoration.
+Third, reconstruct a non-prefix workspace and visible context that describe
+the same surviving steps.
+
+\subsection{An Observed Dependency Graph}
+\label{sec:effect-dag}
+
+The recovery graph represents tool steps as nodes and observed recovery
+dependencies as forward edges.
+An edge connects a producer to a later consumer when the latter reads
+state produced by the former.
+The graph also records conservative constraints from overlapping mutations,
+deletions, and namespace observations, including failed lookups followed by
+creation.
+These constraints prevent recovery from separating effects whose recorded
+state relationships require coordinated removal.
+
+Object association determines which accesses belong to these relationships.
+Different names may identify the same object, while replacement can make one
+name refer to different objects over time.
+The AET therefore relates observed accesses to supported object identities
+and historical states, rather than relying solely on path equality.
+These associations serve both graph construction and later version selection.
+
+Dependencies can also pass through tool results without an intervening file.
+When a later request reuses a detectable value from an earlier result, the
+graph connects their steps.
+Filesystem and message edges form a graph that can branch and merge; the
+causal chain of invalidation need not follow one chronological sequence.
+
+\subsection{From Candidates to an Invalidation Set}
+\label{sec:recovery-selection}
+
+Failure observation and recovery-set selection answer different questions.
+An observed failure motivates candidate changes to withdraw; the graph
+determines which descendants must accompany each candidate.
+Candidate localization and isolated verification are described separately
+in Section~\ref{sec:design}.
+
+For a candidate set $B$, recovery begins with $C=B$ and repeatedly adds
+dependent steps until the set stops growing.
+Expansion follows both filesystem and message edges, including paths that
+cross between the two channels.
+Invalidation need not be contiguous: membership depends on reachability,
+so independent steps between selected nodes remain eligible to survive.
+The surviving state therefore need not be a temporal prefix.
+Figure~\ref{fig:recovery-workflow} summarizes this selection and the
+reconstruction guard.
+
+\begin{figure}[t]
+\centering
+\begin{lstlisting}[style=agenttxcode]
+// Input: candidate steps B; effects and history.
+C = B;
+do {
+    old = C;
+    C |= file_descendants(C, effects);
+    C |= message_descendants(C, history);
+} while (C != old);
+
+objects = mutated_objects(C, effects);
+// Versions before the earliest selected mutations.
+versions = prior_versions(objects, C, history);
+// Check identity, history, and retained mutations.
+if (!can_restore(objects, versions, C, effects))
+    return unsupported_plan;
+return plan(C, versions); // For isolated checking.
+\end{lstlisting}
+\caption{\textbf{Candidate-derived recovery workflow.}
+\small\emph{Joint dependency closure determines the invalidation set;
+reconstruction checks determine whether it can be applied safely.}}
+\label{fig:recovery-workflow}
+\end{figure}
+
+The fixed point is the least set containing the candidates and closed under
+the recorded filesystem and message dependencies.
+
+\subsection{Reconstructing Affected Object Versions}
+\label{sec:selective-reconstruction}
+
+Selecting invalid steps does not yet produce a usable workspace.
+Repeated writes and deletions can hide earlier valid object versions, so
+deleting the latest files alone cannot undo selected effects.
+Recovery instead selects historical state preceding the earliest selected
+mutation of each affected object group.
+It checks these targets against retained mutations before applying the
+plan, rejecting unsupported overlaps rather than guessing a merge.
+
+Historical restoration changes affected objects while independent state
+remains in place.
+The result may combine versions that never coexisted at any chronological
+checkpoint.
+After successful reconstruction, selected steps become inactive in the
+execution history.
+Their mutations are absent and nonconflicting retained effects remain visible.
+
+\subsection{Continuing with Matching Visible Context}
+\label{sec:context-reconstruction}
+
+The same invalidation set governs workspace and visible-context
+reconstruction.
+Otherwise, an agent could continue using a tool result whose underlying
+state recovery has already withdrawn.
+Recovery removes selected tool-call spans and stale recovery-control
+messages, retains independent spans, and describes the surviving work.
+In the example, the documentation and its valid record survive together;
+the affected report and its associated results are invalidated together.
+
+The next model request therefore describes the same survivor set as the
+reconstructed workspace.
+Native integrations rebuild the request from retained spans; black-box
+agents receive a retained-effects manifest instead.
+The agent then continues repair and verification from the retained
+progress.

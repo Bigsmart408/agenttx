@@ -51,6 +51,7 @@ class TaskServices:
         self.standalone_network=False
         self.image_id=image_id
         self.task=task
+        self.download_proxy=None
 
     def start(self):
         if self.evidence is None:
@@ -172,9 +173,16 @@ class TaskServices:
         for key,value in self.client.get('environment',{}).items():
             options+=['--env',key+'='+str(value)]
         # Docker shares the anchor's hosts/resolv.conf in container network mode.
-        return result[:2]+options+result[2:]
+        result=result[:2]+options+result[2:]
+        import os
+        if os.environ.get('AGENTTX_DOWNLOAD_PROXY_RETRY')=='1':
+            from experiments.scripts.tb_download_proxy import RetryDownloadProxy
+            self.download_proxy=RetryDownloadProxy(self.network,self.folder,NETWORK_HELPER_IMAGE).start()
+            result=self.download_proxy.apply(result)
+        return result
 
     def close(self):
+        if self.download_proxy:self.download_proxy.close()
         if self.anchor_id and self.task=='create-bucket':
             logs=subprocess.run(['docker','logs',self.anchor_id],capture_output=True,text=True,timeout=15)
             (self.folder/'original-service.log').write_text(logs.stdout+logs.stderr)

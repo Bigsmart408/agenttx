@@ -26,9 +26,9 @@ from .ledger import EffectKind, Ledger
 
 SCHEMA = "agenttx.conversation/v2"
 CONTROL_TOOLS = frozenset(
-    {"inspect_ledger", "rollback_causal", "rollback", "finish"}
+    {"inspect_ledger", "rollback_causal", "rollback_file", "rollback", "finish"}
 )
-ROLLBACK_TOOLS = frozenset({"rollback_causal", "rollback"})
+ROLLBACK_TOOLS = frozenset({"rollback_causal", "rollback_file", "rollback"})
 MIN_COPY_LEN = 8
 _SKIP_TOKENS = CONTROL_TOOLS | {
     "write_file",

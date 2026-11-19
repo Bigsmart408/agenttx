@@ -1,6 +1,6 @@
 from pathlib import Path
 import sys,json,subprocess,urllib.request,urllib.error,datetime,os,re,tomllib
-sys.path[:0]=['/home/bfq/agenttx','/home/bfq/agenttx/src']
+sys.path[:0]=['/home/bfq/agenttx-workspace/agenttx','/home/bfq/agenttx-workspace/agenttx/src']
 from experiments.scripts.tb_task_services import TaskServices,NETWORK_HELPER_IMAGE
 A=Path('/mnt/data/agenttx-runtime/validation/tb-api-connection-repair-20261023')
 cell=A/('isolated-network-probe-'+datetime.datetime.now(datetime.timezone.utc).strftime('%H%M%S'));cell.mkdir()

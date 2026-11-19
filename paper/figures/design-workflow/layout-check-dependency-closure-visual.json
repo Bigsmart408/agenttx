@@ -1,0 +1,783 @@
+{
+  "title": "From execution evidence to a rollback set",
+  "overview_steps": [
+    2
+  ],
+  "evidence": {
+    "file": [
+      "E3",
+      "f1",
+      "E4"
+    ],
+    "result": [
+      "E3",
+      "report.json",
+      "E7"
+    ]
+  },
+  "filesystem_edges": [
+    [
+      "E3",
+      "E4"
+    ],
+    [
+      "E4",
+      "E6"
+    ],
+    [
+      "E7",
+      "E8"
+    ],
+    [
+      "E3",
+      "E6"
+    ]
+  ],
+  "file_edge_objects": [
+    "f1",
+    "f2",
+    "p1",
+    "f history"
+  ],
+  "message_edges": [
+    [
+      "E3",
+      "E7"
+    ]
+  ],
+  "expansion_sets": [
+    [
+      "E3",
+      "E4"
+    ],
+    [
+      "E3",
+      "E4",
+      "E6",
+      "E7"
+    ],
+    [
+      "E3",
+      "E4",
+      "E6",
+      "E7",
+      "E8"
+    ]
+  ],
+  "recovery_input": "user file report",
+  "reported_files": [
+    "f"
+  ],
+  "reference_checkpoint": "C0 before E3",
+  "file_roots": [
+    "E3",
+    "E4"
+  ],
+  "validation": "frozen file-state and command/result residue audit",
+  "task_test_used_for_selection": false,
+  "selected_steps": [
+    "E3",
+    "E4",
+    "E6",
+    "E7",
+    "E8"
+  ],
+  "retained_steps": [
+    "E1",
+    "E2",
+    "E5"
+  ],
+  "simplification": {
+    "removed": [
+      "OverlayFS before/after state",
+      "standalone result-reuse chain",
+      "duplicated expansion-stage boxes"
+    ],
+    "preserved": [
+      "file report and post-checkpoint mutations",
+      "all file and result edges",
+      "joint closure and independent E5"
+    ],
+    "connections": [
+      "file accesses/changes and result/argument inputs",
+      "isolated residue audit",
+      "shared S to filesystem and context recovery"
+    ]
+  },
+  "routing_clearance": {
+    "dependency_bypass_to_root_row_inches": 0.34
+  },
+  "typography": {
+    "family": "Times New Roman",
+    "node_pt": 21,
+    "annotation_pt": 18,
+    "heading_pt": 21,
+    "bold_headings_only": true,
+    "math_symbol_font": "Cambria Math",
+    "labels": [
+      {
+        "text": "File accesses / changes",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Tool results / arguments",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "2",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Select and validate S",
+        "size_pt": 21,
+        "bold": true,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "User file: f",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Since C0",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "B = {E3, E4}",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "E3",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "E4",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "E6",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "E7",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "E8",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "E5",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "f1",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "f2",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "p1",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "report.json",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Independent",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Keep g1",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "S = {E3, E4, E6\u2013E8}",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Residue audit",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "clean",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Apply audited S",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Restore filesystem",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Sync agent context",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Flow",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "File",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Result",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      }
+    ]
+  },
+  "connectors": {
+    "shaft_pt": 1.6,
+    "head_length_pt": 9.0,
+    "head_width_pt": 7.2,
+    "routed_geometry": "smooth cubic Bezier",
+    "gap_inches": 0,
+    "arrows": [
+      {
+        "role": "flow",
+        "color": "black",
+        "dash": false,
+        "points": [
+          [
+            2.15,
+            0.54
+          ],
+          [
+            2.15,
+            0.97
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "flow",
+        "color": "black",
+        "dash": false,
+        "points": [
+          [
+            6.45,
+            0.54
+          ],
+          [
+            6.45,
+            0.97
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "flow",
+        "color": "black",
+        "dash": false,
+        "points": [
+          [
+            2.73,
+            1.91
+          ],
+          [
+            3.1,
+            1.91
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "flow",
+        "color": "black",
+        "dash": false,
+        "points": [
+          [
+            5.3,
+            1.91
+          ],
+          [
+            6.0,
+            1.91
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "file",
+        "color": "black",
+        "dash": true,
+        "points": [
+          [
+            1.16,
+            2.93
+          ],
+          [
+            2.64,
+            2.93
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "file",
+        "color": "black",
+        "dash": true,
+        "points": [
+          [
+            3.3600000000000003,
+            2.93
+          ],
+          [
+            4.84,
+            2.93
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "file",
+        "color": "black",
+        "dash": true,
+        "points": [
+          [
+            3.3600000000000003,
+            3.77
+          ],
+          [
+            4.84,
+            3.77
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "file",
+        "color": "black",
+        "dash": true,
+        "points": [
+          [
+            0.8,
+            2.75
+          ],
+          [
+            0.8,
+            2.44
+          ],
+          [
+            5.2,
+            2.44
+          ],
+          [
+            5.2,
+            2.75
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "result",
+        "color": "red",
+        "dash": false,
+        "points": [
+          [
+            0.8,
+            3.11
+          ],
+          [
+            0.8,
+            3.77
+          ],
+          [
+            2.64,
+            3.77
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "flow",
+        "color": "black",
+        "dash": false,
+        "points": [
+          [
+            5.7,
+            4.82
+          ],
+          [
+            6.19,
+            4.82
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "flow",
+        "color": "black",
+        "dash": false,
+        "points": [
+          [
+            4.3,
+            5.7
+          ],
+          [
+            2.15,
+            5.7
+          ],
+          [
+            2.15,
+            6.05
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "flow",
+        "color": "black",
+        "dash": false,
+        "points": [
+          [
+            4.3,
+            5.7
+          ],
+          [
+            6.45,
+            5.7
+          ],
+          [
+            6.45,
+            6.05
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "legend",
+        "color": "black",
+        "dash": false,
+        "points": [
+          [
+            1.0,
+            6.77
+          ],
+          [
+            1.53,
+            6.77
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "legend",
+        "color": "black",
+        "dash": true,
+        "points": [
+          [
+            3.75,
+            6.77
+          ],
+          [
+            4.28,
+            6.77
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "legend",
+        "color": "red",
+        "dash": false,
+        "points": [
+          [
+            6.35,
+            6.77
+          ],
+          [
+            6.88,
+            6.77
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      }
+    ]
+  },
+  "line_styles": {
+    "flow": {
+      "color": "black",
+      "lw": 1.6,
+      "dash": false
+    },
+    "file": {
+      "color": "black",
+      "lw": 1.6,
+      "dash": true
+    },
+    "result": {
+      "color": "red",
+      "lw": 1.6,
+      "dash": false
+    }
+  },
+  "line_semantics": {
+    "solid_black_arrow": "workflow",
+    "dashed_black_arrow": "file dependency",
+    "solid_red_arrow": "tool-result reuse",
+    "dashed_red_node": "selected effect or context to withdraw",
+    "dashed_frame": "isolated residue audit",
+    "solid_frame": "normal stage or live application",
+    "empty_node": "absence symbol with a solid gray outline"
+  },
+  "paper_include_width_fraction": 1.0,
+  "primary_font_at_actual_paper_width_pt": 8.18,
+  "native_shapes": 79,
+  "text_fit_issues": [],
+  "bounds_issues": [],
+  "canvas_inches": [
+    8.6,
+    6.98
+  ],
+  "font": "Times New Roman",
+  "preview_font": "Times New Roman",
+  "reference": {
+    "paper": "Don't Let AI Agents YOLO Your Files: Information and Control in Agent-Native Filesystems",
+    "venue": "SOSP 2026",
+    "version": "arXiv:2604.13536v5",
+    "figures": [
+      1,
+      2,
+      7
+    ],
+    "url": "https://arxiv.org/pdf/2604.13536v5",
+    "use": "Thin black structure, compact aligned blocks, circled operations, semantic red/green/blue accents."
+  },
+  "palette": {
+    "blue": "0066CC",
+    "pale": "F3F7FC",
+    "purple": "000000",
+    "purpale": "F5F5F5",
+    "red": "8C0000",
+    "redpale": "FFEBEB",
+    "green": "008000",
+    "greenpale": "E6FFE6",
+    "black": "000000",
+    "gray": "707070",
+    "light": "B0B0B0",
+    "white": "FFFFFF"
+  },
+  "running_example": {
+    "name": "shared-eight-call-trajectory",
+    "steps": {
+      "E1": "inspect the baseline",
+      "E2": "inspect the baseline",
+      "E3": "write f1 and return report.json",
+      "E4": "read f1 and overwrite f with f2",
+      "E5": "independently write g1 between affected calls",
+      "E6": "read f2 and delete h",
+      "E7": "reuse report.json and create p1 at that path",
+      "E8": "read p1"
+    },
+    "reported_files": [
+      "f"
+    ],
+    "reference_checkpoint": "C0 before E3",
+    "file_roots": [
+      "E3",
+      "E4"
+    ],
+    "selected_steps": [
+      "E3",
+      "E4",
+      "E6",
+      "E7",
+      "E8"
+    ],
+    "retained_steps": [
+      "E1",
+      "E2",
+      "E5"
+    ],
+    "filesystem_edges": [
+      [
+        "E3",
+        "E4"
+      ],
+      [
+        "E4",
+        "E6"
+      ],
+      [
+        "E7",
+        "E8"
+      ],
+      [
+        "E3",
+        "E6"
+      ]
+    ],
+    "file_edge_objects": [
+      "f1",
+      "f2",
+      "p1",
+      "f history"
+    ],
+    "message_edges": [
+      [
+        "E3",
+        "E7"
+      ]
+    ],
+    "objects": [
+      "f",
+      "g",
+      "h",
+      "p"
+    ],
+    "lower": [
+      "f0",
+      "g0",
+      "h0",
+      "\u2205"
+    ],
+    "upper_before": [
+      "f2",
+      "g1",
+      "WH",
+      "p1"
+    ],
+    "upper_after": [
+      "\u2205",
+      "g1",
+      "\u2205",
+      "\u2205"
+    ],
+    "merged_before": [
+      "f2",
+      "g1",
+      "\u2205",
+      "p1"
+    ],
+    "merged_after": [
+      "f0",
+      "g1",
+      "h0",
+      "\u2205"
+    ],
+    "before_images": [
+      [
+        "f",
+        "E3"
+      ],
+      [
+        "h",
+        "E6"
+      ],
+      [
+        "p",
+        "E7"
+      ]
+    ],
+    "turns": [
+      [
+        "E1",
+        "E2",
+        "E3"
+      ],
+      [
+        "E4"
+      ],
+      [
+        "E5",
+        "E6",
+        "E7",
+        "E8"
+      ]
+    ]
+  },
+  "paper_width_inches": 3.35,
+  "body_font_at_paper_width_pt": 8.18,
+  "text_words": 54,
+  "text_characters": 250
+}

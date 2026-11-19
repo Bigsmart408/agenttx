@@ -1,5 +1,52 @@
 # L3 Consistency Report: AgentTX | OSDI | 2026-09-23
 
+## Scoped try-boundary clarification — 2026-10-29
+
+The user-approved paper-writing edit now defines try's wrapped invocation as
+a command, script, or whole agent session. Table 1, Introduction, Motivation,
+Implementation, and Related Work consistently distinguish isolation lifetime
+from internal step attribution and dependency-selected recovery. Section 5
+connects native tool boundaries to file/history/message records and matching
+visible-context reconstruction, while preserving the black-box outer-step
+and manifest-handoff limits. The Section 5 draft is synchronized.
+
+Scoped L3 checks pass; all numeric tokens, citations, labels, and figure paths
+are preserved. Evaluation and Discussion are unchanged. Tectonic rebuilds a
+13-page PDF; Figure 7 remains single-column on page 7. Modified content on
+pages 3, 8, 9, and 11 was visually checked. See
+`review/try-boundary-clarification-20261029.md` for the scoped audit.
+Previously recorded whole-paper issues remain open.
+
+## Scoped figure integration — 2026-10-29
+
+The accepted design figure is integrated into Section 5 as Figure 7, with
+workflow prose explaining shared try execution, layer transitions, the joint
+dependency set, historical targets, isolated checking, and live restoration.
+The user's subsequent white-background correction is included in every asset.
+The paper now builds with Tectonic 0.17.0 and, following the user's latest layout
+request, the figure appears in a single column on page 7 of the current 13-page
+PDF. The final log has no undefined references, citations,
+fonts, overfull boxes, or PDF-version warnings; underfull spacing warnings remain.
+See `review/design-figure-integration-20261029.md` for scoped findings and checks.
+This supersedes the earlier compiler-unavailable status for the current PDF.
+Whole-paper L3 remains open for the previously recorded issues outside this scope.
+
+## Scoped design revision — 2026-10-27
+
+The approved English revision has replaced Sections 4–5 and aligned the two
+challenge passages. The scoped design audit passes: candidate localization,
+joint dependency closure, isolated checking, historical restoration, and visible
+context reconstruction follow one causal workflow without assuming a known
+true root. See `review/design-english-consistency-20261027.md` for the current
+findings and unresolved issues outside this revision.
+
+Static label, citation, environment, prose-length, and diff checks pass.
+Evaluation and subsequent sections are unchanged from the pre-edit manuscript.
+The current environment lacks a TeX compiler; portable compiler downloads failed,
+so this revision has not rebuilt `paper/main.pdf`. Earlier compilation claims
+below describe the earlier audit, not validation of the revised manuscript.
+Whole-paper L3 remains OPEN.
+
 ## Current status
 
 **OPEN -- evaluation restructuring required.** The core rollback thesis and
@@ -96,3 +143,24 @@ experiment labels and stale three-challenge wording are absent.
 claim, but L3 is open because Evaluation has not yet been migrated to the new
 evidence order and still lacks the canonical system-microbenchmark,
 full real-world, interrupted-recovery, and resource-overhead datasets.
+
+## Scoped real-workload integration — 2026-10-30
+
+Completed SWE and TB recovery campaigns are now integrated in RQ2, replacing
+the earlier missing-real-workload status for this intervention-based study.
+The final TB audit covers 2,892 terminal cells and 3,736 attempts. Cost pairs
+retain failed/retry spend and exclude unknown or incompatible histories;
+task outcomes, context/localization differences and protocol-validation scope
+are stated separately. Unfavorable cost and success results remain visible.
+
+Figure 8 is replaced by a compact success/savings grid; Figure 9 shows per-task
+ratios. Both match the earlier SWE figure style and appear with RQ2 on pages
+10–11. The 14-page PDF compiles without undefined references/citations,
+overfull boxes or TeX errors; existing underfull warnings remain.
+
+The scoped seven-check review, independent data/style reviews, source hashes,
+and numeric/graphics validation are in
+`review/realworld-results-20261030/L3-scoped-review.md` and adjacent artifacts.
+The dedicated RQ2 draft is synchronized. Other missing evaluation sections,
+formal uniform-budget evidence and the submission page budget remain open;
+this is not whole-paper L3 completion.

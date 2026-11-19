@@ -1,9 +1,57 @@
 from pathlib import Path
 
+import pytest
+
 from agenttx.cli import build_parser
 from agenttx.ledger import Effect, EffectKind
 from agenttx.runtime import AgentTX
 from agenttx.trace import parse_strace_effects
+
+
+@pytest.mark.parametrize(('token','expected'), [
+    ('"a,b.txt" trailing annotation', 'a,b.txt'),
+    (r'"a\\b"', 'a\\b'),
+    (r'"quote\"name"', 'quote"name'),
+    (r'"octal\040name"', 'octal name'),
+    (r'"hex\x20name"', 'hex name'),
+    ('"中文文件"', '中文文件'),
+    ('"line\\\ncontinuation"', 'linecontinuation'),
+    ('"unclosed', None),
+    ('"raw\nnewline"', None),
+    ('"raw\x00nul"', None),
+    ('NULL', None),
+])
+def test_path_decoding_preserves_escaped_and_invalid_trace_strings(token, expected):
+    from agenttx.trace import _decode_string
+    assert _decode_string(token) == expected
+
+
+def test_argument_prefix_preserves_nested_and_quoted_fields():
+    from agenttx.trace import _split_args
+    text = 'AT_FDCWD, "comma,name", {flags=O_RDONLY, resolve=0}, ["large", "array"]'
+    for count in (1, 2, 3, 4):
+        assert _split_args(text, limit=count) == _split_args(text)[:count]
+
+
+def test_cached_paths_keep_cwd_and_workspace_in_the_key(tmp_path):
+    from agenttx.trace import _resolve_path, _workspace_path
+    left, right = tmp_path/'left', tmp_path/'right'
+    a = _resolve_path('"same"', left)
+    b = _resolve_path('"same"', right)
+    assert a == left/'same' and b == right/'same'
+    assert _workspace_path(a, right) is None
+    assert _workspace_path(a, left) == str(a)
+
+
+def test_long_execve_suffix_and_resumed_stat_keep_dependency_effects(tmp_path):
+    state = {}
+    assert parse_strace_effects('100 chdir("sub") = 0\n100 clone(flags=SIGCHLD) = 101\n', tmp_path, state=state)
+    text = ('101 execve("tool", [' + ','.join('"unused"' for _ in range(10000)) + '], 0x0) = 0\n'
+            '101 newfstatat(AT_FDCWD, "missing", <unfinished ...>\n')
+    effects = parse_strace_effects(text, tmp_path, state=state)
+    effects += parse_strace_effects('101 <... newfstatat resumed>0x0, 0) = -1 ENOENT (No such file)\n', tmp_path, state=state)
+    assert Effect(str(tmp_path/'sub/tool'), EffectKind.READ) in effects
+    assert Effect(str(tmp_path/'sub/missing'), EffectKind.NEGATIVE) in effects
 
 
 def test_parse_strace_distinguishes_reads_negatives_and_writes(

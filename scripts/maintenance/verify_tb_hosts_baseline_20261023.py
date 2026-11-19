@@ -1,13 +1,13 @@
 from pathlib import Path
 import sys,json,subprocess,datetime
-sys.path[:0]=['/home/bfq/agenttx','/home/bfq/agenttx/src']
+sys.path[:0]=['/home/bfq/agenttx-workspace/agenttx','/home/bfq/agenttx-workspace/agenttx/src']
 from experiments.scripts.run_tb_dual_local import cell_command
 r=Path('/mnt/data/agenttx-runtime/validation/tb-api-connection-repair-20261023')
 harness=sys.argv[1]
 folder=r/('hosts-baseline-'+harness+'-'+datetime.datetime.now(datetime.timezone.utc).strftime('%H%M%S'))
 row=dict(task='create-bucket',harness=harness,policy='clean_recovery')
 evidence='/mnt/data/agenttx-runtime/validation/tb-basic-official-validation-20261019-r1/create-bucket/result.json'
-cmd=cell_command(Path('/home/bfq/agenttx'),folder,row,evidence)+['--preflight-only']
+cmd=cell_command(Path('/home/bfq/agenttx-workspace/agenttx'),folder,row,evidence)+['--preflight-only']
 with (r/('hosts-baseline-'+harness+'.log')).open('w') as out:
  p=subprocess.run(cmd,stdout=out,stderr=subprocess.STDOUT,timeout=240)
 path=folder/'clean_recovery/host-result.json';assert path.exists(),str(folder)

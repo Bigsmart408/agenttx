@@ -42,6 +42,29 @@ def test_cross_turn_dependency_keeps_interleaved_independent_write():
     assert root_zero["long_chain_with_interleaved_independent_work"] is True
 
 
+def test_single_exec_turn_still_has_interleaved_tool_dependencies():
+    root = "/tmp/native/workspace"
+    data = {
+        "task": "single-codex-turn", "workspace_root": root,
+        "source_system": "Codex native", "source_completed": True,
+        "ledger": {"steps": [
+            {"step_id": 0, "effects": [{"kind": "W", "path": f"{root}/a.py"}]},
+            {"step_id": 1, "effects": [{"kind": "W", "path": f"{root}/b.py"}]},
+            {"step_id": 2, "effects": [{"kind": "R", "path": f"{root}/a.py"}]},
+        ]},
+        "conversation": {"turns": [{"calls": [
+            {"step_id": 0}, {"step_id": 1}, {"step_id": 2},
+        ]}]},
+    }
+    summary, rows = analyze_trace(data)
+    assert summary["observed_workspace_edges"] == 1
+    assert summary["cross_turn_edges"] == 0
+    assert summary["roots_with_interleaved_work"] == 1
+    root_zero = next(row for row in rows if row["root_step"] == 0)
+    assert root_zero["interleaved_independent_work"] is True
+    assert root_zero["long_chain_with_interleaved_independent_work"] is False
+
+
 def test_checkpoint_removes_only_turns_with_affected_steps():
     root = "/tmp/native/workspace"
     data = {

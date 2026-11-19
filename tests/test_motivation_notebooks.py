@@ -21,7 +21,7 @@ def test_paper_motivation_reports_all_multiturn_boundaries() -> None:
     assert POLICY_LABELS["turn_checkpoint_proxy"] == "Turn checkpoint"
 
 
-def test_paper_motivation_names_artifact_backends() -> None:
+def test_archived_motivation_helpers_name_artifact_backends() -> None:
     source = (ROOT / "motivation" / "plot_motivation_four.py").read_text(
         encoding="utf-8"
     )
@@ -32,7 +32,7 @@ def test_paper_motivation_names_artifact_backends() -> None:
     artifact_labels = source.split("ARTIFACT_LABELS = {", 1)[1].split("}", 1)[0]
     assert "agenttx" not in artifact_labels
     assert "external_recovery_raw.csv" in source
-    assert 'suite_slice="mb4_dependency"' in source
+    assert "def load_artifact_recovery_suite(" in source
     assert '"artifact_checkpoint"' not in source
     assert '"YoloFS / Waypoint"' not in source
 
@@ -79,10 +79,10 @@ def test_intra_turn_motivation_notebook_uses_canonical_bundle() -> None:
     assert "(ours)" not in module
     assert '"Causal"' not in module
     for label in (
-        "No recovery",
-        "Root only",
+        "No rollback",
+        "Selected effects",
         "Turn checkpoint",
-        "Temporal step",
+        "Temporal checkpoint",
         "Whole branch",
         "Ideal oracle",
     ):

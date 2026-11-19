@@ -14,7 +14,7 @@ import subprocess
 import sys
 import time
 
-PROJECT=Path('/home/bfq/agenttx')
+PROJECT=Path('/home/bfq/agenttx-workspace/agenttx')
 sys.path[:0]=[str(PROJECT),str(PROJECT/'src')]
 from experiments.scripts.run_tb_dual_local import (
     cell_command, infrastructure_issue, effects, experiment_configuration,
@@ -139,7 +139,7 @@ def main():
         save(AUDIT/'protected-first-results.json',protected)
         save(ROOT/'source-manifest.json',manifest)
         registration=dict(reg,registered_at=now(),cohort=NAME,outcome_based_retry=True,
-            coordinator_script='/home/bfq/agenttx-maintenance/run_tb_retry_queue_20261022.py',
+            coordinator_script='/home/bfq/agenttx-workspace/agenttx/scripts/maintenance/run_tb_retry_queue_20261022.py',
             coordinator_script_sha256=sha(__file__),previous_cohort=PREVIOUS.name,
             user_instruction='看看进展，任务失败的需要重启',retry_limit_per_cell=1,
             retries_are_additional_attempts=True,original_result_bytes_unchanged=True,

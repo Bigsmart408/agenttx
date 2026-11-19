@@ -1,0 +1,17 @@
+\begin{table}[!ht]
+\centering
+\caption{\textbf{Process policies versus clean execution.}
+Each variant executes 210 trajectories and 16 continuation calls per trajectory.}
+\label{tab:process-state}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Variant & \shortstack{Correct\\continuations} & \shortstack{Valid state\\retained} & \shortstack{Extra cache\\construction} \\
+\midrule
+Retain all & 180/210 & 100\% & +0\% \\
+Clear all & 210/210 & 0\% & +100\% \\
+Clean execution & 210/210 & 100\% & +0\% \\
+\bottomrule
+\end{tabular}
+\end{table}

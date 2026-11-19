@@ -30,7 +30,7 @@ from experiments.workloads import terminal_bench_suite as tb
 DATA=Path('/mnt/data/agenttx-runtime')
 PYTHON=Path('/home/bfq/.venvs/agenttx/bin/python')
 PROFILE=Path('/home/bfq/.config/agenttx/experiment-20261017')
-SWE=Path('/home/bfq/agenttx-deps/SWE-agent-3ea751c087f32b16e039a2233dd6eefecef325d5')
+SWE=Path('/home/bfq/agenttx-workspace/agenttx-deps/SWE-agent-3ea751c087f32b16e039a2233dd6eefecef325d5')
 CODEX=Path('/home/bfq/.local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex')
 TOOLS=DATA/'validation/tb-validation-tools-20261018'
 CELL_TIMEOUT_S=2*MODEL_TIMEOUT_S+VERIFIER_TIMEOUT_S+600
@@ -54,10 +54,40 @@ def result_configuration(result,path):
     # registration, never the current continuation's longer limits.
     launch=path.parent.parent/'registration.json'
     registration=json.loads(launch.read_text()) if launch.is_file() else {}
-    return dict(protocol=result.get('protocol',registration.get('protocol','unknown')),
+    config=dict(protocol=result.get('protocol',registration.get('protocol','unknown')),
         completion_contract=result.get('completion_contract',registration.get('completion_contract','legacy-implicit-cleanup')),
         model_session_wall_s=result.get('model_session_wall_s',registration.get('wall_timeout',900)),
         verifier_wall_s=result.get('verifier_wall_s',registration.get('verifier_timeout',900)))
+    cache=result.get('prerequisite_cache')
+    if result.get('hf_cache_contract'):
+        config['hf_cache_contract']=result['hf_cache_contract']
+    if result.get('download_timeout_contract'):
+        config['download_timeout_contract']=result['download_timeout_contract']
+    if result.get('verifier_download_contract'):
+        config['verifier_download_contract']=result['verifier_download_contract']
+    if result.get('sudo_download_proxy_contract'):
+        config['sudo_download_proxy_contract']=result['sudo_download_proxy_contract']
+    if result.get('verifier_toolchain_contract'):
+        config['verifier_toolchain_contract']=result['verifier_toolchain_contract']
+    if result.get('c4_verifier_asset_contract'):
+        config['c4_verifier_asset_contract']=result['c4_verifier_asset_contract']
+    if result.get('session_visibility_contract'):
+        config['session_visibility_contract']=result['session_visibility_contract']
+    if result.get('device_namespace_contract'):
+        config['device_namespace_contract']=result['device_namespace_contract']
+    if result.get('app_tmp_filesystem_contract'):
+        config['app_tmp_filesystem_contract']=result['app_tmp_filesystem_contract']
+    if result.get('reference_input_contract'):
+        config['reference_input_contract']=result['reference_input_contract']
+    if result.get('task_user_workspace_contract'):
+        config['task_user_workspace_contract']=result['task_user_workspace_contract']
+    if result.get('task_user_swe_tools_contract'):
+        config['task_user_swe_tools_contract']=result['task_user_swe_tools_contract']
+    if cache:
+        config['prerequisite_cache_sha256']=cache['cache_sha256']
+        if cache.get('preparation'):
+            config['prerequisite_preparation']=cache['preparation']
+    return config
 
 
 def resume_protocol_changes(prior, allow_update):
@@ -86,7 +116,7 @@ def save(path,value):
 
 
 def freeze(name):
-    destination=Path('/home/bfq/agenttx-executions')/name/'project'
+    destination=Path('/home/bfq/agenttx-workspace/agenttx-executions')/name/'project'
     destination.mkdir(parents=True,exist_ok=False)
     manifest=source_manifest(ROOT)
     for entry in manifest['files']:

@@ -1,17 +1,48 @@
 \documentclass[letterpaper,twocolumn,10pt]{article}
-% Load float before the USENIX style initializes hyperref's float hooks.
+% Load float before the USENIX style initializes the hyperref float hooks.
 \usepackage{float}
 \usepackage{usenix-2020-09}
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs}
 \usepackage{graphicx}
 \usepackage{xcolor}
+\usepackage{listings}
 \usepackage{enumitem}
 \usepackage{balance}
+\usepackage{stfloats}
 \usepackage{url}
 \usepackage{microtype}
 \usepackage{xspace}
 \usepackage{etoolbox}
+
+\floatstyle{ruled}
+\newfloat{algorithm}{tbp}{loa}
+\floatname{algorithm}{Algorithm}
+\floatstyle{plain}
+
+\lstdefinestyle{agenttxcode}{%
+  language=C,
+  basicstyle=\fontsize{8}{9.5}\selectfont\ttfamily\color{blue!75!black},
+  keywordstyle=\color{green!40!black}\bfseries,
+  commentstyle=\color{teal!70!black},
+  stringstyle=\color{teal!80!black},
+  backgroundcolor=\color{black!2},
+  rulecolor=\color{black!65},
+  frame=single,
+  framerule=0.4pt,
+  framesep=4pt,
+  xleftmargin=4.4pt,
+  xrightmargin=4.4pt,
+  aboveskip=3pt,
+  belowskip=3pt,
+  numbers=none,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  breaklines=true,
+  breakatwhitespace=true,
+  tabsize=4
+}
 
 \graphicspath{{img/}}
 \setlist{leftmargin=*,nosep}
@@ -19,6 +50,8 @@
 \setlength{\parskip}{0pt}
 \setlength{\textfloatsep}{1pt plus .5pt minus .5pt}
 \setlength{\floatsep}{1pt plus .5pt minus .5pt}
+\setlength{\dbltextfloatsep}{2pt plus .5pt minus .5pt}
+\setlength{\dblfloatsep}{1pt plus .5pt minus .5pt}
 \setlength{\intextsep}{2pt plus .5pt minus .5pt}
 \setlength{\abovecaptionskip}{1pt}
 \setlength{\belowcaptionskip}{0pt}
@@ -41,1194 +74,1220 @@
   \setlength{\parskip}{0pt}}
 
 \begin{document}
+% Prevent bottom alignment from stretching paragraph and float spacing.
+\raggedbottom
 \date{}
 \title{\Large \bf Roll Back the Fault, Not the Future: Causal Recovery for Coding Agents with \system}
 \author{Anonymous submission}
 \maketitle
 
 \begin{abstract}
-Coding agents increasingly execute long, stateful trajectories in which later
-tool calls reuse filesystem state produced by earlier editing, compilation, and
-testing. Existing mechanisms couple the lifetime of speculative state to the
-granularity of recovery: command-scoped isolation repeatedly reconstructs
-state, whereas coarse temporal rollback discards independent later work.
-Recovery may target a historical state that never existed as a temporal prefix,
-and the workspace and agent context must move to that target together.
-\system keeps the trajectory in one speculative workspace but recovers only
-the failed step and its dependents. It captures dependencies and object
-versions, then uses one recovery decision to rebuild both the workspace and
-agent-visible context. In the 144-run
-controlled recovery suite, \system retained 100\% of independent work and
-removed 100\% of invalid descendants; temporal recovery retained only 41\% of
-independent work at 64 calls. At 48 document entries, preserving valid later
-work avoided 1,425 replay tokens relative to temporal recovery and 3,340
-relative to whole-session abort.
+Coding agents reuse files and tool results over long sequences of edits,
+commands, and tests. An error can therefore affect both filesystem state and
+agent context, making rollback necessary for continued execution.
+Unfortunately, checkpoint and branch rollback also discard independent work
+when affected and unaffected calls interleave.
+We present \system, a causal recovery runtime built on Linux OverlayFS.
+Given a user report naming the file to roll back, it follows file
+dependencies and tool-result reuse to select
+and validate a rollback set. This set guides filesystem reconstruction and
+the removal of corresponding call/result pairs from agent context,
+preserving independent work within and across turns. Recovery can therefore
+reconstruct file states absent from any temporal checkpoint.
+Across 400 controlled workloads with three repetitions per policy, \system
+removes all affected calls and retains all independent work. Furthermore,
+on matched successful tasks with SWE-agent and Codex, it reduces token use
+relative to DeltaBox by 17.55--23.45\% on SWE-Bench Lite
+and 25.39--44.69\% on Terminal-Bench. The real-task breakdown shows
+lower agent-execution time in all twelve comparisons.
 \end{abstract}
 
 
 \section{Introduction}
 
-Coding agents increasingly solve software-engineering tasks through long
-sequences of interactions with a development environment rather than producing
-a patch in a single turn. Their control loops interleave model reasoning with
-tool actions and observations, allowing plans to change after commands fail or
-reveal new repository evidence~\cite{react}. Systems such as SWE-agent and
-OpenHands expose repository navigation, editing, shell commands, and tests to
-the model~\cite{sweagent,openhands}. SWE-bench evaluates issue resolution across
-multiple files and test runs~\cite{swebench}. The filesystem therefore becomes
-persistent execution state. Later steps consume files and artifacts produced
-earlier in the same trajectory.
+Coding agents are increasingly used to automate software-engineering tasks
+through extended interactions with development
+environments~\cite{sweagent,openhands,autocoderover,hyperagent}. In these
+workflows, agents edit code and execute commands, using the resulting
+observations to decide how to proceed~\cite{react,toolformer}. Yet an
+incorrect edit or command can disrupt the task and cause subsequent actions
+to build on an erroneous result. Worse still, the effects of the mistake can
+persist even after it is recognized, leaving the agent to repair affected work
+before making further progress~\cite{agentrewind,planarian}. Rollback is
+therefore essential for removing these effects and restoring a valid state
+from which the agent can continue~\cite{try-osdi26,branchfs,crab}.
 
-Existing systems preserve this evolving state at different boundaries.
-Command-level semisolates such as \trycmd stage one opaque invocation
-~\cite{try-osdi26}, whereas agent-facing filesystems and branch runtimes
-preserve longer-lived workspace state~\cite{yolofs,branchfs}. Checkpoints
-restore temporal state~\cite{waypoint,deltabox}; process checkpointing provides
-restart guarantees~\cite{criu,dmtcp}. These mechanisms usually recover the
-state unit they preserve: a command, session, branch, checkpoint, or
-transaction. Short units repeatedly reconstruct execution state; coarse units
-can remove valid work together with corrupted effects.
+To support rollback, existing systems stage effects or restore checkpoints.
+In particular, effect-staging systems isolate filesystem changes for later
+application or discard~\cite{try-osdi26,branchfs,cordon}. When selecting
+file effects to discard, the caller also has to identify dependent calls
+and observations to remove. By comparison, checkpoint/restore systems save state for later
+restoration~\cite{rollbacksurvey,dmtcp,waypoint,deltabox}. Building on
+these mechanisms, recent agent runtimes select checkpoint state from turn effects~\cite{crab}, restore
+consistent environment versions~\cite{planarian}, or recover aligned
+filesystem and agent-context checkpoints while retaining lessons~\cite{agentrewind}.
+However, restoring an earlier checkpoint discards later independent updates,
+while rolling back a whole branch loses its independent changes.
 
-Correct recovery exposes this limitation. Leaving all state in place preserves
-progress, while removing only the failed operation can leave derived effects
-behind. Coarse recovery removes those effects, yet also discards unrelated work
-enclosed by its boundary. To isolate granularity, our study gives coarse
-baselines exact failure locations and their most favorable native boundaries.
-Even under these conditions, correct recovery sacrifices independent progress
-within a turn or checkpoint.
+Our motivational experiments (Section~\ref{sec:motivation}) show that
+the DeltaBox recovery scope discards 56.90\% of valid work on average across 400
+fixed trajectories, even with exact fault information. Moreover, dependent
+calls interleave with independent work in 86.8\% of 946 complete clean agent
+traces. These observations show that existing recovery policies discard
+substantial valid work. Our goal is to retain independent progress while
+undoing affected file changes and removing the associated tool results
+from agent context.
+To this end, we present \system, a causal recovery runtime for coding
+agents. The key idea is to \textbf{let dependencies among tool calls
+determine the recovery boundary across filesystem state and agent context}.
+The user identifies the file whose changes should be rolled back.
+\system selects its mutations since a reference checkpoint and follows
+file dependencies and tool-result reuse to derive one rollback set.
+An isolated trial checks the expected file state and command/result residue
+before live recovery. The runtime restores affected file objects and
+removes the corresponding calls and results from agent context while preserving
+independent progress. Consequently, recovery can preserve independent calls
+within and across turns and combine earlier file versions with later valid
+updates, even when that combination never existed at a checkpoint.
 
-The underlying problem is that execution order does not encode failure
-dependence. Consider four interleaved steps: $s_0$ writes a faulty formatter,
-$s_1$ uses it to generate a report, $s_2$ edits an unrelated document, and
-$s_3$ tests the faulty output. Recovery should remove
-$\{s_0,s_1,s_3\}$ while retaining $s_2$. Undoing only $s_0$ leaves derived
-state behind, while restoring a prefix also discards $s_2$. Changing among
-turn-level checkpoints, temporal suffixes, and whole branches merely moves this
-collateral loss across workloads. No fixed coarse boundary consistently avoids
-it.
+However, designing a filesystem that supports causal rollback poses three
+key challenges.
+1) A user can identify a problem file without knowing which calls depend
+on it. \system follows both file and result dependencies from the file's
+mutations, then checks the resulting rollback state before resuming execution.
+2) The desired file state may be absent from every checkpoint. To
+reconstruct it, \system restores selected object versions, metadata, and
+deletion state in OverlayFS while retaining independent updates.
+3) A single agent turn can contain both affected and independent calls.
+Accordingly, \system uses shared call identifiers to remove affected
+calls and results from the next model request while retaining independent
+pairs within the same turn.
 
-Selective recovery raises three systems challenges. First, \emph{dependency
-discovery} must uncover producer--consumer relations hidden behind shells,
-compilers, tests, and descendant processes. Second, \emph{object identity}
-must relate effects across aliases, renames, replacements, and layered
-filesystems. Third, \emph{selective reconstruction} must rebuild a non-prefix
-workspace while aligning agent-visible context with that state.
-
-The root cause is a mismatch between how the compared substrates organize
-recovery state and how failures propagate. Their recovery boundaries follow
-commands, checkpoints, or branches, while failures propagate through
-dependencies among versioned effects.
-The trajectory should therefore remain one speculation unit, but recovery
-should select a dependency-defined subgraph of tool-step effects. Recording
-individual steps alone is insufficient because a temporal suffix still follows
-execution order rather than dependence.
-
-\system keeps one speculative environment across tool calls while recording
-their observed effects and dependencies. When a step fails, it selects the
-affected steps, tracks the object versions needed to remove them, and
-reconstructs the workspace and agent context from the same survivor set.
-
-We implemented \system on Linux with dependency capture, object-aware
-historical reconstruction, fail-closed alias handling, and conversation
-rewind. Across 144 controlled runs, \system retained 100\% of independent
-work while removing 100\% of invalid descendants. At 64 calls, temporal
-recovery retained only 41\% of independent work. At 48 document entries,
-preserving valid artifacts avoided 1,425 replay tokens relative to temporal
-recovery and 3,340 relative to whole-session abort. These results indicate that
-recovery granularity is not only an execution-overhead problem: reducing
-isolation cost cannot recover valid work once a coarse rollback boundary has
-discarded it. We evaluate the prevalence and end-to-end benefit of this
-opportunity separately from the controlled recovery mechanism.
+We implement \system on Linux OverlayFS and integrate it with SWE-agent
+and Codex. In controlled
+experiments on 400 workloads, with three
+repetitions per policy, \system removes all affected calls while retaining
+all independent work. Beyond these controlled workloads, \system reduces token consumption
+on real-world SWE-Bench Lite~\cite{swebench} and Terminal-Bench~\cite{tbench}
+tasks relative to DeltaBox by 17.55--23.45\% and 25.39--44.69\%,
+respectively, on matched successful task pairs across the two agents.
+On the same real tasks, the breakdown shows lower agent-execution and
+setup/replay time relative to DeltaBox.
 
 This paper makes three contributions:
 \begin{itemize}
-  \item We identify the recovery-unit mismatch in stateful coding-agent
-        trajectories and characterize the limits of fixed coarse boundaries.
-  \item We build \system to recover dependency-selected effects while keeping
-        the workspace and agent-visible context aligned.
-  \item We evaluate \system across recovery correctness, retained work,
-        runtime, replay cost, object identity, and context consistency.
+  \item We quantify the valid work lost when recovery boundaries include
+        calls independent of an error, and show that dependent calls
+        commonly interleave with independent work in real agent traces
+        (Section~\ref{sec:motivation}).
+  \item We design and implement \system, which combines file dependencies
+        and tool-result reuse to select and validate rollback sets. The
+        selected set guides selective object restoration and updates
+        agent context, preserving independent calls within and across turns
+        (Section~\ref{sec:design}).
+  \item We evaluate recovery correctness, preserved work, runtime overhead,
+        and model cost on controlled and real-world workloads
+        (Section~\ref{sec:eval}).
 \end{itemize}
 
 
 \section{Background}
 \label{sec:background}
 
-\subsection{Stateful Coding-Agent Workspaces}
+\subsection{Stateful Coding-Agent Execution}
 
-Coding agents execute software-engineering tasks as iterative interactions with
-an operating-system environment.  Systems such as SWE-agent and OpenHands let a
-model inspect repositories, edit files, invoke shell commands, and run tests
-~\cite{sweagent,openhands}.  A task therefore spans multiple tool calls rather
-than one isolated program execution.  Each call observes repository state left
-by earlier calls. Shells may also launch compilers, test runners, package
-managers, and descendant processes whose effects enter the same workspace. The
-filesystem is therefore persistent execution state: later calls can consume
-source edits, generated artifacts, build products, and configuration changes.
+ReAct interleaves model reasoning with actions and observations from an
+external environment~\cite{react}. Coding agents such as SWE-agent and
+OpenHands repeatedly inspect repositories,
+edit files, invoke shell commands, and run tests~\cite{sweagent,openhands}.
+Each tool call can consume source edits, generated artifacts, or configuration
+changes left by earlier calls. The filesystem therefore carries
+progress across the task. At the same time, the agent context---the messages
+supplied to subsequent model requests---records calls and their results.
+A reported test outcome, for example, describes a particular filesystem
+version. After recovery, the observations supplied to the agent should
+therefore describe the file state that remains.
 
-The broader agent literature makes this execution pattern explicit.  Tool-use
-controllers learn when to invoke external APIs~\cite{toolformer}.  Reasoning-
-and-action loops and self-reflection extend trajectories across feedback
-steps~\cite{reflexion}.  Interactive benchmarks evaluate multi-turn state and
-real websites, as in AgentBench~\cite{agentbench} and WebArena~\cite{webarena}.
-Desktop and stateful-tool suites broaden this setting to OSWorld~\cite{osworld}
-and ToolSandbox~\cite{toolsandbox}; AppWorld evaluates longer application
-workflows~\cite{appworld}, while BrowserGym targets multi-step web interaction
-~\cite{browsergym}.
+Toolformer incorporates API results into subsequent token
+generation~\cite{toolformer}. Reflexion retains textual feedback for later
+attempts, while MemGPT moves information between memory tiers and the
+active model context~\cite{reflexion,memgpt}. Software-engineering systems such as
+AutoCodeRover, Agentless, and HyperAgent combine localization, editing, and
+validation~\cite{autocoderover,agentless,hyperagent}.
+SWE-Bench and Terminal-Bench evaluate agents through executable repository
+and command-line tasks~\cite{swebench,tbench}.
+SWE-Gym trains agents and verifiers in executable repository
+environments~\cite{swegym}. FeatureBench and SWE-EVO extend evaluation to
+complex feature development and sustained, multi-file software
+evolution~\cite{featurebench,sweevo}. These workflows accumulate both modified
+files and observations that later decisions reuse.
 
-This execution model makes the workspace boundary important.  Direct execution
-exposes every mutation to the host as soon as a tool runs.  Recent agent systems
-instead keep filesystem changes provisional.  YoloFS stages session mutations
-outside the base filesystem and provides snapshots that an agent can return to
-during self-correction~\cite{yolofs}.  OpenHands similarly supports sandboxed
-execution for software-development agents~\cite{openhands}.  These systems let
-an agent continue operating on a mutable workspace while retaining a recovery
-point.
+An error can affect both forms of state. A later tool call can read an incorrect
+file, or the model can reuse an incorrect value from a tool result in a later
+request. These effects therefore extend to subsequent calls that
+consume the faulty state or reuse affected results. Recovery determines how
+much valid work survives by choosing which calls to withdraw from both
+histories.
 
-Repository-level coding systems add another source of long-lived state.  They
-retrieve context across files, localize faults, edit repositories, and execute
-tests iteratively; RepoCoder~\cite{repocoder} and AutoCodeRover
-~\cite{autocoderover} illustrate this workflow.  Agentless and HyperAgent
-extend it to autonomous repair~\cite{agentless,hyperagent}, while SWE-gym
-studies longer interactive trajectories~\cite{swegym}.  Recent benchmarks
-broaden the workload from issue fixes to feature development and software
-evolution~\cite{sweevo}.  FeatureBench studies feature-level development
-~\cite{featurebench}, while SWE-rebench revisits repository evolution
-~\cite{swerebench}.  Other suites cover repository-scale work, research
-replication, and experiment execution; examples include GitTaskBench
-~\cite{gittaskbench}, PaperBench~\cite{paperbench}, and MLAgentBench
-~\cite{mlagentbench}.
+\subsection{Recovery Support for Stateful Agents}
 
-\subsection{Speculation and Recovery Units}
+Classical rollback-recovery protocols use checkpoints and logs to resume
+consistent execution after failures~\cite{rollbacksurvey}. Process
+checkpointing and file transactions provide underlying state-management
+mechanisms~\cite{criu,dmtcp,valor,txfs}. We classify agent-facing recovery
+interfaces by the scope of their rollback: selected effects, temporal
+checkpoint, turn checkpoint, and whole branch.
+Figure~\ref{fig:motivation-rollback-example} illustrates these four scopes
+on six calls across three turns. Call 4 writes an incorrect value to A,
+and Call 6 reads it; the updates to B, C, D, and E remain valid.
 
-Existing substrates generally expose recovery at the boundary of the state
-container they preserve.  \trycmd introduces a semisolate around an opaque
-component invocation: it captures the command's filesystem effects so they can
-be inspected, applied, stacked, or discarded before they modify the live
-system~\cite{try-osdi26}.  Sandlock similarly confines a process invocation and
-uses a copy-on-write work directory to commit or discard its filesystem
-effects~\cite{sandlock}.  Agent-native filesystems extend this lifetime across a
-session.  YoloFS retains staged mutations and uses snapshots as restoration
-points~\cite{yolofs}, while BranchFS gives each speculative branch an isolated
-copy-on-write filesystem view with branch-level commit or abort~\cite{branchfs}.
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.8\linewidth]{FIG-Recovery-Granularity.pdf}
+  \caption{\textbf{Recovery granularity over interleaved tool calls.}
+  \small\emph{Red calls are faulty or affected; green calls are independent.
+  Four outline styles mark selected effects, a temporal suffix, a
+  turn-boundary suffix, and the whole branch. The arrow denotes dependency.}}
+  \label{fig:motivation-rollback-example}
+\end{figure}
 
-hS instead targets script performance: it speculatively reorders black-box
-subprocesses at fine granularity and tracks dependencies to preserve the
-script's sequential semantics~\cite{hs-osdi26}.  It is an execution
-optimization rather than a post-failure recovery mechanism for agent state.
+\textbf{Selected effects.}
+Semisolates let callers inspect, selectively apply or discard, filter, and
+stack filesystem effects~\cite{try-osdi26}. Their tracing interface also
+extracts dependencies. In the example, discarding the faulty write to A
+alone leaves the later read affected. Discarding a file effect therefore
+also calls for a decision about which dependent agent calls and
+observations to withdraw.
 
-Checkpoint/restore systems preserve still broader execution state.  Crab
-observes turn-level OS effects to decide when a sandbox checkpoint is
-recovery-relevant, but restoration still returns the sandbox to a selected
-checkpoint~\cite{crab}.  Waypoint captures filesystem, process, memory, and
-terminal state, and materializes a new live fork from a selected temporal
-checkpoint~\cite{waypoint}.  DeltaBox accelerates checkpoint and rollback of
-stateful agent sandboxes by storing changes between consecutive checkpoints;
-its restored state includes both filesystem and process state
-~\cite{deltabox}.  Thus, these systems span command effects, staged sessions,
-branches, and complete session or sandbox checkpoints.
-Table~\ref{tab:granularity} summarizes the corresponding speculative and
-recovery boundaries.
+\textbf{Temporal checkpoint.}
+These interfaces restore a saved environment version. Waypoint captures filesystem and
+process state together~\cite{waypoint,waypoint-project}. DeltaBox pairs
+DeltaFS layer switching with DeltaCR process restoration to return both
+forms of state to the same checkpoint~\cite{deltabox}.
+Planarian also coordinates supported remote effects through compensating
+operations~\cite{planarian}. In the example, restoring the point before
+Call 4 withdraws the last three calls, including the independent update to E.
 
-\begin{table}[H]
+\textbf{Turn checkpoint.}
+These interfaces place recovery points at agent-turn boundaries. Crab uses
+observed OS effects to select the state to capture and overlaps capture
+with execution~\cite{crab}. AgentRewind restores aligned filesystem and
+agent-context checkpoints and retains lessons from abandoned
+attempts~\cite{agentrewind}. In the example, restoring the start of Turn 2
+also removes the independent update to D.
+
+\textbf{Whole branch.}
+These interfaces discard a complete speculative branch or transaction.
+BranchFS provides nested copy-on-write branches with commit/abort~\cite{branchfs}.
+Cordon stages local mutations and external effects, tracks result lineage,
+and validates the composed flow before commit; local rollback restores
+pre-transaction state~\cite{cordon}. Whole-branch recovery in the example
+withdraws all six calls, including all four independent updates.
+
+Other mechanisms support isolation and dependency-aware execution.
+Sandlock confines agent-invoked code with a copy-on-write work
+directory~\cite{sandlock}. hS uses dependencies to revoke and re-execute
+affected speculative subprocesses while preserving sequential
+semantics~\cite{hs-osdi26}. Provenance systems record how outputs derive
+from earlier actions~\cite{pass,beep}; RETRO uses an action-history graph
+to undo unwanted actions and selectively re-execute affected legitimate
+actions~\cite{retro}.
+
+Table~\ref{tab:granularity} compares the scopes on two recovery goals:
+removing all affected calls and preserving all independent work. A turn
+checkpoint policy can preserve unaffected turns, but loses independent
+calls inside withdrawn turns. A temporal checkpoint policy can also
+discard independent work in later unaffected turns. State coverage is
+separate from rollback scope:
+Waypoint, for example, restores files and processes, whereas AgentRewind
+restores files and agent context.
+
+\begin{table}[!htbp]
 \centering
-\scriptsize
-\setlength{\tabcolsep}{5pt}
-\renewcommand{\arraystretch}{1.10}
-\caption{\textbf{Speculation and recovery units.}
-Existing agent execution substrates preserve and recover state at command,
-process, session, branch, sandbox, snapshot, or checkpoint granularity.}
-\resizebox{0.8\columnwidth}{!}{%
-\begin{tabular}{@{}lll@{}}
+\footnotesize
+\setlength{\tabcolsep}{2pt}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}lccc@{}}
 \toprule
-System & Speculation unit & Recovery unit \\
+ & & \multicolumn{2}{c}{\textbf{Keep independent work}} \\
+\cmidrule(l){3-4}
+\textbf{Recovery scope} &
+\shortstack{\textbf{Remove all}\\\textbf{affected calls}} &
+\shortstack{In unaffected\\turns} &
+\shortstack{In affected\\turns} \\
 \midrule
-\trycmd~\cite{try-osdi26}
-  & Command
-  & Command \\
-Sandlock~\cite{sandlock}
-  & Process
-  & Process \\
-YoloFS~\cite{yolofs}
-  & Session
-  & Snapshot \\
-BranchFS~\cite{branchfs}
-  & Branch
-  & Branch \\
-Waypoint~\cite{waypoint}
-  & Session
-  & Checkpoint \\
-Crab~\cite{crab}
-  & Sandbox
-  & Checkpoint \\
-DeltaBox~\cite{deltabox}
-  & Sandbox
-  & Checkpoint \\
+Selected effects (\trycmd) & $\times$ & $\checkmark$ & $\checkmark$ \\
+Temporal checkpoint (DeltaBox) & $\checkmark$ & $\times$ & $\times$ \\
+Turn checkpoint (Crab) & $\checkmark$ & $\checkmark$ & $\times$ \\
+Whole branch (BranchFS) & $\checkmark$ & $\times$ & $\times$ \\
 \bottomrule
-\end{tabular}%
-}
-
+\end{tabular}
+\par\vspace{1pt}
+\begin{minipage}{\linewidth}
+\footnotesize\raggedright
+$\checkmark$: guaranteed by the scope with exact affected-call information;
+$\times$: no general guarantee. Retention means keeping \emph{all}
+independent work, including work after the fault. With selected effects,
+recovery removes the faulty file effect alone, without expanding to dependent calls.
+\end{minipage}
+\caption{\textbf{Recovery completeness and independent-work retention.}
+The scopes differ in whether they remove dependent calls and how much
+independent work they can preserve.}
 \label{tab:granularity}
 \end{table}
 
+\begingroup\clubpenalty=10000
+These scopes can discard independent calls. We next measure that loss
+and examine how dependencies enable selective rollback.
+\par\endgroup
 
-For the mechanisms in Table~\ref{tab:granularity}, the state abstraction
-determines both speculation lifetime and the native recovery boundary. They
-span command, session, branch, and checkpoint state, but do not expose a
-dependency-defined recovery unit within one trajectory.
-
-\section{Observation and Motivation}
+\section{Observations and Motivation}
 \label{sec:motivation}
 
-Recovery mechanisms inherit their rollback boundaries from the execution
-substrate. We first examine what state each boundary can select. A shared
-multi-turn microbenchmark measures the valid work each boundary sacrifices
-after a crash, followed by an audit of opportunities in native agent traces.
+\subsection{Recovery Loss and Dependency Structure}
+\label{sec:motivation-observations}
 
-Artifact availability prevents a complete implementation-to-implementation
-comparison. We replay the shared cases through pinned artifacts for \trycmd,
-BranchFS, YoloFS, and Waypoint. The first two expose native discard or abort
-operations rather than post-failure agent recovery. Their results therefore
-measure the state retained by those native boundaries, not the systems' intent.
-We represent systems without reusable artifacts by their recovery semantics.
+The recovery scopes in Section~\ref{sec:background} can discard valid work
+when independent calls execute alongside calls affected by an error.
+Our goal is to remove file changes and observations produced by affected calls
+while preserving independent progress. We examine the resulting loss under
+existing recovery scopes, explain why execution order alone cannot identify
+affected calls, and check whether real agent trajectories exhibit the same
+interleaving.
 
-\emph{Whole branch} is the controlled semantic bound for discarding a complete
-speculative unit. The checkpoint and temporal baselines are defined in the
-same way, and we assign no implementation latency to these emulations. Named
-artifact results remain separate from these bounds.
+\textbf{Methodology.}
+To isolate recovery loss from agent randomness and fault-localization
+errors, we use 400 scripted trajectories without an agent or LLM for the
+first two observations: 100 vary task length, 90 vary fault position, and
+210 vary dependencies and interleaving. Each turn has 16 calls. We implement
+the recovery scopes associated with the works in Table~\ref{tab:granularity}
+on a common OverlayFS runtime and label the controls by those work names.
+DeltaBox withdraws the faulty call and all later calls, Crab withdraws
+affected turns, and BranchFS withdraws the entire branch. All three remove
+all affected calls. The \trycmd control withdraws only the faulty call,
+without expanding to dependent calls.
 
-We deliberately favor every coarse baseline with oracle localization. Each
-receives the exact failed step, and turn recovery receives the exact affected
-turns. The baseline then selects the smallest set of native units covering all
-affected effects. This is the maximum retention that its granularity can
-express. Detection error, imperfect localization, or implementation constraints
-can only discard additional valid work.
+For \system, the user specifies the file whose changes should be rolled
+back, without identifying a faulty step. The runtime derives the
+affected-call set from that file's recorded mutations and their file and
+tool-result dependencies. The controls receive the exact faulty step; Crab
+also receives the exact affected turns. For each control, we choose the
+smallest withdrawal set its rule permits, so localization errors do not
+reduce retention. We measure the affected work removed and the collateral
+loss (independent calls discarded). Retention percentages use deterministic
+token weights. As a reference target, an \emph{Ideal oracle} uses the
+generated dependencies to roll back the erroneous operation and all its
+dependent effects while retaining every unaffected file change and agent
+observation, removing all affected work with zero collateral loss.
 
-\subsection{Analyzing Recovery Paths of Stateful Agents}
-\label{sec:recovery-granularity}
+\textbf{Observation \#1: Existing recovery strategies waste substantial valid work.}
+Removing every affected call can still discard independent progress.
+Figure~\ref{fig:motivation-coarse-waste} uses 100 fixed trajectories, with
+ten cases at each length from 16 to 160 calls and 16 calls per turn.
+Every case has exactly four affected calls; the remaining calls are
+independent work that recovery could preserve. Keeping the number of
+affected calls fixed lets us examine whether longer executions cause more valid work
+to be discarded.
 
-\textbf{Execution-defined boundaries.}
-A coding-agent trajectory $T=\langle s_0,s_1,\ldots,s_n\rangle$ comprises
-ordered tool steps. Each step executes one tool call against state left by
-preceding steps. Table~\ref{tab:granularity} groups existing recovery paths by
-the execution boundary they restore. These boundaries encode chronology or
-control structure; they do not identify which later steps consumed state
-produced by the failed step.
+Figure~\ref{fig:motivation-coarse-waste}(a) shows that the loss grows with
+execution length. From 16 to 160 calls, the average number of independent
+calls discarded rises from 12 to 56.8 for Crab, from 8 to 116
+for DeltaBox, and from 12 to 156 for BranchFS.
+Figure~\ref{fig:motivation-coarse-waste}(b)
+shows the total calls rolled back. At 160 calls, the three controls remove
+60.8, 120, and 160 calls, respectively, to clear just four affected calls.
+All calls removed beyond those four are valid work lost during recovery.
+The Ideal oracle discards no valid calls and rolls back exactly the four
+affected calls at every trajectory length.
 
-Consider a failed producer followed by dependent and independent work in
-different turns.  \emph{Root-only} recovery removes the producer but leaves its
-dependent descendants.  A \emph{turn checkpoint} removes complete turns that
-contain invalid effects. Because their identities are supplied, it selects no
-additional turns. A \emph{temporal step} removes the global suffix beginning at the
-producer, and \emph{whole branch} abandons the complete speculative branch.
-The latter three paths remove the dependent descendants, but they may also
-remove independent effects enclosed by their execution boundaries.
-
-We include two controls.  \emph{No recovery} preserves every effect, including
-corrupted state.  The \emph{ideal oracle} removes only the failed step and the
-steps that depend on it, preserving all unaffected work.  The oracle represents
-the desired recovered state without prescribing how to discover it.
-
-\subsection{Methodology}
-\label{sec:motivation-methodology}
-
-\textbf{Controlled cases.}
-We use one filesystem-effect microbenchmark family. A turn contains 16 tool
-calls, each represented by one recoverable ledger step; a branch contains one
-to ten turns. The generator varies turn count, fault position, dependency
-value, graph shape, and interleaving. We analyze 400 paired manifests: 100
-vary task length, 90 vary fault position, and 210 vary dependency value. Every
-policy receives the same manifest and fault root in each paired case.
-
-The generated dependencies identify the failed root and every step that
-depends on it. Recovery is complete only if it removes all these affected
-steps. Among complete policies, collateral cost counts removed steps outside
-this set. We also attribute each step a deterministic token weight to compare
-the amount of useful work discarded; this weight is not billed model usage or
-measured replay. We replay all 400 manifests through \trycmd, BranchFS,
-YoloFS, and Waypoint to compare recovered states, not cross-environment
-latency. The first two observations use this shared population.
-
-\textbf{Native traces.}
-For the third observation, we inspect fault-free SWE-agent runs on SWE-Bench
-and Terminal-Bench. We include complete traces regardless of verifier outcome;
-an unsuccessful task attempt still supplies observed tool steps. We treat each
-workspace-mutating step with a later step as a hypothetical fault root. The
-analysis connects accesses to the last preceding writer of
-each included workspace path. Opaque agent-context steps conservatively link
-earlier observations to later actions. We compare the resulting dependent
-steps with the temporal suffix that would be removed from the root onward.
-
-We retain tasks and roots with zero observed opportunity in the denominators,
-and report both per-task incidence and per-root counts. A dependency edge
-spanning at least five turns is a descriptive slice, not a condition for an
-opportunity: even a short dependency can leave independent work inside a
-rollback boundary. This path-level counterfactual excludes some build artifacts
-and unobserved state. It injects no crash, does not certify that apparently
-independent steps are independent through agent context, and measures no
-replay tokens.
-
-\subsection{Analyzing Recovery Overheads}
-
-Figure~\ref{fig:motivation-coarse-waste} exposes the controlled scaling
-behavior.  Its plots retain only policies that remove every affected effect.
-They hold the ground-truth affected set fixed while varying branch length or
-fault position, so changes in waste arise from the recovery boundary rather
-than a larger failure.
-
-\begin{figure}[t]
+\begin{figure}[!ht]
   \centering
   \includegraphics[width=\linewidth]{FIG-Motivation-Coarse-Waste.pdf}
-  \caption{\textbf{Correct recovery can still discard avoidable work.}
-  \small\emph{All plots compare the four correctness-qualified policies. In
-  (a), waste grows with the number of turns for a fixed four-step affected
-  set. In (b), a temporal suffix changes with fault position at fixed task
-  length and affected set. Plot (c) reports rollback amplification. The ideal
-  oracle is an analytic bound, not an implemented recovery policy.}}
+  \caption{\textbf{Recovery loss versus trajectory length.}
+  \small\emph{Fixed trajectories with four affected calls and exact fault
+  information. (a) Independent calls discarded; (b) total calls rolled back
+  as trajectory length increases. Points average ten cases; bands show
+  95\% case-bootstrap intervals. \trycmd removes only one of the
+  four affected calls.}}
   \label{fig:motivation-coarse-waste}
 \end{figure}
 
-With a fixed four-step affected set, increasing the branch from one to ten turns
-raises discarded valid operations from 12 to 56.8 for turn recovery. Temporal
-recovery rises from 8 to 116, while branch recovery rises from 12 to 156.
-The corresponding ten-turn rollback amplification is $15.2\times$,
-$30\times$, and $40\times$.  Moving the fault from 10\% to 90\% of a fixed
-ten-turn branch reduces temporal waste from 140 to 13 valid operations.  These
-controlled trends establish that execution structure, rather than affected-set
-size, drives coarse recovery cost.
+Across all 400 cases, Crab, DeltaBox, and BranchFS discard 54.02\%, 56.90\%, and 100\% of valid work on average.
+These losses occur with exact fault information. Even Crab,
+given the exact affected turns, discards the independent calls within
+those turns.
 
-\textbf{Observation \#1: Correct coarse recovery still discards independent
-work.}
-The comparison exposes a correctness--retention tradeoff. Policies that retain
-nearly all work leave invalid state behind, while correct coarse policies
-delete valid effects enclosed by their recovery boundaries.
+\trycmd discards no independent work but removes only 17.03\%
+of affected calls on average. It clears the entire affected set in only
+10 of 400 cases (2.5\%), all with no dependent calls.
 
-Figure~\ref{fig:motivation-suite} quantifies this tradeoff over all 400 paired
-manifests. No recovery removes 0\% of the affected steps, while root-only undo
-removes 17.03\% on average. Their low rollback cost therefore reflects
-under-recovery, not efficiency. Turn checkpoint, temporal step, whole branch,
-and ideal recovery remove 100\% of the affected set in every case.
+To explain these losses, we next examine where independent calls occur
+relative to calls affected by the error.
 
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=\linewidth]{FIG-Motivation-Suite.pdf}
-  \caption{\textbf{Recovery tradeoff across 400 paired cases.}
-  \small\emph{Lines report the turn-count (100 cases), fault-position (90
-  cases), dependency-value (210 cases), and combined-suite means; error bars
-  give 95\% bootstrap confidence intervals. The left plot applies the
-  correctness gate to boundary policies. The right plot compares optimistic
-  boundary upper bounds with artifact-native \trycmd, BranchFS, YoloFS, and
-  Waypoint, each labeled by system name.}}
-  \label{fig:motivation-suite}
-\end{figure}
+\textbf{Observation \#2: Calls executed after an error are not necessarily
+affected by it.}
+In Figure~\ref{fig:motivation-rollback-example}, the update to E occurs after
+the faulty write to A but does not depend on it. The later read of A does.
+Both calls execute after the error, but only the read consumes the faulty
+state. Rolling back both would discard the valid update made by E.
 
-Among the semantic policies, checkpoint, temporal, and branch recovery discard
-54.02\%, 56.90\%, and 100\% of valid work on average. The ideal boundary
-discards none. Artifact-native YoloFS and Waypoint each discard 65.89\%, 11.87
-percentage points more than the oracle-aided turn boundary. BranchFS and
-\trycmd discard the complete speculative unit through their native operations.
-The recovered states agree within each pair across all 400 manifests.
-Correctness therefore does not imply efficient recovery: coarse boundaries
-restore safety by deleting independent progress. We first test completeness,
-then compare the valid work preserved by complete policies.
+In 390 of the 400 trajectory cases (97.5\%), returning to a checkpoint cannot
+remove every affected step without also discarding valid work. Only the
+remaining ten cases allow temporal rollback to remove all affected steps
+and preserve all independent work.
 
-The turn policy already uses a favorable boundary: it rolls back only turns
-that contain affected steps. Its 54.02\% collateral loss therefore comes from
-valid steps inside those turns. Substantial avoidable waste remains within the
-turn, below the finest boundary exposed by turn-level recovery.
+Figure~\ref{fig:motivation-dependency}(a) varies the percentage of later calls
+that depend on the faulty call, from 0\% (none) to 100\% (all), in an 80-call
+execution. This sweep uses 210 fixed trajectories, ten per point, with exact
+fault information. The x-axis gives the fraction of later calls affected by
+the faulty call; Figure~\ref{fig:motivation-dependency}(a) reports the
+minimum valid work discarded, using the deterministic token weights.
+With no dependent later calls, Crab discards 18.99\%
+of valid work and DeltaBox discards 74.68\%.
+DeltaBox removes exactly
+the affected calls only in the ten fully dependent cases, losing independent
+work in the other 200 cases.
 
-\textbf{Observation \#2: Temporal recovery wastes work because time and
-dependency order diverge.}
-The desired recovered state is usually not a temporal prefix.
+Figure~\ref{fig:motivation-dependency}(b) shows why this loss occurs.
+The execution length and fault position stay fixed, so DeltaBox
+always removes 60 calls. Yet the actual affected set grows from one to 60
+calls as dependencies increase. At 0\%, DeltaBox discards 59 valid
+calls along with the faulty call; only at 100\% are all 60 calls affected.
+The Ideal oracle follows the affected set throughout. Thus, executing a
+call after the error does not mean that the call depends on it.
 
-Figure~\ref{fig:motivation-dependency} exposes this mismatch directly. Coarse
-recovery follows execution order, whereas failure propagation follows
-dependencies. When valid and affected effects are interleaved, a temporal
-boundary cannot separate them. Across the 400 paired manifests, only 10 exact
-survivor states are temporal prefixes. In the other 390 (97.5\%), no single
-checkpoint removes every affected effect while retaining every valid effect.
-
-To vary the severity of this mismatch, let $r$ be the failed step and $S$ the
-steps after it. Dependency value is the fraction of $S$ that depends on $r$.
-A value of zero means no later step depends on the failure; one means every
-later step does. The figure
-sweeps this value from 0 to 1 in a five-turn, 80-operation branch.  The exact
-target is non-prefix in 200 of these 210 cases; only the ten fully dependent
-cases form a suffix.
-
-At dependency
-value 0, checkpoint, temporal, and whole-branch recovery discard 660, 2,596,
-and 3,476 units of useful token weight. They retain 81.01\%, 25.32\%, and 0\%
-of valid work, with rollback amplification of $16\times$, $60\times$, and
-$80\times$. Artifact-native YoloFS and Waypoint recover identical states in
-all 210 dependency cases. At dependency value 0, each discards 2,772 units,
-retains 20.25\%, and incurs $64\times$ amplification. BranchFS and \trycmd match
-whole-branch recovery because their native operations discard the complete
-unit. At dependency value 1, YoloFS and Waypoint each discard 176 units and
-retain 80\%. Temporal recovery becomes exact, checkpoint discards 176 units,
-and BranchFS and \trycmd each discard 880.
-The ideal oracle remains at zero useful work discarded, 100\% retention, and
-$1\times$ amplification across the sweep.  Denser checkpoints or faster branch
-aborts can reduce mechanism overhead, but they cannot represent a non-prefix
-survivor state. Eliminating this waste requires selecting recovery state by
-dependencies rather than by execution time.
-
-This result locates a granularity gap. Mechanisms that preserve a
-long-running agent workspace recover at a turn, checkpoint, branch, or session
-boundary. Command-scoped semisolates expose one call's effects but end the
-speculative unit at that call. A long-lived runtime must instead retain the
-effects of individual tool steps across the trajectory. Step-level recording
-is necessary, but the next observation shows that it is not sufficient.
-
-\begin{figure}[t]
+\begin{figure}[!ht]
   \centering
   \includegraphics[width=\linewidth]{FIG-Motivation-Dependency.pdf}
-  \caption{\textbf{Recovery waste reflects temporal--dependency mismatch.}
-  \small\emph{Across all 21 dependency values and ten paired manifests per
-  point, sparse dependencies create the largest gap between execution order
-  and failure dependence. \trycmd, BranchFS, YoloFS, and Waypoint are
-  artifact-native and labeled directly. YoloFS overlaps Waypoint, while
-  BranchFS overlaps \trycmd; distinct markers identify both measurements.
-  Other lines are optimistic boundary semantics. Lines show means, faint points
-  show paired cases, and shaded bands give 95\% paired-bootstrap confidence
-  intervals. Token weight is deterministic work attribution, not billed model
-  usage.}}
+  \caption{\textbf{Recovery loss versus affected-call fraction.}
+  \small\emph{Fixed 80-call trajectories varying the percentage of later
+  calls affected by the fault. (a) Valid work discarded; (b) total calls
+  rolled back, compared with the Ideal affected set. Points average ten
+  cases; bands show 95\% case-bootstrap intervals. \trycmd
+  withdraws only the faulty root.}}
   \label{fig:motivation-dependency}
 \end{figure}
 
-\textbf{Observation \#3: Long-range dependence alone does not imply a large
-recovery opportunity.}
-We next inspect fault-free agent trajectories to test whether the structural
-opportunity constructed above appears in real executions. This analysis
-treats each observed workspace write as a hypothetical fault root; it does not
-inject a crash or measure replay tokens. We use SWE-agent because the current
-Codex CLI exporter groups its entire execution into one turn, preventing a
-cross-turn comparison.
+The Ideal oracle discards no valid work throughout the sweep. The gap is
+largest when many later calls are independent of the error. Selection by
+dependency preserves those calls, whereas temporal rollback removes
+everything after a point in time. The controlled cases establish this opportunity; the next
+observation asks whether real agent executions contain the same interleaving.
+
+\textbf{Observation \#3: Dependencies interleave with independent work
+in real agent executions.}
+The controlled cases show why a time boundary can include valid work. We
+next check whether the same structure arises when agents autonomously solve
+benchmark tasks. SWE-agent and Codex each run 300 SWE-Bench Lite~\cite{swebench}
+and 241 Terminal-Bench~\cite{tbench} tasks with live LLM calls and no injected
+faults. All 1,082 runs finished. We analyze 946 complete traces, including
+failed attempts and traces with no recovery opportunity; the 38 partial traces and
+98 invalid captures are reported separately.
+
+Offline analysis combines file and result dependencies, recorded parents,
+and opaque-context barriers. Useful calls access task files or build
+artifacts, or return nonempty task observations; adapter polling, patch
+retrieval, and submission are excluded. For Codex, read tracing covers the
+traced processes and their descendants; failed lookups do not count as
+evidence that a directory exists.
+Interleaving requires useful calls $i<j<k$: $i$ changes files or returns an
+observation, $k$ depends on $i$, and $j$ lies outside the dependent closure of $i$.
+
+Figure~\ref{fig:motivation-native-opportunity} reports the recorded
+dependencies for both agents and benchmarks.
+Figure~\ref{fig:motivation-native-opportunity}(a) considers only file
+dependencies. Figure~\ref{fig:motivation-native-opportunity}(b) considers
+both file dependencies and dependencies carried through agent context,
+where later calls reuse earlier tool results. It counts traces in which
+independent work occurs between dependent calls. The two panels measure
+different properties: (a) counts traces with file dependencies, while (b)
+counts interleaving under the combined file and result graph.
+Both use all complete captures as the denominator, including failed task
+attempts and zero-opportunity traces. SWE and TB denote SWE-Bench Lite
+and Terminal-Bench; $N$ gives the numbers of complete traces for SWE-agent
+followed by Codex.
 
 
-\begin{figure}[t]
+\begin{figure}[!ht]
   \centering
   \includegraphics[width=\linewidth]{FIG-Motivation-Native-Opportunity.pdf}
-  \caption{\textbf{Observed recovery opportunities in native SWE-agent traces.}
-  \small\emph{This interim full-sweep snapshot contains 189 complete SWE-Bench
-  and 54 complete Terminal-Bench traces, including failed task attempts. A long edge spans at
-  least five turns; an interleaved write lies outside the observed dependency
-  closure but between affected steps. Panel (b) considers 236 and 101
-  hypothetical write-root candidates, respectively. These are observed-path
-  counterfactuals, not certified independent work or measured replay cost.}}
+  \caption{\textbf{File dependencies and interleaving in real traces.}
+  \small\emph{Percentage of complete clean traces with (a) file dependencies
+  and (b) dependency interleaving across files and agent context.
+  SWE and TB denote
+  SWE-Bench Lite and Terminal-Bench; $N$ lists trace counts for SWE-agent,
+  then Codex.}}
   \label{fig:motivation-native-opportunity}
 \end{figure}
 
-Figure~\ref{fig:motivation-native-opportunity} separates long-distance
-dependencies from independent work that a temporal suffix would discard.
-Cross-turn workspace dependencies occur in 171 of 189 complete SWE-Bench
-traces and 44 of 54 Terminal-Bench traces. Edges spanning at least five turns
-appear in 99 and 15 traces. Yet only 4 and 7 traces, respectively, contain an
-observed later independent write; just 3 and 6 place such a write inside the
-affected execution interval. Correspondingly, 231 of 236 SWE-Bench candidate
-fault roots and 84 of 101 Terminal-Bench roots have no additional independent
-write for temporal recovery to discard.
+File dependencies occur in 245/297 SWE-agent and 256/257 Codex SWE-Bench
+traces (82.5\% and 99.6\%), and 125/223 SWE-agent and 149/169 Codex
+Terminal-Bench traces (56.1\% and 88.2\%; Figure~\ref{fig:motivation-native-opportunity}(a)). Thus, the effects of a call
+are reused by later calls in both benchmarks and agent systems.
 
-Thus real trajectories exhibit the temporal--dependency mismatch, but a long
-dependency span is not itself evidence of large avoidable loss. The observed
-opportunity is sparse and workload-dependent. Our path analysis excludes some
-build artifacts and cannot certify independence through agent context or
-unobserved process state; the figure bounds a possible opportunity rather
-than demonstrating realized savings. The controlled cases above isolate the
-mechanism, while real-agent recovery must establish its end-to-end benefit
-separately.
-
-
-
-\textbf{Significance.}
-Together, the observations progressively narrow the required recovery model.
-Observation \#1 excludes policies that appear efficient by leaving invalid
-state behind and exposes substantial collateral loss within affected turns.
-Observation \#2 attributes that loss to disagreement between temporal order and
-dependencies. Observation \#3 shows that long-range dependencies occur in
-native trajectories, while the independently writable work that could be
-retained varies sharply across tasks. The required recovery unit is therefore
-a dependency-selected set of tool-step effects, not another fixed interval in
-execution time.
+Figure~\ref{fig:motivation-native-opportunity}(b) shows dependency interleaving in 266/297 SWE-agent and 257/257
+Codex SWE-Bench traces (89.6\% and 100\%), and 145/223 SWE-agent and
+153/169 Codex Terminal-Bench traces (65.0\% and 90.5\%). Overall,
+821/946 traces (86.8\%) contain a dependent pair separated by independent
+task work. If recovery withdraws file effects or an observation produced by
+a call, rolling back to before that call also removes the intervening
+independent work. The mismatch in Observation~\#2 is therefore common in
+autonomous benchmark trajectories.
 
 \subsection{Motivation}
+\label{sec:recovery-challenges}
+
+Together, these observations motivate recovery that follows dependencies
+across both files and tool results. Given a user-specified file, the goal
+is to withdraw its mutations since a reference checkpoint and their
+dependent calls while preserving independent file updates and observations.
 
 \textbf{Attempts.}
-The three observations rule out refining a temporal boundary as a complete
-solution. No recovery and root-only undo fail the correctness gate. Turn
-checkpoints and branch abort remove invalid state but discard valid work inside
-their boundaries. Temporal-step recovery uses a finer unit, yet still removes
-a suffix. The native-trace audit shows that the possible benefit depends on
-whether independent work actually overlaps the affected execution interval.
+The recovery scopes examined above fall short in different ways:
+1) The Crab scope clears affected turns but also discards
+independent calls within them; 2) the DeltaBox and BranchFS scopes remove
+affected work together with independent progress. Even with exact fault
+information, these scopes incur the loss shown in
+Figures~\ref{fig:motivation-coarse-waste} and~\ref{fig:motivation-dependency}.
 
 \textbf{Insight.}
-The observations show that a turn is too large to serve as the recovery unit.
-Each tool step and its OS effects should instead be recorded separately. Step
-granularity alone is insufficient: recovery must select these records by
-dependency rather than remove a temporal suffix. The trajectory remains the
-speculation unit, while a dependency-defined subgraph of step effects becomes
-the recovery unit. This separation preserves independent effects on both sides
-of a failed step.
+An error can spread from a file into a tool result and back into a later
+file change, while independent calls occur in between. Following file
+dependencies alone can therefore miss calls that reuse a returned value.
+Evidence from both channels guides the selection of calls to withdraw.
+Tool calls provide a practical recording unit: each call links
+file accesses and mutations to a result that the agent can reuse.
 
-\textbf{Design challenges.}
-Realizing selective recovery proposes three challenges: 1) \emph{dependency
-discovery}, uncovering relations hidden inside shells, compilers, tests, and
-descendant processes; 2) \emph{object identity}, tracking objects through
-aliases, renames, replacements, and layered filesystems; and 3) \emph{selective
-reconstruction}, rebuilding a state that may never have existed at a checkpoint
-and aligning the agent-visible context with it. The next section states the
-recovery model used to describe these requirements.
+\textbf{Challenges.}
+Realizing this strategy raises three questions:
+1) How can recovery derive and check a rollback set from a user-specified
+file when its effects propagate through both file state and reused tool results?
+2) How can the filesystem combine historical versions of affected
+objects with current independent updates, when no checkpoint contains the
+desired state?
+3) How can the same rollback set update the agent context, removing
+withdrawn calls and results from mixed turns while preserving independent
+observations, so the next model request matches the restored filesystem?
+Section~\ref{sec:design} answers these questions through rollback-set
+selection, filesystem reconstruction, and agent-context alignment.
 
-\section{Selective Recovery Model}
-\label{sec:recovery-model}
+\section{AgentTX Design}
+\label{sec:design}
+\label{sec:aet-model}
+\system coordinates filesystem and agent-context recovery through one
+rollback set $S$. Recovery starts with a user report naming the file or
+files to roll back. The reference checkpoint denotes the state after a
+selected call; the default is the committed boundary. The report identifies
+a file-history range to withdraw, without identifying a faulty step or
+deciding which edit was semantically wrong.
 
-To describe the separation observed in Section~\ref{sec:motivation}, we model
-the trajectory as an \emph{Agent Effect Transaction} (AET). This notation gives
-execution and recovery different units: the trajectory remains speculative,
-while recovery selects a dependency-defined subset of versioned effects. The
-same selection applies to the workspace and agent-visible context.
-Section~\ref{sec:design} maps this model to Linux mechanisms in \system.
-
-\subsection{Overview and Design Principles}
-
-\begin{figure}[t]
+\begin{figure}[H]
 \centering
 \includegraphics[width=\linewidth]{FIG-AgentTX-Overview.pdf}
 \caption{\textbf{Execution and selective recovery in \system.}
-\small\emph{The agent executes tool calls against a shared overlay view.
-The runtime records their effects and dependencies, removes the failed step
-and its descendants from the workspace and agent context, and retains
-independent work.}}
+\small\emph{A user identifies the file to roll back. Shared call identifiers
+connect dependency capture, saved
+versions, and conversation records. The selected set $S$ drives both
+filesystem restoration and agent-context updates.}}
 \label{fig:overview}
 \end{figure}
 
-\textbf{Execution and effect capture.}
-Figure~\ref{fig:overview} connects agent tool calls and context (left), the
-runtime (center), and the overlay filesystem (right). Before a call,
-\system snapshots the upper layer, then runs the command through \trycmd in
-the merged view. In the example, the merged view takes F1 and F3 from the
-lower layer while the upper layer updates F2 and adds F4. After the call, an upper-layer diff
-records writes and deletes; tracing records reads and failed lookups.
-
-\textbf{Dependency-guided recovery.}
-The captured effects form a DAG of tool steps. In the figure, failed E3
-invalidates E4--E7, but later E8 remains on an independent path. \system
-rebuilds the overlay view without the invalid effects and removes their
-associated calls and results from the agent context. E8 and its context
-remain available. The separate \trycmd commit path publishes selected
-surviving files to the host; it does not determine the rollback set.
-
-\textbf{Design principles.}
-An AET spans the complete tool-call trajectory rather than one command or
-recovery attempt. It records dependencies from observed reads, absence,
-writes, and deletes rather than inferring them from command text. Recovery
-reconstructs object versions without the selected steps while preserving
-supported retained effects. The model-visible history follows the same
-survivor set.
-
-
-\subsection{Recovery State and Transitions}
-\label{sec:aet-model}
-
-\textbf{Scope.}
-We model workspace-local filesystem effects and the agent-visible tool-call
-history produced by trusted but fallible coding agents. Network services,
-hidden provider state, process memory, terminal state, and adversarial
-confinement remain outside the transaction.
-
-\textbf{State.}
-An AET is the tuple $\langle V,L,H,M\rangle$. $V$ is the current speculative
-filesystem view. $L$ records tool calls, typed effects, dependencies, and
-status. $H$ stores historical object states needed for reconstruction. $M$
-records agent-visible message spans and their associations with ledger steps.
-
-The tuple assigns one role to each recovery concern. $V$ provides cross-call
-workspace state. $L$ determines causal recovery sets. $H$ supplies versions
-that can remove selected effects. $M$ determines which tool results remain
-valid after rollback.
-
-\textbf{Transitions.}
-\emph{Append} executes one tool call in $V$, appends its effects to $L$, and
-binds the corresponding request and result in $M$. \emph{Recover} computes a
-causal closure, reconstructs the affected portion of $V$ from $H$, and rewinds
-$M$ to the matching survivor set.
-
-\textbf{Invariants.}
-Every successful recovery preserves two properties. \emph{Selective recovery}
-removes every selected effect while preserving supported, non-overlapping
-retained effects. \emph{Workspace--context agreement} removes invalid tool
-results from $M$ while retaining messages associated with surviving effects.
-
-These semantics do not require a particular tracer, snapshot representation,
-or provider message API. The remaining subsections define the recovery set and
-the reconstruction of workspace and agent-visible context.
-
-
-\subsection{Causal Recovery Semantics}
-\label{sec:effect-dag}
-
-\textbf{Effect records.}
-Each ledger node
-$s_i=(i,\mathrm{tool}_i,E_i,P_i,\mathrm{status}_i)$ represents one tool step.
-$E_i$ contains its observed filesystem effects and
-$P_i$ contains the identifiers of earlier steps on which it depends through
-either workspace state or an agent-visible result. Effects include successful
-reads ($R$), negative lookups ($N$), writes ($W$), and deletes ($D$).
-
-\textbf{Dependency rule.}
-Let $\mathrm{overlap}(p,q)$ hold when two effect names identify overlapping
-filesystem objects.  For an active earlier step $j<i$, the transaction adds
-$j\in P_i$ when:
-
+In Figure~\ref{fig:overview}, a persistent worker executes
+calls in an OverlayFS merged view over a read-only lower baseline $L$ and
+writable upper state $U$~\cite{overlayfs}. Tool-dispatch hooks integrate
+SWE-agent and Codex; shared call identifiers link the file-effect ledger,
+saved versions, and conversation log. The three challenges in
+Section~\ref{sec:recovery-challenges} lead to three design points:
 \begin{itemize}
-  \item $s_j$ writes or deletes $p$, and $s_i$ reads, negatively looks up,
-        writes, or deletes an overlapping $q$; or
-  \item $s_j$ negatively looks up $p$, and $s_i$ later writes an overlapping
-        $q$; or
-  \item the request for $s_i$ consumes a value returned to the agent by $s_j$.
+\item \textbf{Select and validate $S$ via file and result dependencies.}
+Start from the reported files' mutations and audit their joint dependency
+closure in an isolated branch (Section~\ref{sec:rollback-set}).
+\item \textbf{Control filesystem recovery in user space.}
+Retain object history incrementally, manage explicit OverlayFS checkpoints,
+and restore affected objects alongside current independent updates
+(Section~\ref{sec:userspace-fs}).
+\item \textbf{Synchronize agent context via shared call identifiers.}
+Use $S$ to remove withdrawn calls and results while preserving independent
+observations within and across turns
+(Section~\ref{sec:context-reconstruction}).
 \end{itemize}
 
-The write/delete rule captures dependencies induced by observed or subsequently
-modified state, including read-after-write and write serialization.  The
-negative-lookup rule captures dependencies on absence: a later creation can
-invalidate namespace state observed by an earlier negative lookup. The final
-rule captures values that flow through the agent context without appearing in
-a filesystem read.
+\subsection{Rollback Selection via File and Result Dependencies}
+\label{sec:rollback-set}
+A fault can propagate through a file, a reused tool result, or both.
+Figure~\ref{fig:dependency-closure} expands step 2 of
+Figure~\ref{fig:overview}: the reported file's mutations seed joint
+dependency closure, an isolated residue audit checks the resulting state,
+and the selected $S$ drives both filesystem restoration and agent-context synchronization.
 
-\textbf{Object relation.}
-Path equality alone does not define overlap.  We make object identity explicit
-with an abstract relation $\equiv_{\mathcal I}$ over effect names.  Path
-equality implies overlap, while aliases may also overlap when the identity
-relation can establish that they refer to the same object.
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{figures/design-workflow/AgentTX-Dependency-Closure.pdf}
+\caption{\textbf{Dependency capture and rollback-set selection.}
+\small\emph{File and result records feed step 2 of Figure~\ref{fig:overview}.
+The user names f with C0 before E3. Its mutations E3 and E4 seed joint
+expansion to E3, E4, and E6--E8, preserving E5. A clean residue audit
+supplies the same $S$ to filesystem and
+agent-context recovery. Dashed black edges denote file dependencies;
+red edges denote result reuse.}}
+\label{fig:dependency-closure}
+\end{figure}
 
-A descriptor read
-is associated with the object opened earlier only when observation supplies
-that relation. Otherwise, the effect remains unknown instead of receiving a
-guessed dependency. Selective recovery that requires an unresolved identity
-relation must fail closed and lies outside the recovery guarantee. The identity
-relation is part of the recovery model; Section~\ref{sec:design} describes how
-\system approximates it on Linux.
+\textbf{Capturing dependencies across both channels.}
+Each exposed tool call receives an identifier linking its command, file
+effects, version references, and call/result pair; a submitted script is
+one recording unit. \texttt{strace}~\cite{strace} records reads and failed
+lookups, while upper-state comparison identifies writes and deletions.
+Table~\ref{tab:dependency-rules} gives the direct edges
+$E_i\rightarrow E_j$ for $i<j$, where $R$, $W$, and $N$ denote reads or
+access checks, mutations, and failed lookups. Related state includes path
+hierarchies, resolved symlink ancestors, and cataloged object identifiers,
+including known hard-link aliases; renames contribute both names.
+The conversation log filters common and short strings from tool results
+and matches distinctive values against later arguments to add result edges.
 
-\textbf{Recovery set.}
-For a failed active step $f$, the transitive descendant closure is
+\input{tables/dependency-rules}
 
-\begin{equation}
-\begin{aligned}
-  C_0(f) &= \{f\},\\[-2pt]
-  C_{k+1}(f) &= C_k(f) \cup
-    \{s_i \mid P_i \cap C_k(f) \neq \emptyset\},\\[-2pt]
-  C(f) &= \bigcup_{k\geq 0} C_k(f).
-\end{aligned}
-\end{equation}
+\textbf{Selecting calls via joint dependency closure.}
+The controller normalizes the reported paths, resolves known aliases, and
+selects all active mutations of those files after the reference checkpoint
+as roots $B$. It alternates forward expansion through file and result edges
+until neither adds a call. In Figure~\ref{fig:dependency-closure}, a report
+for f selects E3 and E4; file effects lead to E6, and E3's reused result
+leads to E7, whose output E8 reads. The resulting
+$S=\{\mathrm{E3},\mathrm{E4},\mathrm{E6},\mathrm{E7},\mathrm{E8}\}$
+preserves independent E5 and captures the chain across both graphs.
+The controller derives one scope from the report; it does not enumerate
+faulty-step candidates or use task-test success to choose where to stop.
 
-$C(f)$ is the least transitive descendant closure of $f$ among active steps. It
-may contain steps that are separated in time by
-independent work.  Temporal rollback instead selects the contiguous suffix
-$\{s_i \mid i\geq f\}$, regardless of whether each later step depends on $f$.
+\textbf{Checking recovery before model continuation.}
+The filesystem controller supplies compatible pre-mutation versions for
+overlapping paths written or deleted by $S$
+(Section~\ref{sec:userspace-fs}). Before application, the runtime freezes
+the graph, active call/result identifiers, and expected saved file entries.
+It applies the plan in an isolated branch and checks for residual selected
+calls, visible results, dangling dependencies, and mismatched file state.
+Reported files must match the reference checkpoint; retained entries and
+the lower baseline must remain unchanged. Missing history, incompatible
+versions, or a failed check make recovery inconclusive. After a clean trial,
+the runtime verifies that the history has not changed, applies the same
+frozen plan, and repeats the audit before model continuation.
+The official task verifier evaluates subsequent repairs separately.
 
-
-\subsection{Object-Aware Reconstruction}
+\subsection{Filesystem Recovery via User-Space Control}
+\label{sec:userspace-fs}
+\label{sec:version-retention}
 \label{sec:selective-reconstruction}
+The selected calls can require a combination of file states absent from
+every checkpoint. The user-space controller in \system translates $S$ into
+object versions and restoration operations, using native Linux mount and
+file interfaces. OverlayFS supplies the merged view and copy-on-write
+behavior; the controller manages version history, checkpoint lifetimes,
+and selective restoration.
 
-\textbf{Target version.}
-Computing $C(f)$ identifies which effects should no longer contribute to the
-speculative state, but removing their latest writes is not sufficient when the
-same object has been modified repeatedly.  Recovery must instead reconstruct
-the version that would remain after excluding the selected recovery subgraph.
+\textbf{Retaining history via changed entries.}
+Figure~\ref{fig:version-capture} separates incremental object history from
+explicit checkpoints. Each logical recovery point references its parent
+and records changed paths, contents, metadata, and deletion state;
+unchanged state reuses its existing version. Immutable contents are shared
+in the version store, while the active upper keeps separate writable
+copies. E3 and E4 add f1 and f2; E5 adds g1 without copying earlier versions.
+Recovery follows parent references to retrieve selected objects, applying
+deltas where needed. A complete historical tree is materialized only when
+requested, avoiding repeated directory cloning and a new mounted
+checkpoint for every call.
 
-Let $W(C)$ denote the objects written or deleted by steps in $C(f)$.  For each
-target in $W(C)$, recovery obtains from $H$ a historical state that predates its
-earliest selected effect.  The retained active history is then considered
-against the selected targets so that later independent state is not discarded
-solely because it occurs after the failed step.
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\linewidth]{figures/design-workflow/AgentTX-Version-Capture.pdf}
+\caption{\textbf{Incremental history and explicit checkpoint creation.}
+\small\emph{Changed entries extend object history. An explicit checkpoint
+retains the old read-only view and starts a fresh writable upper; retained
+mount references are released at commit or close. Solid arrows show flow;
+dashed arrows associate saved file state with history records.}}
+\label{fig:version-capture}
+\end{figure}
 
-\textbf{Retained overlap.}
-A retained effect can nevertheless conflict with selective reconstruction.  If
-a retained active effect overlaps a target in $W(C)$ and the model cannot
-establish a supported reconstruction, recovery rejects the operation rather
-than guessing a merge.  This fail-closed rule trades availability for the
-following safety invariant:
+\textbf{Managing checkpoints via retained mounts.}
+For an explicit storage checkpoint, the caller quiesces writers. The
+controller makes the current view read-only, retains a mount reference,
+detaches the view, and mounts a fresh writable upper over the frozen layers.
+In Figure~\ref{fig:version-capture}, checkpoint C1 references U0 and L
+after E5, and execution continues in U1. Retaining the mount defers
+superblock destruction to commit or close, while file data stay in their
+existing layers. Section~\ref{sec:eval-file-commit} measures checkpoint
+latency and the complete workflow, including reference release and cleanup.
 
-\textbf{Recovery guarantee.}
-After successful recovery within the stated identity and reconstruction
-contract, no write or deletion from $C(f)$ remains visible. Every supported,
-non-overlapping retained effect remains visible in the speculative view.
+\textbf{Reconstructing state via compatible object versions.}
+The controller groups overlapping paths mutated by $S$, placing a selected
+directory and its children together. For each group, it resolves the
+nearest compatible saved state before its earliest selected mutation and
+rejects retained mutations that overlap a group after its earliest selected
+mutation. Earlier retained writes remain in that group's saved state.
+Groups may use different
+historical versions; paths outside them retain their current state.
+In Figure~\ref{fig:design-workflow}, f comes from V0 before E3, h from V1
+before E6, and p from V2 before E7. V0 has correct f0 but predates g1;
+V1 and V2 contain g1 together with affected f2. Selecting individual
+entries preserves the required f0/g1 combination.
 
-Only after reconstruction succeeds are the selected ledger nodes marked as
-rolled back.  Reconstruction therefore changes the workspace by causal
-membership rather than restoring a complete temporal snapshot.  Unreachable
-historical states may then be reclaimed.
+After isolated validation, the runtime checks the frozen history signature,
+stops the worker, and applies the same $S$ and saved versions in the live
+session. It restores the contents, metadata,
+and deletion state of each group in the upperdir. Removing an upper entry
+exposes its lower version or leaves the path absent. Removing f2 and the
+whiteout hiding h therefore exposes f0 and h0; removing p1 makes p absent,
+while independent g1 stays in $U$. The runtime refreshes mount scaffolding
+and filesystem tracking without replaying retained commands, then applies
+the same selection to agent context.
 
-
-\subsection{Agent-Context Reconstruction}
+\subsection{Context Synchronization via Shared Call Identifiers}
 \label{sec:context-reconstruction}
+Recovery also removes observations of withdrawn effects
+from the next model request. Shared identifiers let \system apply the same
+$S$ to file-effect records and agent-visible call/result pairs, retaining
+independent observations from partially withdrawn turns.
 
-\textbf{Message association.}
-$M$ groups each tool request and result into a span associated with its ledger
-step. If a later request copies a value from an earlier result, the runtime adds
-that relation to $P_i$, even when the value never enters the filesystem.
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=\linewidth]{figures/design-workflow/AgentTX-Design-Workflow.pdf}
+\caption{\textbf{Applying one rollback set to files and agent context.}
+\small\emph{Blue cells select saved states for f, h, and p over shared
+lower $L$; current g1 remains active. The f0/g1 combination appears in no
+saved row. The same $S$ removes selected context pairs and retains E5/r5.
+The dashed frame denotes the isolated residue audit; WH is a whiteout and
+$\varnothing$ denotes absence.}}
+\label{fig:design-workflow}
+\end{figure}
 
-\textbf{Shared recovery set.}
-The closure $C(f)$ follows both filesystem and message dependencies to a fixed
-point. The runtime removes the filesystem effects and message spans of exactly
-those steps, plus stale recovery-control messages, while retaining independent
-steps on both sides of the failure.
+After restoration succeeds, selected ledger steps and their call/result
+spans become inactive, with full records retained for audit. In the mixed
+turn in Figure~\ref{fig:design-workflow}, withdrawing E6--E8 preserves
+E5/r5, matching the retained g1 update. Turns with no surviving calls
+are omitted. The native tool-call log filters assistant call lists and
+their matching results; recovery removes stale control messages and adds
+a notice describing retained and withdrawn effects.
 
-\textbf{Reconstructed view.}
-The next model request is assembled only from active spans and an authoritative
-notice that identifies retained and invalidated effects. The reconstructed
-workspace and model-visible history therefore describe the same survivor set.
-Hidden provider state is outside this guarantee; black-box agents receive a
-retained-effects manifest instead of an in-place message rewrite.
+System and task messages, surviving pairs, and the recovery notice form
+the next model request. If older history is summarized to meet the context
+budget, summaries are rebuilt from active spans so withdrawn results do
+not reappear through compaction. Saving the ledger and conversation
+together in session metadata keeps subsequent execution tied to the same
+recovery decision.
 
-\section{AgentTX Implementation}
-\label{sec:design}
+\subsection{Correctness of Selective Recovery}
+\label{sec:recovery-correctness}
+Let $F$ be the normalized files named by the user, $c$ the reference
+checkpoint, and $X_c$ its filesystem state. Let $H$ be the finite active
+history, $G$ the union of recorded file and result edges, $W_i$ the mutation
+footprint of $E_i$, and $V_i$ its pre-call saved versions. Write
+$W(A)=\bigcup_{E_i\in A}W_i$. Edges point forward in call order. Footprints include
+contents, supported metadata, deletions, related paths, and known aliases;
+$\bowtie$ denotes footprint overlap. Calls execute serially over a fixed
+lower baseline, with no untracked writers during recovery. Saved versions
+faithfully represent this history, and file effects and call/result records
+share identifiers. To cover actual propagation, $G$ must contain all true
+dependencies within this managed state. State equality covers contents,
+supported metadata, presence, and active call/result records.
+Distinctive-string matching alone does not establish capture completeness.
 
-AgentTX maps each model component to a Linux mechanism. A shared
-OverlayFS view keeps the trajectory in $V$; effect capture constructs $L$; the
-version store and object catalog preserve $H$; a ledger-bound conversation log
-maintains $M$. Together, these mechanisms preserve trajectory-wide speculation
-while restricting rollback to a dependency-defined effect subgraph. We follow
-this path from execution through fault localization to workspace and context
-recovery, then describe performance optimizations.
+Algorithm~\ref{alg:causal-rollback} computes the report's scope and applies
+it. $\operatorname{Audit}$ checks frozen expected versions, checkpoint
+files, active identifiers, retained entries, and the lower baseline as
+described in Section~\ref{sec:rollback-set}. Its acceptance condition is
+independent of the original task's test outcome.
+Write $Z=(X,C,\operatorname{Active}(H))$. The fixed transformation $T_S$
+restores each group from $V_{m(p)}$, projects records onto $R$, and marks
+$S$ inactive. $\operatorname{Fresh}(A)$ checks the frozen history signature;
+$\bot$ denotes rejection or inconclusive recovery.
 
-\subsection{Runtime Architecture and Continuous Speculation}
+\begin{algorithm}[H]
+\caption{File-scoped recovery}
+\label{alg:causal-rollback}
+\footnotesize
+\textbf{Input:} $F,c,H,G,V,Z$
+\begin{enumerate}[label=\arabic*:,ref=\arabic*,leftmargin=1.7em,labelsep=.4em,topsep=2pt,itemsep=0pt,parsep=0pt]
+\item $B\gets\{E_i\in H\mid i>c\ \land\ W_i\bowtie F\}$ \label{algline:file-roots}
+\item \textbf{if} $B=\varnothing$ \textbf{return} $\bot$
+\item $S\gets\operatorname{Reach}_G(B)$ \label{algline:closure-start}\label{algline:closure-end}
+\item $R\gets H\setminus S$;
+$\mathcal{P}\gets\operatorname{OverlapGroups}(W(S))$
+\item $m(p)\gets\min\{i\mid E_i\in S,\ W_i\bowtie p\}$, $p\in\mathcal{P}$
+\item \textbf{if} $\exists p\in\mathcal{P},E_j\in R:\ j>m(p)\land W_j\bowtie p$ \textbf{return} $\bot$ \label{algline:conflict}
+\item $A\gets\operatorname{Freeze}(F,c,H,G,V,Z,S)$
+\item $Z_t\gets T_S(\operatorname{Clone}(Z))$ \label{algline:restore}\label{algline:context}
+\item \textbf{if} $\neg\operatorname{Audit}(Z_t,A)\lor\neg\operatorname{Fresh}(A)$ \textbf{return} $\bot$
+\item $Z\gets T_S(Z)$
+\item \textbf{return} $(Z,S,\operatorname{Audit}(Z,A))$
+\end{enumerate}
+\end{algorithm}
 
-\textbf{Workspace construction.}
-For each tool call $T_i$, AgentTX selects the project baseline as the read-only
-\texttt{lowerdir}, creates the session's writable \texttt{upperdir}, and
-allocates the OverlayFS \texttt{workdir} and \texttt{merged} mount point.  The
-command runs against \texttt{merged}, not the host project.
+\textbf{Proposition 1 (file-scope rollback consistency).}
+Under the assumptions above, an accepted recovery removes every call
+reachable from $B$, preserves the retained history $R$, and satisfies
+\[
+  X^{+}|_F=X_c|_F,\qquad
+  C^{+}=\operatorname{Project}(C,R).
+\]
+Filesystem state outside the restored groups is unchanged. Retained calls
+have no dependency on the withdrawn scope in the covered dependency graph.
 
-OverlayFS resolves reads against the upper layer and then the baseline.  A
-write to a lower object triggers copy-up, a new object enters the upper layer,
-and deletion creates a whiteout.  The kernel uses \texttt{workdir} for internal
-bookkeeping.  AgentTX configures these directories and controls their lifetime;
-OverlayFS performs lookup, copy-up, and whiteout operations.
+\emph{Proof.}
+The reachability computation starts from every post-checkpoint mutation
+of $F$. Each strict closure expansion adds a call, reaching the least fixed
+point $S=\operatorname{Reach}_G(B)$. Hence no edge leaves $S$ for $R$.
+If $G$ covers the true dependencies, every call depending on the reported
+mutations is withdrawn. A retained call cannot consume a withdrawn file
+version or result, since that dependency would place it in $S$.
 
-\textbf{Cross-call state.}
-All calls in a session reuse one \trycmd \texttt{-N} upper layer. Later calls
-therefore observe earlier provisional effects, while the base workspace remains
-unchanged.
-The launcher synchronizes \texttt{\$PWD} with the protected workspace so the
-process working directory and environment refer to the same view.
+For a restored group $p$, no selected mutation precedes $m(p)$.
+The saved state $V_{m(p)}|_p$ therefore includes all earlier retained writes.
+Line~\ref{algline:conflict} excludes later retained mutations of $p$;
+restoring that saved state yields the group's state with the selected
+mutations removed. The groups do not overlap, so their assignments commute.
+Outside these groups, no selected call mutates the managed state, which
+therefore stays unchanged. Together, these facts preserve the filesystem
+state of retained calls in their original order. Every mutation of $F$
+after $c$ belongs to $B$, so no such mutation survives and
+$X^{+}|_F=X_c|_F$. Projection removes exactly the corresponding call/result
+pairs and preserves those of $R$. The frozen audit checks these invariants
+before the agent resumes.
 
-The runtime now has one call's effects inside the shared trajectory, but not
-their cross-call dependencies. Ledger construction adds the edges that define
-the recoverable subgraph.
+\textbf{Corollary (idempotence of a fixed plan).}
+Let $Z=(X,C,\operatorname{Active}(H))$ and let $T_S$ apply the frozen
+saved versions, inactive marks, and record projection. Reassigning the same
+versions and projecting onto $R$ twice leaves the managed state unchanged:
+$T_S(T_S(Z))=T_S(Z)$. Recovery notices and audit counters are outside
+this state equality; the API rejects stale plans instead of recomputing
+their scope during application.
 
-\subsection{Effect Capture and Ledger Construction}
+This proves consistency of the requested rollback, conditional on capture
+coverage. It neither identifies an upstream mistake outside the reported
+scope nor proves that the original task is solved. A semantically valid
+checkpoint restores that validity for the reported files; subsequent task
+completion is checked separately.
 
-\textbf{Mutation effects.}
-AgentTX fingerprints the unmounted upper layer before and after each command.
-Content and metadata fingerprints capture writes, chmod, chown, touch, empty
-directories, symlinks, and deletions.  OverlayFS character-device and
-\texttt{.wh.*} whiteouts are both normalized to $D$ effects.
+\subsection{Implementation}
+\label{sec:implementation}
+\system decouples recovery policy and agent-context synchronization from
+the backing filesystem. A shared user-space controller manages history,
+checkpoints, and restoration through native Linux interfaces over
+OverlayFS. Figure~\ref{fig:implementation} shows two implementations:
+Ext4 uses ordinary file copying, while XFS uses reflink to share unchanged
+data blocks between distinct versions. Support for additional backing
+filesystems is concentrated in storage operations, allowing the dependency
+graph, rollback selection, and agent integration to be reused.
 
-\textbf{Observation effects.}
-AgentTX uses \texttt{strace}~\cite{strace} to capture successful reads and
-ENOENT/ENOTDIR lookups.  The parser follows subprocess creation and working
-directory changes.  A failed trace or parse aborts the call unless observation
-is explicitly disabled.  Trusted tools may instead declare effects, making the
-declaration part of the trusted computing base.
-
-\textbf{Path resolution and coverage.}
-The parser resolves supported pathname operations relative to the current
-directory or a known file-descriptor origin.  It retains both requested and
-resolved names when a symlink changes the path.  A non-\texttt{AT\_FDCWD}
-operation without a known descriptor origin fails closed.  Modeled Linux
-pathname syscalls define the coverage boundary; the trace does not prove that
-every possible filesystem access was observed.
-
-\textbf{Ledger construction.}
-At command return, AgentTX merges the observed $R$ and $N$ effects with the
-derived $W$ and $D$ effects.  It normalizes paths and supported identities,
-preserves observable order within the call, and appends one record $E_i$.
-The ledger then compares $E_i$ with active earlier records using the rules in
-Section~\ref{sec:effect-dag}.  Unsupported identities remain unknown rather
-than receiving dependencies inferred from command text.
-
-\subsection{Historical Versions and Object Identity}
-
-\textbf{Version store.}
-Before step $i$, the layer store records \texttt{before\_i}; after the call, it
-records the resulting upper-layer state as $V_i$.  Regular-file contents are
-stored as immutable content-addressed blobs and linked into snapshots.  Native
-whiteouts, directory metadata, and mode-000 trees are preserved.  These states
-provide the pre-effect versions required by Section~\ref{sec:selective-reconstruction}.
-
-\textbf{Namespace normalization.}
-AgentTX treats ancestor-related paths as overlapping and retains lexical and
-resolved names for supported symlink accesses.  A rename contributes a delete
-at the old name and a create at the new name.  These rules cover namespace
-relations that can be established from the observed operation.
-
-\textbf{Hard-link identity.}
-The active OverlayFS path enables \texttt{index=on} to preserve hard-link
-visibility during live copy-up.  A persisted object catalog connects accesses
-through known sibling names and records tested upper-created link groups.
-Recovery expands a known alias group before checking overlap or reconstructing
-an object.
-
-\textbf{Identity boundary.}
-AgentTX promotes a hard-link relation only when the substrate or upper-layer
-materializer verifies it.  Bind mounts, external aliases, arbitrary generation
-changes, and general multi-object identity remain outside the contract.  An
-operation that requires one of these relations fails closed.
-
-\subsection{Fault Localization and Recovery Planning}
-
-\textbf{Failure observation.}
-A failed verifier establishes that the current view is invalid, but does not
-identify the faulty step. AgentTX records the failed check as a ledger step and
-uses its observed dependencies to find earlier active steps that changed state.
-The search excludes committed steps and, when available, steps before the last
-passing check. Dependency distance and diagnostic references rank candidates;
-neither constitutes proof that a candidate is the fault's origin.
-
-\textbf{Counterfactual checks.}
-For each candidate, AgentTX forks the speculative view, removes the candidate
-and its dependents, and reruns the same verifier in the fork. It can also test
-candidate groups to handle interacting faults. Among plans
-that pass within the probe budget, it selects one that discards the least
-active work, with conversation loss as a secondary cost. A passing check
-establishes a sufficient recovery plan for that verifier, not a unique root
-cause. If no plan passes, localization is inconclusive and the causal path
-does not change the live view. The real-workload causal evaluation disables
-optional coarse fallback so an inconclusive search cannot count as causal
-recovery.
-
-\subsection{Causal Reconstruction}
-
-\textbf{Recovery plan.}
-AgentTX applies a verified plan to the live view only after counterfactual
-checks finish. For its selected root steps, it alternates ledger and
-conversation expansion until the recovery set reaches a fixed point. It
-collects objects written or deleted by that unified closure, expands known
-alias groups, and chooses the version preceding each object's earliest
-selected effect.
-
-\textbf{Retained-state check.}
-The runtime compares every target with active effects outside the closure.  A
-non-overlapping retained effect can survive.  An overlap without a supported
-object-level reconstruction rejects recovery before the speculative view is
-changed.
-
-\textbf{Reconstruction.}
-AgentTX builds a fresh upper generation from the selected historical versions
-and rebases retained state outside the closure onto it. It validates every
-affected target before swapping the generation into the live session. Ledger
-nodes become rolled back only after the swap succeeds. Recovery reconstructs
-the view from effect history; it does not replay the trajectory.
-
-\subsection{Conversation Reconstruction}
-
-\textbf{Ledger-bound spans.}
-AgentTX persists each native-agent tool request and result as a call span bound
-to its ledger step. The conversation log also records message dependencies when
-a later tool request copies a distinctive value from an earlier result.
-
-\textbf{Synchronized rewind.}
-Workspace reconstruction and conversation rewind consume the same fixed-point
-recovery set. After reconstruction succeeds, the runtime invalidates the
-corresponding spans and stale control messages, then rebuilds the next provider
-request from active spans.
-
-\textbf{Recovery handoff.}
-Native tool-calling agents resume from the reconstructed message list plus a
-ledger-derived notice naming retained and invalidated state. External black-box
-agents cannot expose mutable provider history, so they resume from a compact
-retained-effects manifest. AgentTX does not claim to restore hidden reasoning
-state or process memory.
-
-\subsection{Performance Engineering}
-
-\textbf{Persistent execution.}
-A Python worker exchanges length-prefixed requests inside one semisolate.  This
-amortizes namespace and overlay setup across a long trajectory.  If the worker
-dies, the current request uses the one-shot path and the next request starts a
-new worker.  Worker reuse does not change recovery semantics.
-
-\textbf{Incremental history.}
-After the initial snapshot, AgentTX clones the previous snapshot and replays
-only paths changed by the latest call.  Content-addressed blobs deduplicate
-regular-file contents across versions.  These optimizations reduce history
-maintenance while preserving the same $H$ states used by reconstruction.
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{figures/design-workflow/AgentTX-Implementation.pdf}
+\caption{\textbf{Ext4 and XFS implementations.}
+Shared recovery logic with two storage backends.}
+\label{fig:implementation}
+\end{figure}
 
 \section{Evaluation}
 \label{sec:eval}
 
-Our evaluation asks four questions, separating controlled recovery behavior,
-real-agent task outcomes, component contributions, and runtime overhead:
-\begin{itemize}
-  \item[\textbf{RQ1}] On matched multi-turn workloads, does AgentTX remove
-        invalid effects, retain independent work, and reduce repair cost
-        while keeping workspace and context consistent
-        (Section~\ref{sec:eval-causal})?
-  \item[\textbf{RQ2}] On official coding and terminal tasks, how do recovery
-        policies affect task success, total model tokens, and end-to-end time
-        (Section~\ref{sec:eval-agent})?
-  \item[\textbf{RQ3}] Which dependency-capture, object-identity, reconstruction,
-        context, and execution mechanisms explain correctness and cost
-        (Section~\ref{sec:eval-mechanisms})?
-  \item[\textbf{RQ4}] What execution, tracing, history-storage, and recovery
-        overheads does AgentTX introduce as trajectories grow
-        (Section~\ref{sec:eval-runtime})?
+Our evaluation aims to answer the following questions:
+\begin{itemize}[leftmargin=0.9em,labelsep=0.35em]
+  \item Can \system retain work in microbenchmarks?~(\S\ref{sec:eval-causal})
+  \item Can \system reduce real-world token use?~(\S\ref{sec:eval-agent})
+  \item Can \system reduce real-world workflow time?~(\S\ref{sec:eval-time})
+  \item Can \system reduce agent-execution time?~(\S\ref{sec:eval-mechanisms})
+  \item Can \system limit replay and recovery costs?~(\S\ref{sec:eval-replay})
+  \item Can \system keep filesystem overhead low?~(\S\ref{sec:eval-file-commit})
 \end{itemize}
 
-\subsection{Setup and Methodology}
-
-\subsection{RQ1: Controlled Recovery and Repair Cost}
-\label{sec:eval-causal}
-
-\subsection{RQ2: Real-World Workloads}
-\label{sec:eval-agent}
-
-\textbf{SWE-agent on SWE-Bench Lite.}
-We evaluate all 300 SWE-Bench Lite tasks with six recovery policies,
-one run per task and policy, using SWE-agent with GPT-5.6 Luna.
-The campaign has 1,800 planned cells: 1,799 have complete results and one
-clean-reference cell ends in a worker timeout. A successful run passes the
-target \texttt{FAIL\_TO\_PASS} tests and the applicable recovery-state,
-completion, and commit checks. AgentTX, ideal recovery, and the clean reference
-use compact context; no rollback, temporal checkpoints, and whole-branch
-rollback use full context. All token measurements below use API-reported
-usage and include both the main repair session and any separate replay session.
-
-\begin{figure*}[t]
+\begin{figure*}[!t]
   \centering
-  \includegraphics[width=\textwidth]{FIG-SWEagent-SWEbench-Results.pdf}
-  \caption{\textbf{Causal recovery on the full SWE-agent / SWE-Bench Lite campaign.}
-  \small\emph{(a) Success over 300 planned tasks per policy.
-  (b) Mean main-session and replay API tokens over all complete runs, including
-  task failures (299 runs for Clean, 300 for each other policy).
-  (c) Total token savings on matched successful tasks with 95\% task-paired
-  bootstrap intervals. (d) The empirical distribution of per-task Causal/control
-  token ratios on the same successful pairs; ratios below one favor Causal.}}
-  \label{fig:sweagent-full}
+  \includegraphics[width=\linewidth]{FIG-System-Micro-Recovery.pdf}
+  \caption{\textbf{Recovery scope on fixed command trajectories.}
+  \small\emph{Top: valid calls discarded. Bottom: total calls withdrawn.
+  Columns vary trajectory length, fault position, and the fraction of later
+  calls affected. Each sweep point averages ten cases with three
+  repetitions each; bands show 95\% case-bootstrap intervals.
+  Recovery completeness is reported in Table~\ref{tab:controlled-policy-results}.}}
+  \label{fig:system-micro-recovery}
 \end{figure*}
 
-\begin{table}[t]
-\centering
-\caption{\textbf{SWE-agent recovery on all 300 SWE-Bench Lite tasks.}
-\small\emph{Success uses all 300 planned tasks as the denominator. Mean
-tokens include successful and failed complete runs, and include replay.
-The clean reference has 299 complete runs and one worker timeout.}}
-\label{tab:swe-full-results}
-\scriptsize
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{lrrr}
-\toprule
-Policy & Success & Mean tokens & Replay tokens \\
- & /300 & per complete run & all complete runs \\
-\midrule
-AgentTX & 285 (95.00\%) & 135,004 & 0 \\
-Ideal recovery & 289 (96.33\%) & 133,251 & 0 \\
-Clean reference & 273 (91.00\%) & 154,355 & 0 \\
-No rollback & 282 (94.00\%) & 311,673 & 0 \\
-Temporal checkpoint & 284 (94.67\%) & 159,201 & 1,954,855 \\
-Whole-branch rollback & 243 (81.00\%) & 160,053 & 2,898,444 \\
-\bottomrule
-\end{tabular}
-\end{table}
+\subsection{Setup and Methodology}
+\label{sec:eval-setup}
 
-Figure~\ref{fig:sweagent-full} and Table~\ref{tab:swe-full-results} report
-task outcomes and measured model cost.
-AgentTX succeeds on 285 tasks, compared with 282 for no rollback, 284 for
-temporal checkpoints, and 243 for whole-branch rollback. The ideal recovery
-reference succeeds on 289 tasks. Across all complete runs, AgentTX uses
-40,501,138 tokens, compared with 93,502,009, 47,760,194, and 48,015,838 for
-the three controls, respectively. The clean worker timeout additionally
-incurs 1,958,229 known tokens from returned API responses; usage for its last
-in-flight request is unknown and is excluded from the complete-run mean.
+\textbf{Testbed.}
+We run the experiments on a server with two 32-core Intel Xeon Gold 6530
+CPUs and 128\,GiB DRAM, running Ubuntu 24.04 with Linux kernel
+6.8.0-147. Recovery workloads execute in containers using OverlayFS over
+Ext4, with \texttt{strace} recording file accesses.
 
-\begin{table}[t]
-\centering
-\caption{\textbf{Token savings from causal recovery on matched successful tasks.}
-\small\emph{Each row pairs the same tasks successfully completed by AgentTX
-and the indicated policy. Total savings are $1-\sum T_{\mathrm{AgentTX}}/
-\sum T_{\mathrm{control}}$; median savings are the median of per-task savings.
-Both include main and replay API tokens.}}
-\label{tab:swe-paired-savings}
-\scriptsize
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{lrrr}
-\toprule
-Comparison & Tasks & Total savings & Median savings \\
-\midrule
-No rollback & 275 & 58.43\% & 55.60\% \\
-Temporal checkpoint & 278 & 17.55\% & 18.91\% \\
-Whole-branch rollback & 239 & 27.86\% & 32.31\% \\
-Ideal recovery & 282 & 1.47\% & $-2.25$\% \\
-Clean reference & 264 & 14.38\% & 11.36\% \\
-\bottomrule
-\end{tabular}
-\end{table}
+\textbf{Baselines.}
+We compare \system with Crab, DeltaBox, BranchFS, and \trycmd, implementing their
+Table~\ref{tab:granularity} recovery scopes on the common OverlayFS runtime
+as in Section~\ref{sec:motivation-observations}.
+For storage overhead, we compare \system with OverlayFS, \trycmd,
+DeltaBox~\cite{deltabox}, and BranchFS~\cite{branchfs} on Ext4 and XFS, using the native filesystem
+as the direct-update reference.
 
-\textbf{Recovery cost.}
-On matched successful tasks, causal recovery reduces total model tokens by
-58.43\% relative to no rollback, 17.55\% relative to temporal checkpoints,
-and 27.86\% relative to whole-branch rollback
-(Table~\ref{tab:swe-paired-savings}). The respective 95\% task-paired
-bootstrap intervals are 53.42--62.82\%, 11.20--23.48\%, and 22.70--32.91\%.
-The savings persist on the fixed 212 tasks completed successfully by all six
-policies: 60.02\%, 17.25\%, and 26.64\%, respectively. Removing the single
-largest absolute token-difference task in each comparison as a sensitivity
-check leaves savings of 58.07\%, 15.97\%, and 27.20\%; the primary estimates
-retain every matched task. Thus the observed cost reduction is not explained
-by one extreme task. AgentTX requires no replay session; temporal checkpoints
-and whole-branch rollback incur 1,954,855 and 2,898,444 replay tokens across
-their complete runs.
+\textbf{Methodology.}
+Scripts execute the fixed command trajectories, repeating each case three
+times. Real-world experiments use SWE-agent and Codex on
+SWE-Bench Lite~\cite{swebench} and Terminal-Bench~\cite{tbench}.
+Both agents use GPT-5.6 Luna with maximum reasoning effort. \system uses
+compact agent context, while the real-world competitors use full context.
 
-\subsection{RQ3: Breakdown}
+\textbf{Recovery input and measurement scope.}
+The file-report protocol gives \system the user-specified file and a
+reference checkpoint, defaulting to the committed boundary. Controls retain
+exact step hints; Crab also receives the affected turns. The recovery
+measurements below were collected with the earlier verifier-guided selector.
+They measure recovery scope and cost; a full rerun with file reports is
+pending.
+
+\subsection{RQ1: Microbenchmarks}
+\label{sec:eval-causal}
+
+We reuse the 400 fixed trajectories from
+Section~\ref{sec:motivation-observations}: 100 vary trajectory length, 90
+fault position, and 210 the fraction of later calls affected by the fault.
+Scripts execute each trajectory under \system, Crab, DeltaBox,
+BranchFS, and \trycmd, with three repetitions per method, totaling
+6,000 runs. Each run executes the trajectory and
+applies recovery using the shared runtime. \system is not given the injected fault
+step or affected-call set. These recorded runs use the earlier selector
+with captured dependencies and verifier feedback, while the competitors attain the best
+valid-work retention permitted by their policies, with exact fault-location
+hints where needed.
+Injection records supply ground truth for scoring error
+removal and independent-work retention. These checks run at the recovery
+boundary without model calls, independently of subsequent task success.
+
+\input{tables/rq1-fixed-trajectories}
+
+\textbf{Error removal.}
+Table~\ref{tab:controlled-policy-results} shows that \system, Crab,
+DeltaBox, and BranchFS remove all affected calls in every run, giving
+1,200 complete recoveries per method. \trycmd removes 17.03\% of affected
+calls on average and completes recovery in 30 of 1,200 runs (2.5\%).
+
+\textbf{Independent work retained.}
+Table~\ref{tab:controlled-policy-results} shows that \system retains all
+independent work. Crab, DeltaBox, and BranchFS
+retain 45.98\%, 43.10\%, and 0\%, respectively. They discard an average
+of 38.12, 48.18, and 82.08 valid calls per run, compared with zero for
+\system. Including affected calls, the corresponding withdrawal counts
+are 56.04, 66.10, and 100.00, versus 17.93 for \system.
+\trycmd retains all independent work but withdraws only one call per run,
+leaving dependent effects in the other 97.5\% of runs.
+Selecting affected calls preserves independent progress that the other
+complete-recovery policies discard.
+
+\textbf{Effect of trajectory structure.}
+In Figure~\ref{fig:system-micro-recovery}(a,d), trajectory length grows
+while the affected set stays at four calls. At 160 calls, Crab,
+DeltaBox, and BranchFS withdraw 60.8, 120, and 160 calls,
+while \system withdraws four. In Figure~\ref{fig:system-micro-recovery}(b,e),
+moving the fault from 10\% to 90\% of a 160-call trajectory reduces
+the number of calls withdrawn by DeltaBox from 144 to 17; \system still
+withdraws four. In Figure~\ref{fig:system-micro-recovery}(c,f), the
+affected fraction increases in 80-call trajectories. The number withdrawn by \system grows
+from one to 60 calls as dependencies spread, while DeltaBox
+continues to withdraw 60. The top row shows that \system discards no
+independent calls throughout these sweeps. The \trycmd scope remains at one
+call even as the affected set grows.
+
+\subsection{RQ2: Real-World Token Cost}
+\label{sec:eval-agent}
+
+\textbf{Workloads and setup.}
+We evaluate all 300 SWE-Bench Lite tasks~\cite{swebench} and 241
+Terminal-Bench tasks~\cite{tbench} with SWE-agent and Codex under the settings
+in Section~\ref{sec:eval-setup}. Each run executes a scripted fault prefix,
+applies a recovery policy,
+regenerates discarded notes, and lets the agent complete the original task.
+These recorded runs use the earlier selector and hints described in
+Section~\ref{sec:eval-causal}; each injected-prefix call occupies its own
+turn. SWE injection targets gold-patch file paths, which can appear in the
+recovery handoff.
+
+Token comparisons use tasks that succeed
+under both methods and have complete costs; SWE \trycmd pairs use task-test
+success. We match tasks, images, model,
+fault seed, recovery contract, and budgets, pooling infrastructure variants
+for Crab and \trycmd. Token totals use API-reported usage, including replay and all
+recorded attempts. For token cost $C$, savings are
+$100(1-\sum C_{\mathrm{AgentTX}}/\sum C_{\mathrm{control}})$; 95\%
+intervals use 20,000 paired task-bootstrap samples within configuration
+strata.
+
+\input{tables/realworld-success}
+
+\textbf{Task outcomes.}
+Table~\ref{tab:swe-full-results} reports task success. With SWE-agent and
+Codex, respectively, \system's success rates are 95.0\% and 96.0\% on
+SWE-Bench Lite, and 86.3\% and 92.5\% on Terminal-Bench.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{FIG-Realworld-Token-Savings.pdf}
+  \caption{\textbf{Token totals and savings on control-specific matched tasks.}
+  \small\emph{Paired bars show total tokens on matched successful tasks;
+  $n$ counts pairs. Right labels give savings in millions (M) and percent.
+  Task sets differ between controls; token scales differ between panels.}}
+  \label{fig:realworld-token-savings}
+\end{figure}
+
+\textbf{Model cost.}
+Figure~\ref{fig:realworld-token-savings} shows that \system saves
+17.55--44.69\% relative to DeltaBox and 21.90--35.91\% relative
+to BranchFS across the four benchmark/agent combinations.
+Against Crab, savings are 22.77\%, 12.54\%, 27.36\%, and
+17.18\% on SWE/SWE-agent, SWE/Codex, TB/SWE-agent, and TB/Codex,
+respectively.
+For scale, the 175 TB/SWE-agent pairs against DeltaBox consume
+36.18 million AgentTX tokens versus 65.43 million control tokens, a
+44.69\% reduction.
+Against \trycmd, savings are 52.70\%, 52.12\%, 19.41\%, and 13.23\%
+on the same four benchmark/agent combinations, using 185, 226, 181,
+and 201 matched pairs, respectively.
+
+\textbf{Answer to RQ2.}
+Across SWE-Bench Lite and Terminal-Bench with both agents, \system
+reduces total token use on matched tasks by
+12.54--52.70\% across the evaluated controls.
+
+\subsection{RQ3: Real-World Workflow Time}
+\label{sec:eval-time}
+
+We measure workflow time on the same task pairs as
+Section~\ref{sec:eval-agent}, using the same cost-ratio formula for savings.
+Workflow time subtracts the entire localization stage, including initial
+error checks and candidate search and validation, overlapped with agent
+execution from recorded elapsed time. It retains setup, plan application,
+replay, model execution, and final verification across all attempts,
+excluding queue time.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{FIG-Realworld-Time-Savings.pdf}
+  \caption{\textbf{Workflow time and savings on matched tasks.}
+  \small\emph{Paired bars show mean workflow time on the same task pairs as
+  Figure~\ref{fig:realworld-token-savings}; $n$ counts pairs. Right labels
+  give mean seconds saved per task and percentage savings.}}
+  \label{fig:realworld-time-savings}
+\end{figure}
+
+Figure~\ref{fig:realworld-time-savings} shows that, relative to DeltaBox,
+mean time falls from 224.92\,s to 191.52\,s
+on SWE/SWE-agent, from 870.70\,s to 727.40\,s on TB/SWE-agent, and from
+755.19\,s to 679.28\,s on TB/Codex. These correspond to reductions of
+14.85\%, 16.46\%, and 10.05\%, respectively. On SWE/Codex, mean time falls from
+209.40\,s to 180.15\,s, a 13.97\% reduction.
+Relative to BranchFS, time falls by 45.93\%, 13.67\%, 24.84\%, and
+11.35\% on SWE/SWE-agent, SWE/Codex, TB/SWE-agent, and TB/Codex,
+respectively.
+Relative to Crab, AgentTX reduces mean time from 270.41 to
+176.23\,s on SWE/SWE-agent (34.83\%) and from
+181.48 to 180.29\,s on SWE/Codex (0.66\%). TB/SWE-agent and TB/Codex show mean
+reductions of 23.36\% and 8.75\%, respectively.
+Against \trycmd, mean time falls from 304.03 to 137.51\,s on SWE/SWE-agent,
+from 234.11 to 164.99\,s on SWE/Codex, from 931.83 to 707.61\,s on
+TB/SWE-agent, and from 704.91 to 656.11\,s on TB/Codex: reductions of
+54.77\%, 29.52\%, 24.06\%, and 6.92\%, respectively.
+
+\textbf{Answer to RQ3.}
+\system achieves lower mean workflow time in all 16 comparisons,
+with reductions of 0.66--54.77\% across the two benchmarks and agents.
+
+\subsection{Breakdown}
+\label{sec:eval-breakdown}
+
+Figure~\ref{fig:runtime-stage-cost} decomposes the matched runs and
+workflow time from Section~\ref{sec:eval-time} into agent execution,
+final verification, and setup/replay. Agent execution includes model
+calls and tool use; verification measures final task grading.
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=\linewidth]{FIG-Realworld-Stage-Cost.pdf}
+\caption{\textbf{Workflow-time breakdown on real tasks.}
+  \small\emph{Pairs and time accounting match
+  Figure~\ref{fig:realworld-time-savings}. Hatched bars show \system;
+  solid bars show the named competitor. Colors distinguish stages;
+  $n$ counts matched task pairs.}}
+  \label{fig:runtime-stage-cost}
+\end{figure}
+
+% Queue the wide storage figure early to place it alongside the RQ6 analysis.
+\begin{figure*}[!t]
+  \centering
+  \includegraphics[width=\linewidth]{FIG-RQ5-Storage.pdf}
+  \caption{\textbf{Filesystem costs.}
+  (a) Write I/O; (b) synced edit latency; (c) checkpoint latency;
+  (d) workflow time; (e) extra storage; (f) extra memory.
+  Axes in (a), (c), and (d) use log scales.
+  Bars show means with 95\% bootstrap intervals.}
+  \label{fig:rq5-storage}
+\end{figure*}
+
+\subsubsection{RQ4: Agent Execution}
 \label{sec:eval-mechanisms}
 
-\subsection{RQ4: Other Overheads}
-\label{sec:eval-runtime}
+On SWE-Bench Lite (Figure~\ref{fig:runtime-stage-cost}(a--b)),
+agent execution falls from 165.13 to 155.18\,s with SWE-agent and from
+169.56 to 159.60\,s with Codex, relative to DeltaBox. Against Crab,
+the SWE-agent execution stage falls from 238.99 to 140.86\,s,
+while SWE/Codex has similar
+execution times of 161.81 and 160.72\,s. Against \trycmd, agent execution
+falls from 279.73 to 102.60\,s with SWE-agent and from 219.00 to
+145.62\,s with Codex.
 
-\section{Discussion and Limitations}
+On Terminal-Bench (Figure~\ref{fig:runtime-stage-cost}(c--d)),
+agent execution accounts for most of the time saved relative to DeltaBox:
+it falls from 781.14 to 668.21\,s with SWE-agent and from 650.49 to
+585.63\,s with Codex. Against \trycmd, it falls from 875.33 to 653.27\,s
+with SWE-agent and from 652.11 to 562.18\,s with Codex.
+Across all sixteen comparisons, agent execution
+accounts for 74.6--92.3\% of \system workflow time.
 
-\textbf{Why not make causal rollback the default?}
-The active view uses OverlayFS \texttt{index=on}, which preserves hard-link
-visibility within the tested session~\cite{overlayfs}. Recovery expands
-verified pre-existing and upper-created alias groups before reconstruction.
-Causal recovery still fails closed
-for arbitrary multi-object topology, bind mounts, external aliases, and
-unsupported generation changes.
+\subsubsection{RQ5: Replay and Recovery}
+\label{sec:eval-replay}
 
-\textbf{Why trace instead of infer commands?}
-Command strings are not a reliable specification of transitive compiler, test,
-or script reads.  System-call tracing observes actual accesses but adds
-workload-dependent cost and remains Linux-specific. We therefore use the strace
-path for the main correctness and performance claims. In the measured 12-step
-comparison, it costs 25.60 ms/step versus 61.39 ms/step for the optional
-persistent eBPF backend. Both capture the same read and negative-lookup cases in
-this probe.
+\subsection{RQ6: Storage and Checkpoint Costs}
+\label{sec:eval-file-commit}
 
-The eBPF path remains a replaceable implementation,
-not a claim of lower overhead.  Neither tracer removes the need to define alias
-and unsupported-syscall semantics or repairs an inode relation already split by
-OverlayFS copy-up.
+Figure~\ref{fig:rq5-storage} compares \system, OverlayFS, BranchFS~\cite{branchfs},
+\trycmd~\cite{try-osdi26}, and the DeltaFS component of
+DeltaBox~\cite{deltabox} on Linux 6.8.0-147, using 4\,GiB Ext4 and
+reflink-enabled XFS volumes.
+Native Ext4 and XFS provide direct-update references.
+Partial-update tests perform five non-truncating 4\,KiB edits to a
+1\,MiB file, retaining the initial version and checkpointing after each
+edit. Block-device writes and edit latency include \texttt{syncfs} but
+exclude the subsequent checkpoint. The remaining tests use 100 target
+files and overwrite ten seed files, all 4\,KiB, before each of 1, 10,
+or 30 checkpoints. For \trycmd, checkpoint timing includes saving an
+environment, exiting, and reentering a new view.
+Workflow time covers setup, buffered writes, checkpoints, publication,
+and cleanup. We report twenty timing runs per configuration. Resource
+overhead is the difference in growth from initialization to just before
+publication between ten paired runs with and without checkpoints.
+Storage counts shared extents once; memory includes anonymous pages,
+file cache, and kernel allocations across all worker processes.
 
-\textbf{What state is outside the transaction?}
-The current AgentTX prototype places workspace-local filesystem effects and
-ledger-bound tool-call history inside its transaction state. Hidden provider reasoning,
-network requests, emails, package registries, cloud control planes, process
-memory, and terminal state remain outside the guarantee. These effects may be
-irreversible or require subsystem-specific compensation; systems that capture
-full process or session state are complementary to \system.
+Figure~\ref{fig:rq5-storage}(a--b) shows that XFS reduces the data
+copied for partial updates. On Ext4, \system writes 1,102.44\,KiB per
+edit because copy-up copies the original file; XFS reflink shares
+unchanged extents, reducing writes to 12.71\,KiB. Synced edit latency
+falls from 4.496 to 1.331\,ms. On XFS, OverlayFS and DeltaBox write
+12.71 and 12.73\,KiB with similar edit latency. Thus, the user-space
+controller preserves the data-sharing benefits of the backing filesystem.
 
-\textbf{What is outside the recovery scope?}
-AgentTX determines and reconstructs the surviving speculative state. Publishing
-that state to a user workspace, coordinating concurrent publishers, and making
-publication crash-consistent are separate concerns outside this paper.
+Figure~\ref{fig:rq5-storage}(c--d) shows the benefit of retaining mount
+references during checkpoint creation. Across the tested depths,
+\system takes 0.58--0.67\,ms per checkpoint, a 4.20--13.66$\times$
+speedup over OverlayFS. At thirty checkpoints, complete workflows take
+95.22\,ms on Ext4 and 99.22\,ms on XFS, reducing time by 30.8\% and
+30.5\% relative to OverlayFS, and by 79.8\% and 84.3\% relative to
+BranchFS. The corresponding \trycmd workflows take 14.159 and
+13.958\,s. DeltaBox has lower repeated-checkpoint costs, taking
+0.546 and 0.504\,ms per checkpoint at this depth on Ext4 and XFS.
 
-\textbf{How strong is the current evidence?}
-The native audit covers 20 successful trajectories and 638 turns, but only six
-turns pass the independence gate. The real-turn result is therefore a narrow
-counterfactual, not an end-to-end success study. Controlled motivation traces
-reach 128 tool-call steps, while failure/reload tests reach 256 steps. The
-matched strategy study uses 30 Codex cells and 25 native-SWEAgent cells per
-policy. It uses v8 for no rollback and retained v7 measurements for the other
-policies. The study therefore supports within-backend comparisons rather than paired
-protocol-version or cross-backend claims.
+Figure~\ref{fig:rq5-storage}(e--f) shows the resource cost of this
+optimization. At thirty checkpoints, \system uses 1,524\,KiB of extra
+storage on Ext4 and 1,284\,KiB on XFS, just 4\,KiB more than OverlayFS
+and DeltaBox for generation records. Extra memory is 2,760.4 and
+2,499.2\,KiB, respectively, about 1\,MiB above those two systems
+because retained mount references keep kernel metadata live.
+Both storage and memory remain below the corresponding BranchFS and
+\trycmd costs. The main tradeoff is therefore additional resident
+memory for faster checkpoints, with little extra storage.
 
-The historical application check uses six SWE-Bench Lite and Terminal-Bench
-tasks with one oracle-repair run per policy. It does not establish live-agent
-application success. The 300-task, six-policy SWE-agent campaign now has
-1,799 complete results and one clean-reference worker timeout. It measures
-live repair and recovery-contract success with target \texttt{FAIL\_TO\_PASS}
-tests, as reported in Section~\ref{sec:eval-agent}. The earlier
-live-agent control-plane probes remain seeded and use one model.
+\section{Discussion}
 
-\trycmd, BranchFS, YoloFS, and Waypoint run artifact-natively on all 400
-motivation manifests. \trycmd and BranchFS exercise native whole-unit discard;
-YoloFS and Waypoint exercise snapshot restoration. Waypoint runs in a
-privileged container, so these measurements do not support cross-environment
-latency claims. Sandlock builds on this host, but the kernel does not enable
-Landlock. Systems without a reusable recovery artifact are represented only by
-optimistic boundary semantics. We do not attribute those proxies to an
-external implementation.
+\textbf{Object identity and reconstruction.}
+OverlayFS \texttt{index=on} preserves session hard-link
+visibility~\cite{overlayfs}. Object identifiers and resolved paths link
+accesses in the dependency graph. For each affected group, reconstruction
+restores entries from the nearest compatible checkpoint preceding its earliest
+selected mutation while retaining independent changes.
+
+\textbf{Tracing backends.}
+Command strings can omit indirect reads, so \system uses \texttt{strace}.
+System-call tracing has workload-dependent cost and is Linux-specific.
+In a 12-step probe, \texttt{strace} and persistent eBPF capture the same reads
+and negative lookups, taking 25.60 and 61.39 ms/step, respectively.
+
+\textbf{Transaction state.}
+Transaction state covers workspace filesystem effects and tool-call history.
+Network effects need subsystem-specific compensation~\cite{sagas}; hidden
+provider state needs service support.
 
 \section{Related Work}
 
-AgentTX is closest to effect-capturing semisolates, agent-oriented filesystems,
-and checkpoint or branch runtimes. Its distinguishing recovery unit is a
-dependency-defined effect subgraph within one speculative trajectory. We compare
-that semantic choice using matched recovered states, while keeping runtime
-claims separate across host and container environments.
+\textbf{Isolation and state restoration.}
+\trycmd lets callers selectively apply or discard program effects; Sandlock
+confines effects in a copy-on-write directory~\cite{try-osdi26,sandlock}.
+YoloFS stages filesystem changes and supports travel to saved
+checkpoints~\cite{yolofs}.
+BranchFS provides nested branches with commit/abort~\cite{branchfs}.
+Waypoint restores files and
+processes~\cite{waypoint}; DeltaBox pairs DeltaFS layer switching with
+DeltaCR process restoration~\cite{deltabox}. \system selects completed calls
+to withdraw and combines compatible historical object versions with current
+independent updates. Foundations
+include transactional updates~\cite{valor,txfs}, crash-consistency
+testing~\cite{crashmonkey}, and record/replay~\cite{revirt,rr}.
 
-\textbf{Effect capture and semisolates.}
-\trycmd introduces unprivileged semisolates for opaque commands, including
-effect introspection, optional application, and stacking~\cite{try-osdi26}.
-Sandlock confines a single process run and makes its filesystem effects
-reversible through a copy-on-write work directory~\cite{sandlock}. \system uses
-\trycmd's mechanisms as its execution substrate. AgentTX extends this substrate
-from isolated calls to one speculative trajectory, then recovers a
-dependency-defined effect subgraph through historical reconstruction and
-context-aligned rollback.
+\textbf{Checkpoint decisions and agent continuation.}
+Crab selects resources and overlaps checkpoint capture with execution;
+RippleCP selects checkpoints to materialize~\cite{crab,ripplecp}.
+AgentRewind restores environment/context checkpoints and retains lessons;
+Rollback-Induced Reflection reuses lessons after environment
+restoration~\cite{agentrewind,rir}. Planarian restores local and supported
+remote state while retaining context~\cite{planarian}. LogAct recovers
+interrupted operations through intention/result logs~\cite{logact}.
 
-\textbf{Agent-native filesystems and branches.}
-YoloFS stages mutations, exposes snapshots, and uses progressive permission to
-improve agent/user control~\cite{yolofs}.  Its filesystem mediation and
-permission interface are broader than \system's current substrate.  BranchFS
-provides nested copy-on-write branch contexts with atomic leaf commit/abort and
-first-commit-wins coordination~\cite{branchfs}. These systems select snapshots
-or branches. AgentTX instead selects a dependency-defined effect subgraph
-inside one evolving trajectory.
+\textbf{Dependency-guided recovery.}
+Taser and RETRO repair attack effects while preserving legitimate
+work~\cite{taser,retro}; BackTracker explains intrusions~\cite{backtracker}.
+Provenance systems record dependencies~\cite{pass,hifi,camflow}; BEEP
+reduces excessive dependencies through execution partitioning~\cite{beep}.
+hS schedules dependent subprocesses; Cordon validates composed effects
+through result lineage before commit and discards transaction shadow state on
+abort~\cite{hs-osdi26,cordon}. revGo rolls back and replays channel operations; AquaMend
+compares action-graph recovery choices~\cite{revgo,aquamend}. \system uses
+file and returned-value dependencies to select calls within and across turns,
+preserving independent work within partially withdrawn turns.
+Starting from user-reported files, one set guides object restoration and
+call/result withdrawal, with an isolated residue audit before live changes.
 
-\textbf{Checkpoint and restore.}
-Waypoint combines filesystem deltas with process, memory, shell, and terminal
-state for branchable sessions~\cite{waypoint}.  DeltaBox accelerates complete
-sandbox checkpoint/rollback using incremental filesystem and process
-state~\cite{deltabox}.  Crab observes turn-level effects to avoid checkpoints
-that do not contain recovery-relevant state~\cite{crab}.  Their state coverage
-or checkpoint efficiency is complementary to \system.  \system instead answers
-which non-contiguous filesystem effects to remove after a failure has been
-identified.
-
-\textbf{Process checkpointing.}
-CRIU and DMTCP preserve complete process/session state for restart, migration,
-or debugging~\cite{criu,dmtcp}; their recovery unit is an application image,
-not a selected filesystem effect subgraph. AgentTX instead keeps the existing
-unmodified application interface, infers effects at opaque tool boundaries,
-and preserves valid later work after a selective failure.
-
-\textbf{Filesystem topology and tracing.}
-OverlayFS specifies copy-up, whiteout, and index semantics that determine when
-two pathnames still denote one object~\cite{overlayfs}.  System-call tracers
-such as \texttt{strace} observe accesses made by arbitrary descendants
-~\cite{strace}.  The resulting paths still need hierarchy, descriptor, and alias
-normalization.
-Our contribution connects that observation layer to a dependency ledger and a
-fail-closed reconstruction policy. A different tracer alone does not solve
-object identity or selective rollback.
-
-The surrounding systems literature exposes complementary boundaries.  MicroVM
-and userspace-kernel sandboxes study isolation cost~\cite{firecracker,gvisorcase},
-while provenance systems record whole-system data and control flow~\cite{camflow}.
-Kernel tracing work uses eBPF for low-overhead event capture and distributed
-path reconstruction~\cite{ebpfruntime,nahida}. These mechanisms can improve
-observation, but they do not select the rollback set or align model context with
-the reconstructed workspace.
+\textbf{Agent memory and derived-state repair.}
+Reflexion retains feedback; MemGPT manages information across context and memory
+tiers~\cite{reflexion,memgpt}. MemoRepair repairs summaries, cached outputs,
+and procedures through influence dependencies~\cite{memorepair}.
+\system synchronizes retained call/result history with filesystem state.
 
 \section{Conclusion}
 
-Long-running coding agents need a speculation unit larger than one command and
-a recovery unit smaller than one session. \system keeps the trajectory
-speculative while recovering a dependency-defined subgraph of versioned
-effects. It combines effect capture, object-aware history, selective workspace
-reconstruction, and context-aligned rollback.
+An erroneous tool call can affect later calls through both files and reused
+results. Given a user-specified file, \system withdraws its post-checkpoint
+mutations and their joint file/result dependency closure. A residue audit
+checks the resulting state before model continuation. The selected set guides both
+object restoration and updates to agent context, preserving independent
+calls within and across turns. Recovery can thus reconstruct a file state
+absent from the saved checkpoints while the session remains speculative.
 
-Across 144 controlled runs, it retained all independent work and removed all
-invalid descendants. At 48 document entries, it avoided 1,424.7 replay tokens
-over temporal recovery and 3,340.3 over whole-session abort. These claims cover
-supported workspace-local filesystem effects with fail-closed object identity.
-The benefit scales with dependency sparsity rather than arising in every turn.
+Across 400 fixed trajectories with three repetitions per policy, totaling
+6,000 runs over five policies, \system removes all affected calls in its
+1,200 runs while retaining all independent work; Crab and DeltaBox
+discard 54.02\% and 56.90\% of valid work, respectively.
+On matched successful task pairs, \system reduces token use relative to
+DeltaBox by 17.55--23.45\% on SWE-Bench Lite and 25.39--44.69\% on
+Terminal-Bench. Real-task breakdowns show lower agent-execution and
+setup/replay costs relative to DeltaBox.
 
 \bibliographystyle{unsrt}
 \normalsize
 \bibliography{references}
-
 
 \end{document}

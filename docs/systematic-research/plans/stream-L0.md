@@ -14,9 +14,11 @@ systems problem rather than a language-model quality problem.
 
 ## 2. Small Background
 
-Current isolation mechanisms choose one of three units: a command sandbox, a session or
-branch, or a temporal checkpoint.  A command sandbox protects the host but fragments
-trajectory state and repeats setup.  A session or branch preserves state but naturally
+Current isolation mechanisms expose invocation, session or branch, and temporal
+checkpoint boundaries. A try invocation can wrap a command, script, or whole
+agent session. Repeating isolation per tool call fragments trajectory state and
+repeats setup; wrapping the session alone does not supply internal step histories,
+dependencies, or context reconstruction. A session or branch preserves state but naturally
 commits or aborts the whole unit.  A checkpoint restores a prefix, so all later work is
 discarded even when it did not depend on the failure.
 
@@ -59,8 +61,9 @@ state by **command, namespace, time, and pathname**, whereas an agent failure pr
 through **causal dependencies among versioned effects**.  Prior approaches can expose or
 restore a snapshot, command, session, or branch, but they do not maintain the causal
 history needed to select and reconstruct an arbitrary subgraph inside one trajectory.
-Per-call designs also recreate the isolation context because the trajectory is not a
-first-class transactional unit.
+Using invocation isolation separately for each call can also recreate the isolation
+context. Invocation lifetime alone does not determine whether internal effects can be
+selected and reconstructed by dependency.
 
 **Judgment: PASS.**  This root cause explains C1--C3 and the state-continuity component of
 P3.  Residual tracing and OverlayFS costs are implementation limits, not new root causes.
@@ -130,3 +133,87 @@ groups, and non-filesystem effects are outside the transaction.
 
 **Judgment: PASS for draft stage.**  The system and evidence support the central semantic
 claim. Broader repository coverage remains required for an OSDI submission.
+
+## Chinese design draft steering — 2026-10-27
+
+The user requests a Chinese first draft before editing the English manuscript.
+The motivation anchor is boundary-induced loss of independent work. Oracle
+localization belongs only to the controlled motivation methodology: it isolates
+granularity loss and is not a deployment assumption. The user's subsequent
+correction explicitly rejects treating the root as known in the design.
+The workflow starts from a failure observation, constructs candidate recovery
+plans, and uses the dependency graph to determine invalidation sets and test
+them. Fault localization is explained separately, with no claim that the true
+root is available or uniquely identified. The central contribution remains
+dependency-selected recovery rather than improved root-cause diagnosis.
+
+For this draft, express the existing challenges as: (1) discovering recovery
+dependencies across opaque tool calls and observable result flow; (2) relating
+effects to objects and their historical versions across supported names and
+aliases; (3) reconstructing a non-prefix workspace and matching agent-visible
+context from one survivor set. Keep the original three concerns, but explain
+the failure caused by omitting each. Do not introduce fault localization as a
+fourth core challenge. Object identity is an input to graph construction and
+version reconstruction, not an unrelated filesystem feature.
+
+Preserve the native-trace boundary: avoidable loss depends on interleaved
+independent work; the controlled study does not establish universal large
+real-agent token savings. A graph edge is an observed or conservative recovery
+constraint, not a proof of complete semantic causality. Do not claim minimal
+true causal sets, unique root causes, or complete hidden-reasoning recovery.
+
+Output: `paper/design-workflow.zh-CN.md`, plus challenge-change rationale in
+`review/challenges-revision.zh-CN.md`. These are reviewable proposals, not a
+replacement of the English manuscript or a final-paper completion claim.
+
+## Approved English design revision — 2026-10-27
+
+The user now authorizes direct revision of the English design using the Chinese
+draft's reasoning, with workflow-level prose and pseudocode where an algorithm
+needs precision. Revise Sections 4–5 and the two directly connected challenge
+paragraphs. Retain the existing experimental results and literature sections.
+Do not treat the true failure source as known. Explain candidate localization
+as a separate stage, and use the dependency graph to determine the invalidation
+set for each candidate. Keep the causal graph central to reducing boundary
+loss; object history and matching visible context realize that selection.
+
+The user excludes arXiv:2608.10502 from further consideration. Do not add it or
+its claims to the manuscript. No broad first-causal-rollback or first-joint-
+context-recovery claim is needed. Implementation descriptions must match the
+current affected-path historical restoration, not a fresh-generation swap.
+
+## Completed real-workload integration — 2026-10-30
+
+The user authorizes analysis and plotting of the finished TB campaign alongside
+SWE-Bench, direct paper integration, and replacement of Figure 8's composition.
+The accepted thesis and causal-chain design are unchanged. This revision adds
+application-level cost evidence; it does not attribute all savings to graph
+selection without mechanism ablations.
+
+- SWE: 300 tasks × six policies; one run per cell, 1,799 complete. AgentTX
+  succeeds on 285/300 under target-test and recovery checks. Matched-success
+  API-token savings against no rollback/checkpoint/branch are
+  58.43%/17.55%/27.86%.
+- TB: 241 tasks × two harnesses × six policies; all 2,892 cells terminal after
+  registered outcome retries and separately audited environment/provider
+  repairs. Latest AgentTX full-contract successes are 208/241 (SWE-agent) and
+  223/241 (Codex), not first-attempt pass@1.
+- Complete-cost comparisons include every recorded failed/retry/replay attempt
+  and pair only successful, fully billed histories in the same compatible
+  configuration. The frozen audit has 13 configuration groups, 11 nonempty,
+  and 1,886 distinct task/harness/control pairs. No usage is imputed as zero.
+  Main-control savings are 24.70%/44.69%/35.91% for SWE-agent and
+  26.47%/25.39%/28.43% for Codex.
+- Boundaries: costs condition on eligible successful pairs, context settings
+  differ between policies, and the cohorts have different retry rules. SWE
+  injection uses gold-patch file paths and success is not official resolved
+  rate. TB is protocol-validation evidence: uniform hard token-budget and
+  prompt-accounting gates are incomplete.
+- Preserve counterevidence: TB/Codex costs 10.85% more than Ideal on matched
+  pairs (task-bootstrap interval spans zero), succeeds less often than branch
+  rollback, and has negative ML/training category comparisons. No universal
+  benefit or cross-harness ranking is claimed.
+
+Reproducible sources, hashes, pair counts and conditional task-bootstrap
+intervals are recorded in `review/realworld-results-20261030/analysis.json`.
+Other missing canonical evaluation evidence remains open.

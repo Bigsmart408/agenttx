@@ -122,7 +122,7 @@ def start_pending(root, audit):
             verifier_proof=STATE/(stamp+'-verifier-command-audit.json')
             save(verifier_proof,dict(audit,cells=verifier_records))
             command += ['--verifier-command-audit', str(verifier_proof)]
-    launcher = Path('/home/bfq/agenttx-executions/swe-local-auto-launchers') / (name + '.sh')
+    launcher = Path('/home/bfq/agenttx-workspace/agenttx-executions/swe-local-auto-launchers') / (name + '.sh')
     launcher.parent.mkdir(parents=True, exist_ok=True)
     launcher.write_text(prefix + '\nexport AGENTTX_SWE_MONITORED_RUN=' + shlex.quote(name)
                         + '\nexec ' + shlex.join(command) + '\n')

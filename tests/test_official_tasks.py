@@ -40,6 +40,8 @@ from agenttx.ledger import Effect, EffectKind, Ledger
 def test_policy_modes_include_the_ideal_oracle_control():
     assert POLICY_MODES == (
         "causal",
+        "root_only",
+        "turn_checkpoint",
         "temporal_checkpoint",
         "whole_branch_abort",
         "ideal_oracle",
@@ -394,6 +396,8 @@ def test_all_fault_modes_share_the_randomized_crash_plan():
         "crash_direct",
         "crash_no_rollback",
         "causal",
+        "root_only",
+        "turn_checkpoint",
         "temporal_checkpoint",
         "whole_branch_abort",
         "ideal_oracle",

@@ -86,7 +86,7 @@ def run_native_image(
             "--workdir", image_workdir,
             "--mount", f"type=bind,src={workspace},dst={image_workdir}",
             "--mount", f"type=bind,src={scratch / 'prompt.txt'},dst=/task_prompt.txt,readonly",
-            "--mount", f"type=bind,src={ROOT},dst=/home/bfq/agenttx,readonly",
+            "--mount", f"type=bind,src={ROOT},dst=/home/bfq/agenttx-workspace/agenttx,readonly",
             "--mount", "type=bind,src=/home/bfq/miniconda3,dst=/home/bfq/miniconda3,readonly",
             "--mount", "type=bind,src=/home/bfq/SWE-agent,dst=/home/bfq/SWE-agent,readonly",
             "--mount", "type=bind,src=/home/bfq/.codex/config.toml,dst=/home/bfq/.codex/config.toml,readonly",

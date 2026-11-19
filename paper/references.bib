@@ -18,14 +18,17 @@
   url = {https://www.usenix.org/conference/osdi26/presentation/liargkovas}
 }
 
-@misc{yolofs,
+@inproceedings{yolofs,
   author = {Shawn Wanxiang Zhong and Junxuan Liao and Jing Liu and Mai Zheng and Andrea C. Arpaci-Dusseau and Remzi H. Arpaci-Dusseau},
-  title = {Don't Let AI Agents YOLO Your Files: Shifting Information and Control to Filesystems for Agent Safety and Autonomy},
+  title = {Don't Let {AI} Agents {YOLO} Your Files: Information and Control in Agent-Native Filesystems},
   year = {2026},
   eprint = {2604.13536},
-  archivePrefix = {arXiv},
-  primaryClass = {cs.OS},
-  url = {https://arxiv.org/abs/2604.13536}
+  archiveprefix = {arXiv},
+  primaryclass = {cs.OS},
+  url = {https://arxiv.org/abs/2604.13536},
+  booktitle = {Proceedings of the ACM SIGOPS 32nd Symposium on Operating Systems Principles},
+  doi = {10.1145/3830418.3843858},
+  pages = {353--378}
 }
 
 @misc{branchfs,
@@ -49,17 +52,27 @@
 }
 
 @inproceedings{waypoint,
-  author = {Jiakai Xu and Tianle Zhou and Danielle Gillai and Ruizhe Fu and Georgios Liargkovas and Patrick Shen and Kostis Kaffes and Eugene Wu},
+  author = {Jiakai Xu and Tianle Zhou and Eugene Wu and Kostis Kaffes},
   title = {Toward Systems Foundations for Agentic Exploration},
   booktitle = {Systems for Agentic AI Workshop at SOSP},
   year = {2025},
+  url = {https://arxiv.org/abs/2510.05556}
+}
+
+@misc{waypoint-project,
+  author = {{Waypoint Contributors}},
+  title = {Waypoint},
+  year = {2026},
+  howpublished = {Project documentation},
   url = {https://daplab.cs.columbia.edu/projects/waypoint/}
 }
 
-@misc{deltabox,
+@inproceedings{deltabox,
   author = {Yunpeng Dong and Jingkai He and Shiqi Liu and Yuze Hou and Dong Du and Zhonghu Xu and Si Yu and Baochuan Yang and Yubin Xia and Haibo Chen},
-  title = {DeltaBox: Scaling Stateful AI Agents with Millisecond-Level Sandbox Checkpoint/Rollback},
+  title = {DeltaBox: Millisecond-Scale Sandbox Checkpoint and Rollback for Stateful AI Agents},
+  booktitle = {Proceedings of the 2026 ACM SIGOPS Annual Technical Conference},
   year = {2026},
+  doi = {10.1145/3828523.3857015},
   eprint = {2605.22781},
   archivePrefix = {arXiv},
   primaryClass = {cs.OS},
@@ -106,7 +119,7 @@
   title = {{TxFS}: Leveraging File-System Crash Consistency to Provide {ACID} Transactions},
   booktitle = {2018 USENIX Annual Technical Conference (USENIX ATC 18)},
   year = {2018},
-  pages = {879--892},
+  pages = {879--891},
   publisher = {USENIX Association},
   url = {https://www.usenix.org/conference/atc18/presentation/hu}
 }
@@ -115,14 +128,18 @@
   author = {{CRIU developers}},
   title = {Checkpoint/Restore In Userspace},
   year = {2026},
-  url = {https://www.criu.org/Main_Page}
+  url = {https://github.com/checkpoint-restore/criu},
+  howpublished = {Official project repository}
 }
 
-@misc{dmtcp,
+@inproceedings{dmtcp,
   author = {Jason Ansel and Kapil Arya and Gene Cooperman},
   title = {{DMTCP}: Transparent Checkpointing for Cluster Computations and the Desktop},
   year = {2009},
-  url = {https://dmtcp.github.io/papers/dmtcp.pdf}
+  url = {https://dmtcp.github.io/papers/dmtcp.pdf},
+  booktitle = {2009 IEEE International Symposium on Parallel \& Distributed Processing},
+  pages = {1--12},
+  doi = {10.1109/IPDPS.2009.5161063}
 }
 
 @inproceedings{react,
@@ -158,7 +175,7 @@
 }
 
 @inproceedings{toolformer,
-  author = {Timo Schick and Jane Dwivedi-Yu and Roberto Dessi and Roberta Raileanu and others},
+  author = {Schick, Timo and Dwivedi-Yu, Jane and Dess{\`i}, Roberto and Raileanu, Roberta and Lomeli, Maria and Hambro, Eric and Zettlemoyer, Luke and Cancedda, Nicola and Scialom, Thomas},
   title = {Toolformer: Language Models Can Teach Themselves to Use Tools},
   booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
   year = {2023},
@@ -166,7 +183,7 @@
 }
 
 @inproceedings{reflexion,
-  author = {Noah Shinn and Federico Cassano and Ashwin Gopinath and Karthik Narasimhan and Shunyu Yao},
+  author = {Shinn, Noah and Cassano, Federico and Gopinath, Ashwin and Narasimhan, Karthik and Yao, Shunyu},
   title = {Reflexion: Language Agents with Verbal Reinforcement Learning},
   booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
   year = {2023},
@@ -181,19 +198,21 @@
   url = {https://arxiv.org/abs/2305.10601}
 }
 
-@inproceedings{voyager,
-  author = {Guanzhi Wang and Yuqi Xie and Zhenyi Ji and others},
+@misc{voyager,
+  author = {Wang, Guanzhi and Xie, Yuqi and Jiang, Yunfan and Mandlekar, Ajay and Xiao, Chaowei and Zhu, Yuke and Fan, Linxi and Anandkumar, Anima},
   title = {Voyager: An Open-Ended Embodied Agent with Large Language Models},
-  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
   year = {2023},
-  url = {https://arxiv.org/abs/2305.16291}
+  url = {https://arxiv.org/abs/2305.16291},
+  eprint = {2305.16291},
+  archivePrefix = {arXiv}
 }
 
-@inproceedings{memgpt,
-  author = {Charles Packer and Sarah Wooders and Kevin Lin and others},
+@misc{memgpt,
+  author = {Packer, Charles and Wooders, Sarah and Lin, Kevin and Fang, Vivian and Patil, Shishir G. and Stoica, Ion and Gonzalez, Joseph E.},
   title = {MemGPT: Towards {LLMs} as Operating Systems},
-  booktitle = {International Conference on Learning Representations (ICLR)},
-  year = {2024},
+  year = {2023},
+  eprint = {2310.08560},
+  archivePrefix = {arXiv},
   url = {https://arxiv.org/abs/2310.08560}
 }
 
@@ -222,12 +241,12 @@
 }
 
 @misc{toolsandbox,
-  author = {Yifan Zhang and Chenglei Si and others},
+  author = {Lu, Jiarui and Holleis, Thomas and Zhang, Yizhe and Aumayer, Bernhard and Nan, Feng and Bai, Felix and Ma, Shuang and Ma, Shen and Li, Mengyu and Yin, Guoli and Wang, Zirui and Pang, Ruoming},
   title = {ToolSandbox: A Stateful, Conversational, Interactive Evaluation Benchmark for {LLM} Tool Use Capabilities},
   year = {2024},
   eprint = {2408.04682},
-  archivePrefix = {arXiv},
-  primaryClass = {cs.CL},
+  archiveprefix = {arXiv},
+  primaryclass = {cs.CL},
   url = {https://arxiv.org/abs/2408.04682}
 }
 
@@ -266,17 +285,18 @@
 }
 
 @misc{browsergym,
-  author = {Arthur Hosseini and others},
-  title = {BrowserGym: A New Environment for Web Agents},
-  year = {2023},
-  eprint = {2307.03652},
-  archivePrefix = {arXiv},
-  primaryClass = {cs.LG},
-  url = {https://arxiv.org/abs/2307.03652}
+  author = {De Chezelles, Thibault Le Sellier and Gasse, Maxime and Drouin, Alexandre and Caccia, Massimo and Boisvert, Léo and Thakkar, Megh and Marty, Tom and Assouel, Rim and Shayegan, Sahar Omidi and Jang, Lawrence Keunho and Lù, Xing Han and Yoran, Ori and Kong, Dehan and Xu, Frank F. and Reddy, Siva and Cappart, Quentin and Neubig, Graham and Salakhutdinov, Ruslan and Chapados, Nicolas and Lacoste, Alexandre},
+  title = {The {BrowserGym} Ecosystem for Web Agent Research},
+  year = {2024},
+  eprint = {2412.05467},
+  archiveprefix = {arXiv},
+  primaryclass = {cs.AI},
+  url = {https://arxiv.org/abs/2412.05467},
+  primaryClass = {cs.LG}
 }
 
 @inproceedings{repocoder,
-  author = {Daya Guo and others},
+  author = {Fengji Zhang and Bei Chen and Yue Zhang and Jacky Keung and Jin Liu and Daoguang Zan and Yi Mao and Jian-Guang Lou and Weizhu Chen},
   title = {RepoCoder: Repository-Level Code Completion Through Iterative Retrieval and Generation},
   booktitle = {Conference on Empirical Methods in Natural Language Processing (EMNLP)},
   year = {2023},
@@ -285,15 +305,15 @@
 }
 
 @inproceedings{repobench,
-  author = {Jiawei Liu and others},
+  author = {Liu, Tianyang and Xu, Canwen and McAuley, Julian},
   title = {RepoBench: Benchmarking Repository-Level Code Auto-Completion Systems},
   booktitle = {International Conference on Learning Representations (ICLR)},
   year = {2024},
-  url = {https://openreview.net/forum?id=7vP7n0u9bH}
+  url = {https://arxiv.org/abs/2306.03091}
 }
 
 @inproceedings{autocoderover,
-  author = {Yuntong Zhang and Haifeng Ruan and Zhiyu Fan and Abhik Roychoudhury},
+  author = {Zhang, Yuntong and Ruan, Haifeng and Fan, Zhiyu and Roychoudhury, Abhik},
   title = {AutoCodeRover: Autonomous Program Improvement},
   booktitle = {International Symposium on Software Testing and Analysis (ISSTA)},
   year = {2024},
@@ -301,7 +321,7 @@
 }
 
 @misc{agentless,
-  author = {Chunqiu Steven Xia and Yinlin Deng and Soren Dunn and Lingming Zhang},
+  author = {Xia, Chunqiu Steven and Deng, Yinlin and Dunn, Soren and Zhang, Lingming},
   title = {Agentless: Demystifying {LLM}-Based Software Engineering Agents},
   year = {2024},
   eprint = {2407.01489},
@@ -311,8 +331,8 @@
 }
 
 @misc{hyperagent,
-  author = {Huy Nhat Phan and Tien N. Nguyen and Phong X. Nguyen and Nghi D. Q. Bui},
-  title = {HyperAgent: Generalist Software Engineering Agents to Solve Coding Tasks at Scale},
+  author = {Phan, Huy Nhat and Nguyen, Tien N. and Nguyen, Phong X. and Bui, Nghi D. Q.},
+  title = {{HyperAgent}: Generalist Software Engineering Agents to Solve Coding Tasks at Scale},
   year = {2024},
   eprint = {2409.16299},
   archivePrefix = {arXiv},
@@ -321,7 +341,7 @@
 }
 
 @inproceedings{swegym,
-  author = {Jiayi Pan and Xingyao Wang and Graham Neubig and others},
+  author = {Pan, Jiayi and Wang, Xingyao and Neubig, Graham and Jaitly, Navdeep and Ji, Heng and Suhr, Alane and Zhang, Yizhe},
   title = {Training Software Engineering Agents and Verifiers with {SWE}-Gym},
   booktitle = {International Conference on Machine Learning (ICML)},
   year = {2025},
@@ -329,7 +349,7 @@
 }
 
 @misc{sweevo,
-  author = {Minh V. T. Thai and Tue Le and Dung Nguyen Manh and others},
+  author = {Le, Tue and Thai, Minh V. T. and Manh, Dung Nguyen and Nhat, Huy Phan and Bui, Nghi D. Q.},
   title = {{SWE-EVO}: Benchmarking Coding Agents in Long-Horizon Software Evolution Scenarios},
   year = {2025},
   eprint = {2512.18470},
@@ -339,7 +359,7 @@
 }
 
 @misc{featurebench,
-  author = {Qixing Zhou and Jiacheng Zhang and Haiyang Wang and others},
+  author = {Zhou, Qixing and Zhang, Jiacheng and Wang, Haiyang and Hao, Rui and Wang, Jiahe and Han, Minghao and Yang, Yuxue and Wu, Shuzhe and Pan, Feiyang and Fan, Lue and Tu, Dandan and Zhang, Zhaoxiang},
   title = {FeatureBench: Benchmarking Agentic Coding for Complex Feature Development},
   year = {2026},
   eprint = {2602.10975},
@@ -394,7 +414,7 @@
 }
 
 @inproceedings{agentdojo,
-  author = {Marius Mosbach and others},
+  author = {Debenedetti, Edoardo and Zhang, Jie and Balunović, Mislav and Beurer-Kellner, Luca and Fischer, Marc and Tramèr, Florian},
   title = {AgentDojo: A Dynamic Environment to Evaluate Prompt Injection Attacks and Defenses for {LLM} Agents},
   booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
   year = {2024},
@@ -427,10 +447,11 @@
 }
 
 @inproceedings{crashmonkey,
-  author = {Jayashree Mohan and Ashlie Martinez and Soujanya Ponnapalli and others},
+  author = {Jayashree Mohan and Ashlie Martinez and Soujanya Ponnapalli and Pandian Raju and Vijay Chidambaram},
   title = {Finding Crash-Consistency Bugs with Bounded Black-Box Crash Testing},
   booktitle = {USENIX Symposium on Operating Systems Design and Implementation (OSDI)},
   year = {2018},
+  pages = {33--50},
   url = {https://www.usenix.org/conference/osdi18/presentation/mohan}
 }
 
@@ -439,16 +460,18 @@
   title = {Runtime Analysis of Whole-System Provenance},
   booktitle = {ACM Conference on Computer and Communications Security (CCS)},
   year = {2018},
-  url = {https://camflow.org/publications/ccs-2018.pdf}
+  url = {https://doi.org/10.1145/3243734.3243776},
+  doi = {10.1145/3243734.3243776},
+  pages = {1601--1616}
 }
 
 @misc{ebpfruntime,
-  author = {Bolaji Gbadamosi and Luigi Leonardi and Tobias Pulls and Toke Hoiland-Jorgensen and Simone Ferlin-Reiter and Simo Sorce and Anna Brunstrom},
+  author = {Gbadamosi, Bolaji and Leonardi, Luigi and Pulls, Tobias and Høiland-Jørgensen, Toke and Ferlin-Reiter, Simone and Sorce, Simo and Brunström, Anna},
   title = {The eBPF Runtime in the Linux Kernel},
   year = {2024},
   eprint = {2410.00026},
-  archivePrefix = {arXiv},
-  primaryClass = {cs.OS},
+  archiveprefix = {arXiv},
+  primaryclass = {cs.OS},
   url = {https://arxiv.org/abs/2410.00026}
 }
 
@@ -463,41 +486,42 @@
 }
 
 @misc{next4,
-  author = {Yifan Wang and others},
+  author = {Dani, Aditya and Mangade, Shardul and Nimbalkar, Piyush and Shirwadkar, Harshad},
   title = {Next4: Snapshots in Ext4 File System},
   year = {2024},
   eprint = {2403.06790},
-  archivePrefix = {arXiv},
-  primaryClass = {cs.OS},
+  archiveprefix = {arXiv},
+  primaryclass = {cs.OS},
   url = {https://arxiv.org/abs/2403.06790}
 }
 
 @misc{snapshotpmem,
-  author = {H. S. Yoon and others},
-  title = {Snapshot: Fast, Userspace Crash Consistency for {CXL} and Persistent Memory Using msync},
+  author = {Mahar, Suyash and Shen, Mingyao and Kelly, Terence and Swanson, Steven},
+  title = {Snapshot: Fast, Userspace Crash Consistency for {CXL} and {PM} Using msync},
   year = {2023},
   eprint = {2310.16300},
-  archivePrefix = {arXiv},
-  primaryClass = {cs.OS},
+  archiveprefix = {arXiv},
+  primaryclass = {cs.OS},
   url = {https://arxiv.org/abs/2310.16300}
 }
 
 @misc{flytrap,
-  author = {Sathya Narayan and others},
+  author = {LeBlanc, Hayley and Pailoor, Shankara and Dillig, Isil and Bornholt, James and Chidambaram, Vijay},
   title = {Finding and Analyzing Crash-Consistency Bugs in Persistent-Memory File Systems},
   year = {2022},
   eprint = {2204.06066},
-  archivePrefix = {arXiv},
-  primaryClass = {cs.OS},
+  archiveprefix = {arXiv},
+  primaryclass = {cs.OS},
   url = {https://arxiv.org/abs/2204.06066}
 }
 
 @inproceedings{scftl,
-  author = {Hsiao-Yu Yang and others},
-  title = {Determinizing Crash Behavior with a Snapshot-Consistent Flash Translation Layer},
-  booktitle = {USENIX Symposium on Operating Systems Design and Implementation (OSDI)},
+  author = {Yun-Sheng Chang and Yao Hsiao and Tzu-Chi Lin and Che-Wei Tsao and Chun-Feng Wu and Yuan-Hao Chang and Hsiang-Shang Ko and Yu-Fang Chen},
+  title = {Determinizing Crash Behavior with a Verified {Snapshot-Consistent} Flash Translation Layer},
+  booktitle = {14th USENIX Symposium on Operating Systems Design and Implementation (OSDI 20)},
   year = {2020},
-  url = {https://web.stanford.edu/~yaohsiao/uploads/papers/scftl-osdi20.pdf}
+  url = {https://www.usenix.org/conference/osdi20/presentation/chang},
+  pages = {81--97}
 }
 
 
@@ -507,4 +531,182 @@
   journal = {arXiv preprint arXiv:2601.11868},
   year = {2026},
   url = {https://arxiv.org/abs/2601.11868}
+}
+
+@misc{agentrewind,
+  author = {Yu Zhuang and Kefei Chen and Yitong Duan and Shuxin Zheng and Jian Li and Xu-Yao Zhang},
+  title = {AgentRewind: Recoverable Execution for Long-Horizon LLM Agents},
+  year = {2026},
+  eprint = {2608.14380},
+  archivePrefix = {arXiv},
+  url = {https://arxiv.org/abs/2608.14380}
+}
+
+@misc{planarian,
+  author = {Jinnan Guo and Hao Mark Chen and Kapil Vaswani and Andrew Paverd and Peter Pietzuch},
+  title = {Planarian: Managing Agent State with Statepoints},
+  year = {2026},
+  eprint = {2609.35366},
+  archivePrefix = {arXiv},
+  url = {https://arxiv.org/abs/2609.35366}
+}
+
+@misc{cordon,
+  author = {Zheng Chen and Hanqing Liu and Duling Xu and Dong Dong and Jialin Li and Bangzheng Pu and Jidong Zhai},
+  title = {Cordon: Semantic Transactions for Tool-Using {LLM} Agents},
+  year = {2026},
+  eprint = {2606.17573},
+  archivePrefix = {arXiv},
+  url = {https://arxiv.org/abs/2606.17573}
+}
+
+@misc{memorepair,
+  author = {Yang Zhao and Chengxiao Dai and Mengying Kou and Yue Xiu},
+  title = {{MemoRepair}: Barrier-First Cascade Repair in Agentic Memory},
+  year = {2026},
+  eprint = {2605.07242},
+  archivePrefix = {arXiv},
+  url = {https://arxiv.org/abs/2605.07242}
+}
+
+@misc{revgo,
+  author = {Shunya Oguchi and Shoji Yuen and Nobuko Yoshida and Claudio Antares Mezzina},
+  title = {Fine-grained Causal Reversibility for Asynchronous Channel-based Programming},
+  year = {2026},
+  eprint = {2608.29225},
+  archivePrefix = {arXiv},
+  url = {https://arxiv.org/abs/2608.29225}
+}
+
+@misc{aquamend,
+  author = {Yufan Liu and Shang Luo and Yang Liu and Haoxuan Jia and Feiyu Han and Qian Li and Chen Li and Yingguang Yang and Chongyang Zhang and Hao Zheng and Kefu Xu and Bin Chong},
+  title = {{AquaMend}: Minimal Re-probing and Conditional Rollback for Latent-Belief Failures in Embodied Agents},
+  year = {2026},
+  eprint = {2609.28973},
+  archivePrefix = {arXiv},
+  url = {https://arxiv.org/abs/2609.28973}
+}
+
+@misc{rir,
+  author = {Yi Yu and Liuyi Yao and Yaliang Li and Enshu Wang and Libing Wu},
+  title = {Rollback the World, Keep the Reflection: Rollback-Induced Reflection for Long-Horizon {LLM} Agents},
+  year = {2026},
+  eprint = {2609.18304},
+  archivePrefix = {arXiv},
+  url = {https://arxiv.org/abs/2609.18304}
+}
+
+@misc{ripplecp,
+  author = {Mayur Akewar and Ravi Ranjan},
+  title = {{RippleCP}: Measuring Counterfactual Checkpoint Advantage in Coding Agents},
+  year = {2026},
+  eprint = {2610.09088},
+  archivePrefix = {arXiv},
+  url = {https://arxiv.org/abs/2610.09088}
+}
+
+@misc{logact,
+  author = {Mahesh Balakrishnan and Ashwin Bharambe and Davide Testuggine and David Geraghty and David Mao and Vidhya Venkat and Ilya Mironov and Rithesh Baradi and Gayathri Aiyer and Victoria Dudin},
+  title = {{LogAct}: Enabling Agentic Reliability via Shared Logs},
+  year = {2026},
+  eprint = {2604.07988},
+  archivePrefix = {arXiv},
+  url = {https://arxiv.org/abs/2604.07988}
+}
+
+@inproceedings{retro,
+  author = {Taesoo Kim and Xi Wang and Nickolai Zeldovich and M. Frans Kaashoek},
+  title = {Intrusion Recovery Using Selective Re-execution},
+  booktitle = {9th USENIX Symposium on Operating Systems Design and Implementation (OSDI 10)},
+  year = {2010},
+  publisher = {USENIX Association},
+  url = {https://www.usenix.org/conference/osdi10/intrusion-recovery-using-selective-re-execution}
+}
+
+@inproceedings{taser,
+  author = {Ashvin Goel and Kenneth Po and Kamran Farhadi and Zheng Li and Eyal de Lara},
+  title = {The {Taser} Intrusion Recovery System},
+  booktitle = {Proceedings of the Twentieth ACM Symposium on Operating Systems Principles (SOSP 05)},
+  year = {2005},
+  pages = {163--176},
+  doi = {10.1145/1095810.1095826},
+  url = {https://doi.org/10.1145/1095810.1095826}
+}
+
+@inproceedings{backtracker,
+  author = {Samuel T. King and Peter M. Chen},
+  title = {Backtracking Intrusions},
+  booktitle = {Proceedings of the Nineteenth ACM Symposium on Operating Systems Principles (SOSP 03)},
+  year = {2003},
+  pages = {223--236},
+  doi = {10.1145/945445.945467},
+  url = {https://doi.org/10.1145/945445.945467}
+}
+
+@inproceedings{pass,
+  author = {Kiran-Kumar Muniswamy-Reddy and David A. Holland and Uri Braun and Margo Seltzer},
+  title = {Provenance-Aware Storage Systems},
+  booktitle = {2006 USENIX Annual Technical Conference (USENIX ATC 06)},
+  year = {2006},
+  publisher = {USENIX Association},
+  url = {https://www.usenix.org/legacy/event/usenix06/tech/full_papers/muniswamy-reddy/muniswamy-reddy_html/}
+}
+
+@inproceedings{hifi,
+  author = {Devin J. Pohly and Stephen McLaughlin and Patrick McDaniel and Kevin Butler},
+  title = {{Hi-Fi}: Collecting High-Fidelity Whole-System Provenance},
+  booktitle = {Proceedings of the 28th Annual Computer Security Applications Conference (ACSAC 12)},
+  year = {2012},
+  pages = {259--268},
+  doi = {10.1145/2420950.2420989},
+  url = {https://doi.org/10.1145/2420950.2420989}
+}
+
+@inproceedings{beep,
+  author = {Kyu Hyung Lee and Xiangyu Zhang and Dongyan Xu},
+  title = {High Accuracy Attack Provenance via Binary-based Execution Partition},
+  booktitle = {Network and Distributed System Security Symposium (NDSS 13)},
+  year = {2013},
+  url = {https://www.ndss-symposium.org/ndss2013/ndss-2013-programme/high-accuracy-attack-provenance-binary-based-execution-partition/}
+}
+
+@inproceedings{revirt,
+  author = {George W. Dunlap and Samuel T. King and Sukru Cinar and Murtaza A. Basrai and Peter M. Chen},
+  title = {{ReVirt}: Enabling Intrusion Analysis Through Virtual-Machine Logging and Replay},
+  booktitle = {5th Symposium on Operating Systems Design and Implementation (OSDI 02)},
+  year = {2002},
+  publisher = {USENIX Association},
+  url = {https://www.usenix.org/conference/osdi-02/revirt-enabling-intrusion-analysis-through-virtual-machine-logging-and-replay}
+}
+
+@article{rollbacksurvey,
+  author = {E. N. (Mootaz) Elnozahy and Lorenzo Alvisi and Yi-Min Wang and David B. Johnson},
+  title = {A Survey of Rollback-Recovery Protocols in Message-Passing Systems},
+  journal = {ACM Computing Surveys},
+  year = {2002},
+  volume = {34},
+  number = {3},
+  pages = {375--408},
+  doi = {10.1145/568522.568525},
+  url = {https://doi.org/10.1145/568522.568525}
+}
+
+@inproceedings{sagas,
+  author = {Hector Garcia-Molina and Kenneth Salem},
+  title = {Sagas},
+  booktitle = {Proceedings of the 1987 ACM SIGMOD International Conference on Management of Data},
+  year = {1987},
+  pages = {249--259},
+  doi = {10.1145/38713.38742},
+  url = {https://doi.org/10.1145/38713.38742}
+}
+
+@inproceedings{rr,
+  author = {Robert O'Callahan and Chris Jones and Nathan Froyd and Kyle Huey and Albert Noll and Nimrod Partush},
+  title = {Engineering Record and Replay for Deployability},
+  booktitle = {2017 USENIX Annual Technical Conference (USENIX ATC 17)},
+  year = {2017},
+  pages = {377--389},
+  publisher = {USENIX Association},
+  url = {https://www.usenix.org/conference/atc17/technical-sessions/presentation/ocallahan}
 }

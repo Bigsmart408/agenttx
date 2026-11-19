@@ -135,6 +135,8 @@ from experiments.workloads.recovery_inject import (  # noqa: E402
 IDEAL_ORACLE_MODE = "ideal_oracle"
 POLICY_MODES = (
     "causal",
+    "root_only",
+    "turn_checkpoint",
     "temporal_checkpoint",
     "whole_branch_abort",
     IDEAL_ORACLE_MODE,
@@ -324,6 +326,42 @@ def _apply_blind_policy(agent, injected: dict, mode: str) -> tuple[List[int], di
     """
     if mode == CRASH_NO_ROLLBACK_MODE:
         targets: List[int] = []
+    elif mode == "root_only":
+        root = int(injected["root_step"])
+        targets = agent.harness.tx.rollback_exact([root])
+        if targets != [root]:
+            raise RuntimeError("Selected effects must withdraw exactly the selected root call")
+        return targets, {
+            "localized_root_steps": [],
+            "localization_matches_injected_root": None,
+            "localization_validation": "not_run",
+            "localization_confidence": "exact_selected_call_hint",
+            "fault_location_source": "registered_selected_call",
+            "fault_location_disclosed": False,
+            "hinted_selected_step_ids": [root],
+            "dependency_expansion": False,
+        }
+    elif mode == "turn_checkpoint":
+        # Give this control the exact affected turns, without causal expansion.
+        affected = set(injected["oracle_invalid_steps"])
+        turns = [turn for turn in agent.harness.tx.conversation.turns
+                 if affected.intersection(turn.step_ids)]
+        covered = {step for turn in turns for step in turn.step_ids}
+        if not affected.issubset(covered):
+            raise RuntimeError("injected affected calls have no recorded turn")
+        turn_ids = [turn.turn_id for turn in turns]
+        targets = agent.harness.tx.rollback_turns(turn_ids)
+        return targets, {
+            "localized_root_steps": [],
+            "localization_matches_injected_root": None,
+            "localization_validation": "not_run",
+            "localization_confidence": "exact_turn_hint",
+            "fault_location_source": "registered_affected_turns",
+            "fault_location_disclosed": False,
+            "hinted_affected_turn_ids": turn_ids,
+            "hinted_affected_step_ids": sorted(affected),
+            "minimum_complete_turn_set": True,
+        }
     elif mode == "temporal_checkpoint":
         targets = agent.harness.tx.rollback(int(injected["root_step"]))
     elif mode == "whole_branch_abort":
@@ -339,6 +377,115 @@ def _apply_blind_policy(agent, injected: dict, mode: str) -> tuple[List[int], di
         "fault_location_source": "hidden",
         "fault_location_disclosed": False,
     }
+
+
+def _file_report_policy(
+    agent, problem_files: Sequence[str], mode: str, *, checkpoint_step: Optional[int] = None,
+) -> tuple[List[int], dict]:
+    """Our causal method receives a file report, with no injected-step input.
+
+    The report defines an invalidation scope since a reference checkpoint.
+    Freeze its dependencies and file versions before running a policy, then
+    audit residue at the recovery boundary, before any model repair/replay.
+    Incomplete control arms remain measurable instead of being repaired by
+    the validator. Semantic task success is evaluated separately afterward.
+    """
+    from agenttx.file_recovery import FileRecoveryAudit, apply_file_recovery_plan
+    if mode != 'causal':
+        raise ValueError('file-report input is exclusive to our causal method; controls receive steps')
+    started = time.perf_counter()
+    tx = agent.harness.tx
+    plan = tx.plan_file_recovery(problem_files, checkpoint_step=checkpoint_step)
+    audit = FileRecoveryAudit.capture(tx, plan)
+    planned = time.perf_counter()
+    targets = apply_file_recovery_plan(tx, plan)
+    checked = audit.check(tx)
+    if mode == 'causal' and not checked['valid']:
+        raise RuntimeError(f"file-scoped recovery audit failed: {checked}")
+    return targets, dict(
+        recovery_input='file', recovery_protocol='agenttx.file-report-step-controls/v1',
+        problem_files=[str(Path(path).relative_to(tx.workspace)) for path in plan.paths],
+        reference_checkpoint_step=plan.checkpoint_step,
+        file_recovery_audit=checked,
+        localized_root_steps=[], localization_matches_injected_root=None,
+        localization_validation='residue_audit_passed' if checked['valid'] else 'residue_detected',
+        localization_confidence='recorded_dependency_scope',
+        localization_probe_wall_s=0.0, localization_search_wall_s=0.0,
+        localization_apply_wall_s=time.perf_counter()-planned,
+        localization_total_wall_s=time.perf_counter()-started,
+        candidate_probe_count=0, fault_location_source='user_file_report',
+        fault_location_disclosed=True, fault_step_disclosed=False,
+    )
+
+
+def _step_report_policy(
+    agent, injected: dict, mode: str, *, audit_files: Sequence[str],
+    checkpoint_step: Optional[int] = None,
+) -> tuple[List[int], dict]:
+    """Keep exact-step inputs for controls; file history is evaluator-only.
+
+    Freeze the common audit before applying the control's explicit selection.
+    The selector never receives audit files or file-derived recovery roots.
+    """
+    from dataclasses import replace
+    from agenttx.file_recovery import (
+        FileRecoveryAudit, apply_file_recovery_plan, select_step_hint_targets,
+    )
+    started = time.perf_counter()
+    tx = agent.harness.tx
+    policy = {'root_only': 'selected_effects', 'crash_no_rollback': 'no_rollback'}.get(mode, mode)
+    roots = [int(injected['root_step'])]
+    affected = injected.get('oracle_invalid_steps') if policy in {'turn_checkpoint', 'ideal_oracle'} else None
+    targets = select_step_hint_targets(tx, roots, policy=policy, affected_step_ids=affected)
+    reference = tx.plan_file_recovery(audit_files, checkpoint_step=checkpoint_step)
+    plan = replace(reference, policy=policy, rollback_targets=tuple(targets))
+    audit = FileRecoveryAudit.capture(tx, plan)
+    planned = time.perf_counter()
+    targets = apply_file_recovery_plan(tx, plan)
+    checked = audit.check(tx)
+    return targets, dict(
+        recovery_input='step', recovery_protocol='agenttx.file-report-step-controls/v1',
+        problem_files=[str(Path(p).relative_to(tx.workspace)) for p in plan.paths],
+        reference_checkpoint_step=plan.checkpoint_step, file_recovery_audit=checked,
+        hinted_fault_step_ids=roots, hinted_affected_step_ids=list(affected or ()),
+        localized_root_steps=[], localization_matches_injected_root=None,
+        localization_validation='residue_audit_passed' if checked['valid'] else 'residue_detected',
+        localization_confidence='registered_step_hint',
+        localization_probe_wall_s=0.0, localization_search_wall_s=0.0,
+        localization_apply_wall_s=time.perf_counter()-planned,
+        localization_total_wall_s=time.perf_counter()-started,
+        candidate_probe_count=0, fault_location_source='registered_step_hint',
+        fault_location_disclosed=True, fault_step_disclosed=True,
+    )
+
+
+def _reported_recovery_policy(agent, problem_files, mode, *, injected, checkpoint_step=None):
+    """Dispatch file input to our method and exact steps to every control."""
+    if mode == 'causal':
+        return _file_report_policy(agent, problem_files, mode, checkpoint_step=checkpoint_step)
+    return _step_report_policy(agent, injected, mode, audit_files=problem_files,
+                               checkpoint_step=checkpoint_step)
+
+
+def _reported_recovery_manifest(manifest: dict, evidence: dict) -> dict:
+    """Set the public input schema without exposing evaluator-only scope data."""
+    manifest.update(
+        recovery_input=evidence['recovery_input'],
+        reference_checkpoint_step=evidence['reference_checkpoint_step'],
+        file_recovery_audit_valid=evidence['file_recovery_audit']['valid'],
+        localized_fault_step_ids=[],
+        fault_step_disclosed=evidence['fault_step_disclosed'],
+        post_recovery_verified=False, oracle_post_recovery_verified=False,
+    )
+    if evidence['recovery_input'] == 'file':
+        manifest['problem_files'] = evidence['problem_files']
+    else:
+        manifest['hinted_fault_step_ids'] = evidence['hinted_fault_step_ids']
+        manifest['hinted_affected_step_ids'] = evidence['hinted_affected_step_ids']
+    payload = {key: value for key, value in manifest.items() if key != 'state_id'}
+    canonical = json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+    manifest['state_id'] = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+    return manifest
 
 
 def _timed_call(timings: dict, phase: str, function, *args, **kwargs):
@@ -665,7 +812,10 @@ def run_once(
     bare_direct_controls: bool = False,
     swe_tasks=None,
     tb_tasks=None,
+    recovery_input: str = "legacy",
 ) -> dict:
+    if recovery_input not in {'legacy', 'file'}:
+        raise ValueError('recovery_input must be legacy or file')
     direct_runtime = bool(
         bare_direct_controls
         and mode in DIRECT_MODES
@@ -1026,7 +1176,14 @@ def run_once(
                 raise RuntimeError(f"invalid recovery DAG: {injected}")
             if harness_backend == "sweagent" and mode in MANIFEST_MODES:
                 swe_precrash_conversation = agent.harness.tx.conversation.to_dict()
-            if mode == IDEAL_ORACLE_MODE:
+            if recovery_input == 'file' and mode in MANIFEST_MODES:
+                targets, localization = _timed_call(
+                    phase_timings, "policy_wall_s", _reported_recovery_policy,
+                    agent, [task.faulty_relpath], mode,
+                    injected=injected,
+                    checkpoint_step=agent.harness.tx.ledger.committed_frontier,
+                )
+            elif mode == IDEAL_ORACLE_MODE:
                 targets = _timed_call(
                     phase_timings, "policy_wall_s", _apply_policy,
                     agent, mode, injected["root_step"],
@@ -1046,6 +1203,8 @@ def run_once(
                 )
             elif mode in {
                 CRASH_NO_ROLLBACK_MODE,
+                "root_only",
+                "turn_checkpoint",
                 "temporal_checkpoint",
                 "whole_branch_abort",
             }:
@@ -1078,7 +1237,12 @@ def run_once(
             doc_replay_completion_tokens = int(replay_result.completion_tokens)
             doc_replay_tokens = int(replay_result.total_tokens)
             doc_replay_tool_calls = int(replay_result.tool_calls)
-        if mode in POLICY_MODES and not oracle:
+        if recovery_input == 'file' and mode in MANIFEST_MODES:
+            # Structural recovery is audited before model repair. A cleared
+            # scope does not certify completion of the original official task.
+            recovery_state_verified = bool(localization['file_recovery_audit']['valid'])
+            post_recovery_verified = False
+        elif mode in POLICY_MODES and not oracle:
             original_test = next(
                 (
                     record
@@ -1159,6 +1323,8 @@ def run_once(
                 oracle_post_recovery_verified=oracle_post_recovery_verified,
                 post_recovery_verified=post_recovery_verified,
             )
+            if recovery_input == 'file':
+                _reported_recovery_manifest(recovery_manifest, localization)
             recovery_manifest_authoritative = bool(recovery_manifest["authoritative"])
             recovery_manifest_text = recovery_manifest_json(recovery_manifest)
             # The manifest is control-plane state, not task data. Keep the
@@ -1490,6 +1656,15 @@ def run_once(
         "repo": repo,
         "commit": commit,
         "mode": mode,
+        "recovery_input": recovery_input,
+        "policy_recovery_input": localization.get('recovery_input', 'legacy'),
+        "recovery_protocol": 'agenttx.file-report-step-controls/v1' if recovery_input == 'file' else 'legacy',
+        "hinted_fault_step_ids": localization.get('hinted_fault_step_ids', []),
+        "file_recovery_audit": localization.get('file_recovery_audit'),
+        "problem_files": localization.get('problem_files', []),
+        "reference_checkpoint_step": localization.get('reference_checkpoint_step'),
+        "candidate_probe_count": localization.get('candidate_probe_count'),
+        "fault_step_disclosed": localization.get('fault_step_disclosed', mode == IDEAL_ORACLE_MODE),
         "recovery_context_variant": (
             recovery_context_variant(mode) if mode in RECOVERY_PROMPT_MODES else "none"
         ),
@@ -2071,7 +2246,7 @@ def _terminal_attempt(row: dict) -> bool:
         returncode = int(row.get("harness_returncode", 0))
     except (TypeError, ValueError):
         returncode = 0
-    return mode in {"temporal_checkpoint", "whole_branch_abort"} and returncode == 124
+    return mode in {"turn_checkpoint", "temporal_checkpoint", "whole_branch_abort"} and returncode == 124
 
 
 def _verifier_environment_error(verdict: dict) -> bool:
@@ -2103,6 +2278,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="full catalogs (default), representative smoke catalog, or only --tasks from the full catalogs",
     )
     parser.add_argument("--tasks", nargs="+", default=None)
+    parser.add_argument('--recovery-input', choices=('file', 'legacy'), default='file',
+                        help='file report for causal, exact steps for controls (default); legacy reproduces step search')
     parser.add_argument(
         "--allow-host-projected-tb",
         action="store_true",
@@ -2112,7 +2289,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "--modes",
         nargs="+",
         choices=list(EXPERIMENT_MODES),
-        default=list(POLICY_MODES),
+        default=None,
         help=(
             "control/recovery modes: no_fault, crash_direct, clean_recovery, "
             "crash_no_rollback, causal, temporal_checkpoint, whole_branch_abort, "
@@ -2196,6 +2373,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+    if args.modes is None:
+        args.modes = list(POLICY_MODES)
+    if args.recovery_input == 'file':
+        if args.result_subdir is None:
+            args.result_subdir = f'file-report-step-controls-v1-{args.harness}'
     if args.allow_external_writes:
         os.environ["AGENTTX_ALLOW_EXTERNAL_WRITES"] = "1"
     if args.no_fault and (args.oracle or args.replay_docs):
@@ -2372,6 +2554,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # Preserve every attempt for audit. Completed cells and coarse-policy
     # timeouts are terminal; failed causal attempts remain retryable.
     rows = _load_prior_rows(out_path_early)
+    expected_protocol = 'agenttx.file-report-step-controls/v1' if args.recovery_input == 'file' else 'legacy'
+    if any(row.get('recovery_protocol', 'legacy') != expected_protocol for row in rows):
+        raise SystemExit('result directory contains a different recovery protocol; choose a new --result-subdir')
     if args.skip_environment_errors:
         retained_rows = [row for row in rows if not row.get("environment_error")]
         if len(retained_rows) != len(rows):
@@ -2440,6 +2625,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     bare_direct_controls=args.bare_direct_controls,
                     swe_tasks=swe_catalog,
                     tb_tasks=tb_catalog,
+                    recovery_input=args.recovery_input,
                 )
                 if args.skip_environment_errors and row.get("environment_error"):
                     print(

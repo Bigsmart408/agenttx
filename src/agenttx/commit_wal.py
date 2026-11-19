@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
 from .layers import _copy_overlay_tree, _remove_overlay_tree
+from .snapshot import _copy_file_data
 
 
 def _lexists(path: Path) -> bool:
@@ -55,7 +56,8 @@ def _copy_regular(source: Path, destination: Path, mode: int) -> None:
     if changed:
         source.chmod(readable)
     try:
-        shutil.copy2(source, destination, follow_symlinks=False)
+        _copy_file_data(source, destination)
+        shutil.copystat(source, destination, follow_symlinks=False)
         if changed:
             destination.chmod(original_mode)
     finally:

@@ -3,7 +3,50 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import pwd
+import shutil
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
+
+
+@contextmanager
+def task_user_codex_profile(task_user, *, parent=None):
+    """Expose unchanged task-private profile copies to the original task uid.
+
+    Host profile mounts can be mode 0700/0600 for another uid. Never fall back
+    to Codex defaults merely because the original task account cannot read
+    them, and never relax the host profile's permissions.
+    """
+    account = pwd.getpwnam(task_user)
+    original = {key: os.environ.get(key) for key in ('CODEX_CONFIG_FILE', 'CODEX_AUTH_FILE')}
+    sources = {key: Path(value) for key, value in original.items() if value}
+    if set(sources) != set(original) or not all(p.is_file() for p in sources.values()):
+        raise RuntimeError('original task user requires the existing explicit Codex profile')
+    directory = Path(tempfile.mkdtemp(prefix='agenttx-task-profile-', dir=parent or '/run'))
+    try:
+        proof = {}
+        for key, source in sources.items():
+            destination = directory / source.name
+            body = source.read_bytes()
+            destination.write_bytes(body)
+            os.chown(destination, account.pw_uid, account.pw_gid)
+            destination.chmod(0o600)
+            assert destination.read_bytes() == body
+            os.environ[key] = str(destination)
+            proof[key] = dict(bytes_identical=True, mode='0600',
+                uid=account.pw_uid, gid=account.pw_gid,
+                sha256=hashlib.sha256(body).hexdigest())
+        os.chown(directory, account.pw_uid, account.pw_gid)
+        directory.chmod(0o700)
+        yield dict(files=proof, host_profile_modified=False, provider_configuration_changed=False)
+    finally:
+        for key, value in original.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        shutil.rmtree(directory)
 
 
 def private_values():

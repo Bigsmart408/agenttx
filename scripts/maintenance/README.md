@@ -1,3 +1,5 @@
+2026-11-03 目录迁移：脚本现位于 `/home/bfq/agenttx-workspace/agenttx/scripts/maintenance/`。旧维护目录的 16 份相同文件已去重；2 份独有文件保存在同级恢复资料目录的 `maintenance-unique-20261103/`。以下来源记录保留原日期和背景。
+
 # 本机实验维护脚本存档
 
 本目录保存 `/home/bfq/agenttx-maintenance/` 中当前使用的调度、补跑、核验、数据保留脚本，以及相关测试。文件按原字节复制，哈希见 `source-manifest.json`。本次归档不移动或修改正在运行的脚本。

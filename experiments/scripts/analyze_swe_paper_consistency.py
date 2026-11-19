@@ -161,7 +161,7 @@ def run():
     findings={
         'rq2_section_line':next(i for i,s in enumerate(lines,1) if '\\subsection{RQ2:' in s),
         'outdated_five_policy_line':next(i for i,s in enumerate(lines,1) if 'new 300-task, five-policy' in s),
-        'native_opportunity_caption_line':next(i for i,s in enumerate(lines,1) if '189 complete SWE-Bench' in s),
+        'native_opportunity_caption_line':next(i for i,s in enumerate(lines,1) if 'Observed recovery opportunities in native SWE-agent traces.' in s),
         'controlled_replay_claim_line':next(i for i,s in enumerate(lines,1) if 'work avoided 1,425 replay tokens' in s),
         'official_resolved_metric':False,
         'reason':'Runner tests FAIL_TO_PASS via repository-specific commands; PASS_TO_PASS and standard resolved grading were not run.',

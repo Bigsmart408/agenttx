@@ -1,0 +1,154 @@
+{
+  "artifacts": [
+    {
+      "file": "Agenttx overview.pptx",
+      "editable_objects": 33,
+      "slide_rasters": 0,
+      "cubic_paths": 0,
+      "curve_arrowheads": 0,
+      "green_arrows": 0,
+      "included_in_paper": true,
+      "text_words": 22,
+      "text_characters": 98,
+      "text_fit_issues": [],
+      "bounds_issues": [],
+      "diagram_scope": "filesystem structure with a collapsed recovery path",
+      "execution_filesystem": {
+        "type": "OverlayFS",
+        "tool_process_view": "merged",
+        "upper": "writable U",
+        "lower": "read-only L"
+      },
+      "layer_relationship": "U and L jointly provide the merged view",
+      "filesystem_application": "restore selected upper entries; preserve lower baseline",
+      "recovery_steps": [
+        "Select S",
+        "Apply S"
+      ],
+      "synchronized_outputs": [
+        "upper state",
+        "agent context"
+      ],
+      "legend_required": false,
+      "shown_call_example": false,
+      "overview_steps": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "file": "AgentTX-Dependency-Closure.pptx",
+      "editable_objects": 140,
+      "slide_rasters": 0,
+      "cubic_paths": 2,
+      "curve_arrowheads": 2,
+      "arrowheads_join_shafts": true,
+      "arrowhead_length_pt": 12.15,
+      "arrowhead_width_pt": 9.45,
+      "green_arrows": 0,
+      "result_legend_straight": true,
+      "shared_example_preserved": true,
+      "text_fit_issues": [],
+      "bounds_issues": [],
+      "included_in_paper": true,
+      "evidence_connections": {
+        "read_edge_inside_state_frame": true,
+        "shared_lower_connection": "state frames join at baseline frame; no file-cell endpoints"
+      },
+      "text_words": 86,
+      "text_characters": 344,
+      "overview_steps": [
+        1,
+        2
+      ]
+    },
+    {
+      "file": "AgentTX-Design-Workflow.pptx",
+      "editable_objects": 140,
+      "slide_rasters": 0,
+      "cubic_paths": 1,
+      "curve_arrowheads": 1,
+      "arrowheads_join_shafts": true,
+      "arrowhead_length_pt": 12.15,
+      "arrowhead_width_pt": 9.45,
+      "green_arrows": 0,
+      "result_legend_straight": null,
+      "shared_example_preserved": true,
+      "text_fit_issues": [],
+      "bounds_issues": [],
+      "included_in_paper": true,
+      "dependency_edges_shown": false,
+      "snapshot_selection_shown": true,
+      "selected_snapshot_versions": {
+        "f": "V0",
+        "h": "V1",
+        "p": "V2"
+      },
+      "restoration_base": "current filesystem state",
+      "text_words": 81,
+      "text_characters": 261,
+      "overview_steps": [
+        2,
+        3
+      ]
+    },
+    {
+      "file": "AgentTX-Context-Alignment.pptx",
+      "editable_objects": 69,
+      "slide_rasters": 0,
+      "cubic_paths": 2,
+      "curve_arrowheads": 2,
+      "arrowheads_join_shafts": true,
+      "arrowhead_length_pt": 12.15,
+      "arrowhead_width_pt": 9.45,
+      "green_arrows": 0,
+      "result_legend_straight": null,
+      "shared_example_preserved": true,
+      "text_fit_issues": [],
+      "bounds_issues": [],
+      "included_in_paper": false
+    }
+  ],
+  "line_styles": {
+    "flow": {
+      "color": "black",
+      "lw": 1.35,
+      "dash": false
+    },
+    "file": {
+      "color": "black",
+      "lw": 1.35,
+      "dash": true
+    },
+    "result": {
+      "color": "red",
+      "lw": 1.35,
+      "dash": false
+    },
+    "mapping": {
+      "color": "gray",
+      "lw": 0.6,
+      "dash": false
+    },
+    "divider": {
+      "color": "gray",
+      "lw": 0.4,
+      "dash": false
+    }
+  },
+  "shared_example_preserved": true,
+  "legends_use_straight_arrows": true,
+  "build_passed": true,
+  "overfull_or_undefined": false,
+  "paper_pages": 16,
+  "figure_pages": {
+    "Overview": 6,
+    "Dependency capture": 6,
+    "Filesystem reconstruction": 7
+  },
+  "long_turning_connectors_use_curves": true,
+  "short_direct_connectors_remain_straight": true,
+  "curve_shafts_trimmed_at_arrowhead_base": true,
+  "overview_arrowheads_have_straight_tangent_landings": true
+}

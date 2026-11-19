@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from bisect import bisect_left
 from enum import Enum
 from typing import Iterable, List, Optional, Set
 
@@ -71,6 +72,37 @@ class Step:
         )
 
 
+class _EffectIndex:
+    """Index the existing overlap relation without changing path semantics."""
+
+    def __init__(self, effects: Iterable[tuple[Effect, int]]) -> None:
+        self.paths: dict[str, Set[int]] = {}
+        self.objects: dict[str, Set[int]] = {}
+        self.cache: dict[str, Set[int]] = {}
+        for effect, step_id in effects:
+            path = effect.path.rstrip('/') or '/'
+            self.paths.setdefault(path, set()).add(step_id)
+            if effect.object_id is not None:
+                self.objects.setdefault(effect.object_id, set()).add(step_id)
+        self.ordered = sorted(self.paths)
+
+    def related(self, effect: Effect) -> Set[int]:
+        path = effect.path.rstrip('/') or '/'
+        if path not in self.cache:
+            parents = set(self.paths.get(path, ()))
+            # Keep literal separators, including repeated slashes and the
+            # existing special behaviour of '/', exactly as _paths_overlap.
+            for index, char in enumerate(path):
+                if char == '/' and index:
+                    parents.update(self.paths.get(path[:index], ()))
+            start = bisect_left(self.ordered, path + '/')
+            end = bisect_left(self.ordered, path + '0')
+            for index in range(start, end):
+                parents.update(self.paths[self.ordered[index]])
+            self.cache[path] = parents
+        return self.cache[path] | self.objects.get(effect.object_id, set())
+
+
 @dataclass
 class Ledger:
     steps: List[Step] = field(default_factory=list)
@@ -124,30 +156,13 @@ class Ledger:
     def add_step(self, tool_name: str, effects: Optional[List[Effect]] = None) -> Step:
         effects = effects or []
         step = Step(step_id=len(self.steps), tool_name=tool_name, effects=list(effects))
-        writers = self._writers()
-        negatives = self._negative_lookups()
+        writers = _EffectIndex(self._writers())
+        negatives = _EffectIndex(self._negative_lookups())
         for effect in step.effects:
-            if effect.kind in (EffectKind.READ, EffectKind.NEGATIVE):
-                step.parents.update(
-                    previous_id
-                    for previous_effect, previous_id in writers
-                    if self._paths_overlap(effect.path, previous_effect.path)
-                    or self._objects_overlap(effect, previous_effect)
-                )
-            if effect.kind in (EffectKind.WRITE, EffectKind.DELETE):
-                step.parents.update(
-                    previous_id
-                    for previous_effect, previous_id in writers
-                    if self._paths_overlap(effect.path, previous_effect.path)
-                    or self._objects_overlap(effect, previous_effect)
-                )
+            if effect.kind in (EffectKind.READ, EffectKind.NEGATIVE, EffectKind.WRITE, EffectKind.DELETE):
+                step.parents.update(writers.related(effect))
             if effect.kind == EffectKind.WRITE:
-                step.parents.update(
-                    previous_id
-                    for previous_effect, previous_id in negatives
-                    if self._paths_overlap(effect.path, previous_effect.path)
-                    or self._objects_overlap(effect, previous_effect)
-                )
+                step.parents.update(negatives.related(effect))
         self.steps.append(step)
         return step
 

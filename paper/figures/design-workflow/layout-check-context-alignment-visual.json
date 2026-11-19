@@ -1,0 +1,242 @@
+{
+  "title": "Filesystem and agent-context alignment",
+  "selected_steps": [
+    "E3",
+    "E4",
+    "E6",
+    "E7",
+    "E8"
+  ],
+  "retained_steps": [
+    "E1",
+    "E2",
+    "E5"
+  ],
+  "illustrative_turns": [
+    [
+      "E1",
+      "E2",
+      "E3"
+    ],
+    [
+      "E4"
+    ],
+    [
+      "E5",
+      "E6",
+      "E7",
+      "E8"
+    ]
+  ],
+  "restored_objects": [
+    "f",
+    "h",
+    "p"
+  ],
+  "retained_objects": [
+    "g"
+  ],
+  "next_request": [
+    "system/task",
+    "E1/r1",
+    "E2/r2",
+    "E5/r5",
+    "recovery notice"
+  ],
+  "audit_history_preserved": true,
+  "native_shapes": 69,
+  "text_fit_issues": [],
+  "bounds_issues": [],
+  "canvas_inches": [
+    8.6,
+    5.72
+  ],
+  "font": "Times New Roman",
+  "preview_font": "Times New Roman",
+  "reference": {
+    "paper": "Don't Let AI Agents YOLO Your Files: Information and Control in Agent-Native Filesystems",
+    "venue": "SOSP 2026",
+    "version": "arXiv:2604.13536v5",
+    "figures": [
+      1,
+      2,
+      7
+    ],
+    "url": "https://arxiv.org/pdf/2604.13536v5",
+    "use": "Thin black structure, compact aligned blocks, circled operations, semantic red/green/blue accents."
+  },
+  "palette": {
+    "blue": "0066CC",
+    "pale": "F3F7FC",
+    "purple": "000000",
+    "purpale": "F5F5F5",
+    "red": "8C0000",
+    "redpale": "FFEBEB",
+    "green": "008000",
+    "greenpale": "E6FFE6",
+    "black": "000000",
+    "gray": "707070",
+    "light": "B0B0B0",
+    "white": "FFFFFF"
+  },
+  "line_styles": {
+    "flow": {
+      "color": "black",
+      "lw": 1.35,
+      "dash": false
+    },
+    "file": {
+      "color": "black",
+      "lw": 1.35,
+      "dash": true
+    },
+    "result": {
+      "color": "red",
+      "lw": 1.35,
+      "dash": false
+    },
+    "mapping": {
+      "color": "gray",
+      "lw": 0.6,
+      "dash": false
+    },
+    "divider": {
+      "color": "gray",
+      "lw": 0.4,
+      "dash": false
+    }
+  },
+  "running_example": {
+    "name": "shared-eight-call-trajectory",
+    "steps": {
+      "E1": "inspect the baseline",
+      "E2": "inspect the baseline",
+      "E3": "write f1 and return report.json",
+      "E4": "read f1 and overwrite f with f2",
+      "E5": "independently write g1 between affected calls",
+      "E6": "read f2 and delete h",
+      "E7": "reuse report.json and create p1 at that path",
+      "E8": "read p1"
+    },
+    "reported_files": [
+      "f"
+    ],
+    "reference_checkpoint": "C0 before E3",
+    "file_roots": [
+      "E3",
+      "E4"
+    ],
+    "selected_steps": [
+      "E3",
+      "E4",
+      "E6",
+      "E7",
+      "E8"
+    ],
+    "retained_steps": [
+      "E1",
+      "E2",
+      "E5"
+    ],
+    "filesystem_edges": [
+      [
+        "E3",
+        "E4"
+      ],
+      [
+        "E4",
+        "E6"
+      ],
+      [
+        "E7",
+        "E8"
+      ],
+      [
+        "E3",
+        "E6"
+      ]
+    ],
+    "file_edge_objects": [
+      "f1",
+      "f2",
+      "p1",
+      "f history"
+    ],
+    "message_edges": [
+      [
+        "E3",
+        "E7"
+      ]
+    ],
+    "objects": [
+      "f",
+      "g",
+      "h",
+      "p"
+    ],
+    "lower": [
+      "f0",
+      "g0",
+      "h0",
+      "\u2205"
+    ],
+    "upper_before": [
+      "f2",
+      "g1",
+      "WH",
+      "p1"
+    ],
+    "upper_after": [
+      "\u2205",
+      "g1",
+      "\u2205",
+      "\u2205"
+    ],
+    "merged_before": [
+      "f2",
+      "g1",
+      "\u2205",
+      "p1"
+    ],
+    "merged_after": [
+      "f0",
+      "g1",
+      "h0",
+      "\u2205"
+    ],
+    "before_images": [
+      [
+        "f",
+        "E3"
+      ],
+      [
+        "h",
+        "E6"
+      ],
+      [
+        "p",
+        "E7"
+      ]
+    ],
+    "turns": [
+      [
+        "E1",
+        "E2",
+        "E3"
+      ],
+      [
+        "E4"
+      ],
+      [
+        "E5",
+        "E6",
+        "E7",
+        "E8"
+      ]
+    ]
+  },
+  "paper_width_inches": 3.35,
+  "body_font_at_paper_width_pt": 7.4,
+  "text_words": 51,
+  "text_characters": 235
+}

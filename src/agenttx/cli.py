@@ -72,6 +72,19 @@ def cmd_commit(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_recover_file(args: argparse.Namespace) -> int:
+    tx = _load(args)
+    try:
+        outcome = tx.recover_file(
+            args.paths, checkpoint_step=args.checkpoint_step,
+            policy=args.policy, dry_run=args.dry_run,
+        )
+        print(json.dumps(outcome.to_dict(), indent=2))
+        return 0 if outcome.audit['valid'] else 1
+    finally:
+        tx.close()
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     tx = _load(args)
     st = tx.status()
@@ -128,6 +141,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="rollback only graph dependents and retain independent steps",
     )
     rb.set_defaults(func=cmd_rollback)
+
+    from .file_recovery import POLICIES
+    rf = sp.add_parser("recover-file", help="recover reported files and audit dependent-command residue")
+    rf.add_argument("--session", required=True)
+    rf.add_argument("--checkpoint-step", type=int, default=None,
+                    help="reference state after this command; defaults to the committed frontier")
+    rf.add_argument("--policy", choices=POLICIES, default="causal")
+    rf.add_argument("--dry-run", action="store_true", help="audit in an isolated branch only")
+    rf.add_argument("paths", nargs='+', help="problem files relative to the workspace")
+    rf.set_defaults(func=cmd_recover_file)
 
     c = sp.add_parser("commit", help="commit up to frontier")
     c.add_argument("--session", required=True)

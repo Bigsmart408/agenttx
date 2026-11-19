@@ -15,7 +15,7 @@ ROOT=Path(__file__).resolve().parents[2]
 DATA=Path('/mnt/data/agenttx-runtime')
 RUN=DATA/'results/sweagent-swe-local-monitored-20261018-full-r1'
 BASELINE=DATA/'results/sweagent_luna_max_swe_fair_20261012'
-AUDIT=Path('/home/bfq/agenttx-recovery-20261016/reports/official_cell_status.csv')
+AUDIT=Path('/home/bfq/agenttx-workspace/agenttx-recovery-20261016/reports/official_cell_status.csv')
 
 
 def read(path):

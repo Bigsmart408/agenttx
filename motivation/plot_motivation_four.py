@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Generate the four canonical coarse-recovery motivation figures."""
+"""Generate the controlled recovery-policy motivation figures."""
 
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import shutil
 from collections import Counter, defaultdict
@@ -14,6 +15,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib import font_manager
 import numpy as np
 
 from experiments.motivation_strategies import (
@@ -23,6 +25,7 @@ from experiments.motivation_strategies import (
     MOTIVATION_POLICIES,
     POLICY_LABELS,
 )
+from motivation.paper_labels import WORK_LABELS
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,12 +43,14 @@ FIGURE_DIR = ROOT / "motivation"
 PAPER_DIR = ROOT / "paper" / "img"
 CM = 1 / 2.54
 WIDTH_CM = 17.8
+COLUMN_WIDTH_CM = 8.5
+FIXED_FIGURE_AUDIT_DIR = ROOT / "review" / "selected-effects-microbenchmark-20261114-205704" / "motivation-figures"
 
 RAW_CORRECT_POLICIES = CORRECT_RECOVERY_POLICIES
 COARSE_POLICIES = MOTIVATION_CORRECT_RECOVERY_POLICIES
 MICRO_POLICIES = MICROBENCHMARK_POLICIES
 DISPLAY_POLICIES = MOTIVATION_POLICIES
-LABELS = POLICY_LABELS
+LABELS = {**POLICY_LABELS, **WORK_LABELS}
 ARTIFACT_LABELS = {
     "session_try": "try",
     "yolofs": "YoloFS",
@@ -62,7 +67,7 @@ STYLES = {
         color="#6b7280", marker="v", linestyle="none", markerfacecolor="none"
     ),
     "root_only": dict(
-        color="#7c5aa6", marker="x", linestyle="none", markeredgewidth=0.9
+        color="#7c5aa6", marker="x", linestyle="--", markeredgewidth=0.9
     ),
     "turn_checkpoint_proxy": dict(
         color="#1b4f72", marker="o", linestyle="--", markerfacecolor="none"
@@ -93,10 +98,25 @@ STYLES = {
 
 
 def configure_style() -> None:
+    # Register the installed Microsoft fonts explicitly for headless rendering.
+    font_dir = Path.home() / ".local/share/fonts/TimesNewRoman"
+    for font in font_dir.glob("*"):
+        if font.suffix.lower() == ".ttf":
+            font_manager.fontManager.addfont(str(font))
+    font_manager.findfont(
+        font_manager.FontProperties(family="Times New Roman"),
+        fallback_to_default=False,
+    )
     plt.rcParams.update(plt.rcParamsDefault)
     plt.rcParams.update(
         {
-            "font.family": "Nimbus Roman",
+            "font.family": "serif",
+            "font.serif": ["Times New Roman"],
+            "mathtext.fontset": "custom",
+            "mathtext.rm": "Times New Roman",
+            "mathtext.it": "Times New Roman:italic",
+            "mathtext.bf": "Times New Roman:bold",
+            "mathtext.cal": "Times New Roman:italic",
             "font.size": 8,
             "axes.labelsize": 8,
             "xtick.labelsize": 7,
@@ -139,14 +159,50 @@ def save_figure(fig, stem: str) -> tuple[Path, Path]:
     fig.savefig(pdf, bbox_inches="tight", pad_inches=0.02)
     fig.savefig(png, bbox_inches="tight", pad_inches=0.02)
     shutil.copyfile(pdf, PAPER_DIR / pdf.name)
+    shutil.copyfile(png, PAPER_DIR / png.name)
     plt.close(fig)
     return png, pdf
+
+
+def motivation_legend(fig, handles, policies):
+    fig.legend(handles=handles, labels=[LABELS[p] for p in policies],
+               loc="upper center", bbox_to_anchor=(.52, 1.0), ncol=3, fontsize=8,
+               columnspacing=.8, handlelength=1.7, handletextpad=.4, borderpad=.1)
+
+
+def fixed_scope_panel(ax, rows, policies, factor):
+    """Count the calls selected by each rule on the same fixed trajectories."""
+    points = []
+    for policy in policies:
+        selected = [row for row in rows if row["policy"] == policy]
+        values = sorted({float(row[factor]) for row in selected})
+        means, lows, highs = [], [], []
+        for value in values:
+            group = [row for row in selected if float(row[factor]) == value]
+            counts = np.array([len(json.loads(row["rollback_set"])) for row in group])
+            mean, low, high = bootstrap_mean(counts, 20261103)
+            means.append(mean); lows.append(low); highs.append(high)
+            points.append(dict(policy=policy, factor=value, cases=len(group),
+                               calls_rolled_back=mean, ci95=[low, high]))
+        x = np.asarray(values) * (
+            100 if factor in {"requested_dependency_value", "actual_dependency_value"} else 16)
+        style = dict(STYLES[policy])
+        style.update(markersize=3, linewidth=1.1, markevery=2)
+        ax.fill_between(x, lows, highs, color=style["color"], alpha=.10, linewidth=0)
+        ax.plot(x, means, **style)
+    ax.set_ylabel("Calls rolled back", fontsize=8)
+    ax.set_title("(b) Rollback scope", fontsize=8, pad=6)
+    ax.set_ylim(bottom=0)
+    ax.locator_params(axis="y", nbins=3)
+    FIXED_FIGURE_AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+    (FIXED_FIGURE_AUDIT_DIR / f"{factor}-points.json").write_text(
+        json.dumps(dict(source="Fixed trajectories; no agent or model calls",
+                        points=points), indent=2) + "\n")
 
 
 def plot_m0() -> tuple[Path, Path]:
     config = json.loads((CONTROLLED_DIR / "config.json").read_text(encoding="utf-8"))
     rows = read_csv(CONTROLLED_DIR / "controlled_recovery_raw.csv")
-    position_rows = read_csv(CONTROLLED_DIR / "controlled_position_raw.csv")
     turn_counts = tuple(config.get("turn_counts") or ())
     if (
         config.get("schema") != "agenttx.motivation.controlled-waste/v4"
@@ -156,9 +212,6 @@ def plot_m0() -> tuple[Path, Path]:
         or config.get("fixed_closure_size") != 4
         or tuple(config.get("policies") or ()) != MICRO_POLICIES
         or len(rows) != 600
-        or config.get("fault_positions") != [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-        or config.get("position_sweep_turn_count") != 10
-        or len(position_rows) != 540
     ):
         raise ValueError("M0 controlled-case configuration is incomplete")
     grouped: dict[tuple[str, int], list[dict[str, str]]] = defaultdict(list)
@@ -170,16 +223,6 @@ def plot_m0() -> tuple[Path, Path]:
         for turn_count in turn_counts
     ):
         raise ValueError("M0 requires 10 paired cases per policy and turn count")
-    grouped_positions: dict[tuple[str, float], list[dict[str, str]]] = defaultdict(list)
-    for row in position_rows:
-        grouped_positions[(row["policy"], float(row["requested_fault_position"]))].append(row)
-    positions = tuple(config["fault_positions"])
-    if any(
-        len(grouped_positions[(policy, position)]) != 10
-        for policy in MICRO_POLICIES
-        for position in positions
-    ):
-        raise ValueError("M0 requires 10 paired cases per policy and fault position")
     if any(
         (row["rollback_safe"] == "True")
         != (row["policy"] in RAW_CORRECT_POLICIES)
@@ -194,7 +237,7 @@ def plot_m0() -> tuple[Path, Path]:
         grouped, turn_counts, "whole_branch", "useful_steps_wasted"
     )
     if not np.isclose(turn[0], whole[0]) or not np.any(turn[1:] < whole[1:]):
-        raise ValueError("M0 does not separate turn and whole-branch rollback")
+        raise ValueError("M0 does not separate turn and Whole branch")
     correct_removal = [
         grouped_factor_metric(grouped, turn_counts, policy, "invalid_removal")
         for policy in COARSE_POLICIES
@@ -202,88 +245,38 @@ def plot_m0() -> tuple[Path, Path]:
     if any(not np.array_equal(series, correct_removal[0]) for series in correct_removal[1:]):
         raise ValueError("M0 correct policies cannot share one correctness line")
 
-    fig, axes = plt.subplots(1, 3, figsize=(8.5 * CM, 4.1 * CM), dpi=300)
+    # Compare valid-work loss and rollback scope on identical fixed trajectories.
+    fig, axes = plt.subplots(1, 2, figsize=(COLUMN_WIDTH_CM * CM, 4.6 * CM), dpi=300)
+    call_counts = np.asarray(turn_counts) * config["turn_width"]
+    policies = (*COARSE_POLICIES, "root_only")
     legend_handles = {}
-    for index, policy in enumerate(COARSE_POLICIES):
+    for policy in policies:
         style = dict(STYLES[policy])
-        style["markersize"] = 2.1
+        style.update(markersize=4, linewidth=1.35)
         if policy == "turn_checkpoint_proxy":
             style["markevery"] = (0, 2)
         elif policy == "whole_branch":
             style["markevery"] = (1, 2)
-        elif policy == "ideal_oracle":
-            style["markevery"] = (0, 2)
-            style["markersize"] = 1.7
         wasted = grouped_factor_metric(
             grouped, turn_counts, policy, "useful_steps_wasted"
         )
-        handle, = axes[0].plot(turn_counts, wasted, label=LABELS[policy], **style)
+        handle, = axes[0].plot(call_counts, wasted, label=LABELS[policy], **style)
         legend_handles[policy] = handle
-        position_waste = np.array(
-            [
-                np.mean(
-                    [
-                        float(row["useful_steps_wasted"])
-                        for row in grouped_positions[(policy, position)]
-                    ]
-                )
-                for position in positions
-            ]
-        )
-        axes[1].plot(positions, position_waste, **style)
-        rollback_sizes = np.array(
-            [
-                np.mean(
-                    [
-                        len(json.loads(row["rollback_set"]))
-                        for row in grouped[(policy, turn_count)]
-                    ]
-                )
-                for turn_count in turn_counts
-            ]
-        )
-        axes[2].plot(turn_counts, rollback_sizes / 4.0, **style)
+    fixed_scope_panel(axes[1], rows, policies, "turn_count")
 
-    for ax in (axes[0], axes[2]):
-        ax.set_xlim(0.7, 10.3)
-        ax.set_xticks((1, 4, 7, 10))
-        ax.tick_params(axis="x", labelsize=6)
-    axes[0].set_ylim(-10, 270)
-    axes[0].set_ylabel("Valid operations discarded", fontsize=6)
-    axes[0].set_xlabel("Turns\n(a) Task length", fontsize=6)
-    axes[1].set_xlim(0.08, 0.92)
-    axes[1].set_xticks((0.1, 0.5, 0.9))
-    axes[1].set_ylim(-10, 270)
-    axes[1].set_xlabel("Fault position\n(b) Chronology", fontsize=6)
-    axes[2].set_yscale("log", base=2)
-    axes[2].set_ylim(0.8, 80)
-    axes[2].set_yticks(
-        (1, 4, 16, 64),
-        ("1", "4", "16", "64"),
-    )
-    axes[2].set_ylabel("Amplification (x)", fontsize=6)
-    axes[2].set_xlabel("Turns\n(c) Rollback size", fontsize=6)
     for ax in axes:
-        ax.tick_params(axis="both", labelsize=5.5, pad=1)
-    fig.legend(
-        handles=[legend_handles[policy] for policy in COARSE_POLICIES],
-        labels=[LABELS[policy] for policy in COARSE_POLICIES],
-        loc="upper center",
-        bbox_to_anchor=(0.5, 0.995),
-        ncol=4,
-        fontsize=5.5,
-        columnspacing=0.5,
-        handlelength=1.0,
-        handletextpad=0.2,
-        borderpad=0.1,
-    )
-    fig.subplots_adjust(
-        left=0.10,
-        right=0.99,
-        bottom=0.30,
-        top=0.78,
-        wspace=0.60,
-    )
+        ax.tick_params(axis="both", labelsize=8, pad=2)
+        ax.grid(axis="y", color="#dddddd", linewidth=0.45)
+        ax.set_axisbelow(True)
+        ax.set_xlim(12, 164)
+        ax.set_xticks((16, 80, 160))
+        ax.set_xlabel("Original tool\ncalls", fontsize=8)
+    axes[0].set_ylim(-5, 165)
+    axes[0].set_yticks((0, 80, 160))
+    axes[0].set_ylabel("Valid calls discarded", fontsize=8)
+    axes[0].set_title("(a) Valid calls lost", fontsize=8, pad=6)
+    motivation_legend(fig, [legend_handles[p] for p in policies], policies)
+    fig.subplots_adjust(left=0.15, right=0.98, bottom=0.26, top=0.66, wspace=0.90)
     return save_figure(fig, "FIG-Motivation-Coarse-Waste")
 
 
@@ -334,12 +327,13 @@ def grouped_metric(
 
 
 def grouped_metric_samples(
-    rows: list[dict[str, str]], policy: str, metric: str
+    rows: list[dict[str, str]], policy: str, metric: str,
+    factor: str = "requested_dependency_value",
 ) -> tuple[np.ndarray, list[np.ndarray]]:
     grouped: dict[float, list[float]] = defaultdict(list)
     for row in rows:
         if row["policy"] == policy:
-            grouped[float(row["requested_dependency_value"])].append(
+            grouped[float(row[factor])].append(
                 float(row[metric])
             )
     x = np.array(sorted(grouped))
@@ -409,24 +403,6 @@ def exact_target_is_temporal_suffix(row: dict[str, str]) -> bool:
 
 def plot_m1() -> tuple[Path, Path]:
     rows, _ = load_primary()
-    artifacts = load_artifact_recovery_suite(rows, suite_slice="mb4_dependency")
-    coincident_pairs = (
-        ("yolofs", "waypoint"),
-        ("branchfs", "session_try"),
-    )
-    for left_backend, right_backend in coincident_pairs:
-        if any(
-            left["present_ids"] != right["present_ids"]
-            for left, right in zip(
-                artifacts[left_backend], artifacts[right_backend]
-            )
-        ):
-            raise ValueError(
-                f"{left_backend} and {right_backend} dependency states diverged"
-            )
-    comparison_rows = rows + [
-        row for backend_rows in artifacts.values() for row in backend_rows
-    ]
     ideal_rows = [row for row in rows if row["policy"] == "ideal_oracle"]
     nonprefix_cases = sum(
         not exact_target_is_temporal_suffix(row) for row in ideal_rows
@@ -441,109 +417,35 @@ def plot_m1() -> tuple[Path, Path]:
         paired_turn[key]["rollback_set"] != paired_whole[key]["rollback_set"]
         for key in paired_turn
     ):
-        raise ValueError("turn and whole-branch rollback must differ")
+        raise ValueError("turn and Whole branch must differ")
 
-    policies = (
-        "turn_checkpoint_proxy",
-        "temporal_step",
-        "yolofs",
-        "waypoint",
-        "branchfs",
-        "session_try",
-        "ideal_oracle",
-    )
-    fig, axes = plt.subplots(
-        1, 3, figsize=(WIDTH_CM * CM, 6.4 * CM), dpi=300
-    )
+    policies = ("turn_checkpoint_proxy", "temporal_step", "whole_branch", "ideal_oracle", "root_only")
+    fig, axes = plt.subplots(1, 2,
+                             figsize=(COLUMN_WIDTH_CM * CM, 4.6 * CM), dpi=300)
     handles = []
-    policy_offsets = np.linspace(-0.006, 0.006, len(policies))
-    for policy_index, policy in enumerate(policies):
+    for policy in policies:
+        x, retained = grouped_metric_samples(
+            rows, policy, "valid_retention", factor="actual_dependency_value")
+        y, low, high = paired_bootstrap_summary([1.0-v for v in retained], scale=100)
         style = dict(STYLES[policy])
-        if policy == "turn_checkpoint_proxy":
-            style["markevery"] = (0, 2)
-        elif policy in {"waypoint", "session_try"}:
-            style["markevery"] = (1, 2)
-        elif policy in {"yolofs", "branchfs"}:
-            style["markevery"] = (0, 2)
-        color = style["color"]
-        x, samples = grouped_metric_samples(
-            comparison_rows, policy, "useful_tokens_wasted"
-        )
-        y, low, high = paired_bootstrap_summary(samples)
-        axes[0].fill_between(x, low, high, color=color, alpha=0.10, linewidth=0)
-        for dependency, values in zip(x, samples):
-            jitter = np.linspace(-0.004, 0.004, len(values))
-            axes[0].scatter(
-                dependency + policy_offsets[policy_index] + jitter,
-                values,
-                s=3.0,
-                color=color,
-                alpha=0.12,
-                linewidths=0,
-                zorder=1,
-            )
-        label = LABELS.get(policy) or ARTIFACT_LABELS[policy]
-        handle, = axes[0].plot(x, y, label=label, zorder=3, **style)
+        style.update(markersize=3, linewidth=1.1, markevery=2)
+        axes[0].fill_between(100*x, low, high, color=style["color"], alpha=.10, linewidth=0)
+        handle, = axes[0].plot(100*x, y, label=LABELS[policy], zorder=3, **style)
         handles.append(handle)
-        x, samples = grouped_metric_samples(
-            comparison_rows, policy, "valid_retention"
-        )
-        y, low, high = paired_bootstrap_summary(samples, scale=100.0)
-        axes[1].fill_between(x, low, high, color=color, alpha=0.10, linewidth=0)
-        for dependency, values in zip(x, samples):
-            jitter = np.linspace(-0.004, 0.004, len(values))
-            axes[1].scatter(
-                dependency + policy_offsets[policy_index] + jitter,
-                100.0 * values,
-                s=3.0,
-                color=color,
-                alpha=0.12,
-                linewidths=0,
-                zorder=1,
-            )
-        axes[1].plot(x, y, zorder=3, **style)
-        x, samples = amplification_samples(comparison_rows, policy)
-        y, low, high = paired_bootstrap_summary(samples)
-        axes[2].fill_between(x, low, high, color=color, alpha=0.10, linewidth=0)
-        for dependency, values in zip(x, samples):
-            jitter = np.linspace(-0.004, 0.004, len(values))
-            axes[2].scatter(
-                dependency + policy_offsets[policy_index] + jitter,
-                values,
-                s=3.0,
-                color=color,
-                alpha=0.12,
-                linewidths=0,
-                zorder=1,
-            )
-        axes[2].plot(x, y, zorder=3, **style)
-
+    fixed_scope_panel(axes[1], rows, policies, "actual_dependency_value")
     for ax in axes:
-        ax.set_xlim(-0.02, 1.02)
-        ax.set_xticks((0.0, 0.25, 0.5, 0.75, 1.0))
-    axes[0].set_ylim(bottom=-45)
-    axes[0].set_ylabel("Useful token weight discarded")
-    axes[0].set_xlabel("Dependency value\n(a) Avoidable recovery waste", fontsize=7)
-    axes[1].set_ylim(-3, 103)
-    axes[1].set_yticks((0, 25, 50, 75, 100))
-    axes[1].set_ylabel("Valid work retained (%)")
-    axes[1].set_xlabel("Dependency value\n(b) Independent work preserved", fontsize=7)
-    axes[2].set_yscale("log")
-    axes[2].set_ylim(0.8, 80)
-    axes[2].set_ylabel("Rollback amplification (x)")
-    axes[2].set_xlabel("Dependency value\n(c) Work removed / invalid work", fontsize=7)
-    fig.legend(
-        handles=handles,
-        loc="upper center",
-        bbox_to_anchor=(0.5, 0.995),
-        ncol=4,
-        fontsize=5.2,
-        columnspacing=0.8,
-        handlelength=1.8,
-        handletextpad=0.35,
-        borderpad=0.3,
-    )
-    fig.subplots_adjust(left=0.065, right=0.995, bottom=0.25, top=0.69, wspace=0.43)
+        ax.set_xlim(-2, 102)
+        ax.set_xticks((0, 50, 100))
+        ax.set_xlabel("Later calls affected\nby the error (%)", fontsize=8)
+        ax.tick_params(axis="both", labelsize=8, pad=2)
+        ax.grid(axis="y", color="#dddddd", linewidth=0.45)
+        ax.set_axisbelow(True)
+    axes[0].set_ylim(-4, 104)
+    axes[0].set_yticks((0, 50, 100))
+    axes[0].set_ylabel("Valid work discarded (%)", fontsize=8)
+    axes[0].set_title("(a) Valid work discarded", fontsize=8, pad=6)
+    motivation_legend(fig, handles, policies)
+    fig.subplots_adjust(left=0.16, right=0.98, bottom=0.26, top=0.66, wspace=0.90)
     return save_figure(fig, "FIG-Motivation-Dependency")
 
 
@@ -832,11 +734,11 @@ def plot_boundary_crossover() -> tuple[Path, Path]:
     checkpoint_line = axes[0].plot(
         x,
         checkpoint_win_rate,
-        label="Turn checkpoint",
+        label=LABELS["turn_checkpoint_proxy"],
         **checkpoint_style,
     )[0]
     temporal_line = axes[0].plot(
-        x, temporal_win_rate, label="Temporal step", **temporal_style
+        x, temporal_win_rate, label=LABELS["temporal_step"], **temporal_style
     )[0]
     tie_line = axes[0].plot(
         x,
@@ -994,10 +896,18 @@ def plot_m4() -> tuple[Path, Path]:
 
 def main() -> int:
     configure_style()
-    outputs = (plot_m0(), plot_m2(), plot_m1(), plot_boundary_crossover())
+    outputs = (plot_m0(), plot_m1())
     for png, pdf in outputs:
         print(f"wrote {png}")
         print(f"wrote {pdf}")
+    inputs = [CONTROLLED_DIR / "controlled_recovery_raw.csv",
+              CONTROLLED_DIR / "controlled_position_raw.csv",
+              CONTROLLED_DIR / "config.json", MICRO_DIR / "config.json",
+              MICRO_DIR / "motivation_recovery_raw.csv"]
+    (FIXED_FIGURE_AUDIT_DIR / "sources.json").write_text(json.dumps([
+        dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+        for path in inputs
+    ], indent=2) + "\n")
     return 0
 
 

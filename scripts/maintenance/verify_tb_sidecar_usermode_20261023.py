@@ -1,6 +1,6 @@
 import sys,json,subprocess,datetime
 from pathlib import Path
-sys.path[:0]=['/home/bfq/agenttx','/home/bfq/agenttx/src']
+sys.path[:0]=['/home/bfq/agenttx-workspace/agenttx','/home/bfq/agenttx-workspace/agenttx/src']
 from experiments.scripts.tb_task_services import TaskServices,NETWORK_HELPER_IMAGE
 root=Path('/mnt/data/agenttx-runtime/validation/tb-api-connection-repair-20261023')
 folder=root/('sidecar-probe-'+datetime.datetime.now(datetime.timezone.utc).strftime('%H%M%S'));folder.mkdir()

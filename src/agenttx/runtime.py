@@ -531,7 +531,9 @@ class AgentTX:
     def _rewind_conversation(self, targets: Sequence[int], mode: str) -> dict:
         notice = render_ledger_recovery_notice(self.ledger, targets, mode=mode)
         return self.conversation.rewind(
-            targets, notice, mode=mode, expand_dependencies=mode not in {"oracle", "turn_checkpoint"},
+            targets, notice, mode=mode,
+            expand_dependencies=mode not in {"oracle", "turn_checkpoint"}
+            and not mode.startswith("file:"),
         )
 
     def rollback_from(self, step_id: Optional[int] = None) -> List[int]:
@@ -640,7 +642,9 @@ class AgentTX:
             raise ValueError("checkpoint turn contains committed or inactive steps")
         return self._rollback_selected_targets(targets, mode="turn_checkpoint") if targets else []
 
-    def _rollback_selected_targets(self, targets: List[int], *, mode: str) -> List[int]:
+    def _rollback_selected_targets(
+        self, targets: List[int], *, mode: str, preserve_prior_mutations: bool = False,
+    ) -> List[int]:
         if any(
             target <= self.ledger.committed_frontier for target in targets
         ):
@@ -658,7 +662,7 @@ class AgentTX:
             )
         }
         retained_effects = [
-            effect
+            (step.step_id, effect)
             for step in self.ledger.steps
             if step.step_id > self.ledger.committed_frontier
             and step.status != "rolled_back"
@@ -668,11 +672,21 @@ class AgentTX:
             if self.commit_policy is None
             or not self.commit_policy.is_ignored(effect.path)
         ]
+        first_selected = {}
+        if preserve_prior_mutations:
+            selected_mutations = [(step.step_id, effect.path)
+                                  for step in self.ledger.steps if step.step_id in target_set
+                                  for effect in step.effects
+                                  if effect.kind in (EffectKind.WRITE, EffectKind.DELETE)]
+            first_selected = {path: min(i for i, mutated in selected_mutations
+                                        if self._paths_overlap(path, mutated))
+                              for path in target_paths}
         conflicts = sorted(
             (target_path, effect.path)
             for target_path in target_paths
-            for effect in retained_effects
+            for retained_id, effect in retained_effects
             if self._paths_overlap(target_path, effect.path)
+            and (not preserve_prior_mutations or first_selected[target_path] < retained_id)
         )
         if conflicts:
             details = ", ".join(
@@ -715,6 +729,23 @@ class AgentTX:
 
     def rollback_causal(self, step_id: Optional[int] = None) -> List[int]:
         return self.rollback_causal_from(step_id)
+
+    def plan_file_recovery(
+        self, paths: Sequence[str], *, checkpoint_step: Optional[int] = None,
+        policy: str = "causal",
+    ):
+        """Plan from reported files and a checkpoint, without a faulty-step hint."""
+        from .file_recovery import plan_file_recovery
+        return plan_file_recovery(self, paths, checkpoint_step=checkpoint_step, policy=policy)
+
+    def recover_file(
+        self, paths: Sequence[str], *, checkpoint_step: Optional[int] = None,
+        policy: str = "causal", dry_run: bool = False,
+    ):
+        """Validate one file-scoped plan in isolation before changing live state."""
+        from .file_recovery import recover_file
+        return recover_file(self, paths, checkpoint_step=checkpoint_step,
+                            policy=policy, dry_run=dry_run)
 
     def plan_recovery(
         self,

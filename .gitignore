@@ -1,4 +1,5 @@
 __pycache__/
+src/agenttx/_snapshot_native.so
 *.pyc
 .venv/
 venv/
@@ -30,3 +31,7 @@ experiments/cache/
 /.recovery/
 /third_party/
 /paper/Makefile.orig
+# Local review archives and generated port experiment outputs.
+/review/
+/ports/*/results/
+/paper/figures/backups/

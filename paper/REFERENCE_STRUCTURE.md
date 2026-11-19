@@ -18,7 +18,7 @@ Conclusion 主要分布在 PDF 第 2--15 页；后续为参考文献和一致性
 | Background | 3--4 | 将 crash consistency 机制分类并统一符号 | agent tool trajectory、semisolate、temporal/branch recovery taxonomy |
 | Observations and Motivations | 4--5 | I/O path 分析 + latency breakdown + challenge 列表 | bare 污染、per-call try 成本、temporal rollback 丢失独立工作、三个系统难点 |
 | Core model | 5--8 | overview、data structure、translation、layout、recovery | AET model、effect DAG、commit frontier、causal closure 和 safety invariants |
-| Implementation | 8--10 | architecture、operation paths、recovery、optimizations | interception、strace/upperdir capture、persistent worker、snapshots、WAL |
+| Implementation | 8--10 | architecture、operation paths、recovery、optimizations | interception、strace/upperdir capture、persistent worker、checkpoints、WAL |
 | Evaluation | 10--14 | 先列问题，再按 correctness/performance/breakdown/case study 展开 | overhead、retention、ablation、scaling、real agent、tokens、robustness |
 | Discussion | 14--15 | 主动回答设计边界和替代方案 | hard-link/bind mount、non-filesystem effects、observer atomicity、portability |
 | Related Work + Conclusion | 15 | 按机制定位差异，结论回扣核心 insight | agent FS、branch/checkpoint、effect capture、trajectory causal recovery |

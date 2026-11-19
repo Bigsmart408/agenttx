@@ -185,6 +185,11 @@ path.write_text(text, encoding="utf-8")
 PY
   chmod +x "$TRY_SCRIPT"
 fi
+# POSIX multiprocessing requires /dev/shm inside try's private /dev.
+python3 scripts/patch_try_shared_memory.py "$TRY_SCRIPT"
+python3 scripts/patch_try_common_root.py "$TRY_SCRIPT" "$TRY_SCRIPT"
+python3 scripts/patch_try_data_mounts.py "$TRY_SCRIPT" "$TRY_SCRIPT"
+
 echo "AgentTX root: $ROOT"
 
 if ! command -v strace >/dev/null 2>&1; then

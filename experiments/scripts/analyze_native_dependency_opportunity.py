@@ -8,6 +8,7 @@ import csv
 import json
 import statistics
 from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
 
 IGNORED_PARTS = {
@@ -114,11 +115,18 @@ def analyze_trace(data: dict) -> tuple[dict, list[dict]]:
     nodes = sorted(set(steps) & set(turn_of))
     position = {step_id: index for index, step_id in enumerate(nodes)}
     root_path = trace_workspace_root(data)
+
+    # Native ledgers repeat paths across many syscalls. Bound the cache to this
+    # trace; memoization changes neither path filtering nor dependency edges.
+    @lru_cache(maxsize=65536)
+    def included_path(raw: str) -> str | None:
+        return workspace_path(raw, root_path)
+
     observed_paths = {
         path
         for step_id in nodes
         for effect in steps[step_id].get("effects") or ()
-        if (path := workspace_path(str(effect.get("path") or ""), root_path))
+        if (path := included_path(str(effect.get("path") or "")))
     }
     directories = {
         parent.as_posix()
@@ -135,7 +143,7 @@ def analyze_trace(data: dict) -> tuple[dict, list[dict]]:
         effects = steps[step_id].get("effects") or ()
         accesses = []
         for effect in effects:
-            path = workspace_path(str(effect.get("path") or ""), root_path)
+            path = included_path(str(effect.get("path") or ""))
             kind = str(effect.get("kind") or "")
             if path and path not in directories and kind in {"R", "N", "W", "D"}:
                 accesses.append((path, kind))
@@ -213,6 +221,10 @@ def analyze_trace(data: dict) -> tuple[dict, list[dict]]:
                 "checkpoint_extra_mutating_steps": len((checkpoint - invalid) & mutating),
                 "temporal_extra_mutating_steps": len((temporal - invalid) & mutating),
                 "whole_branch_extra_mutating_steps": len((whole_branch - invalid) & mutating),
+                "interleaved_independent_work": any(
+                    root < step_id < max(invalid)
+                    for step_id in valid_later & mutating
+                ),
                 "long_chain_with_interleaved_independent_work": bool(
                     span > 0 and any(
                         root < step_id < max(invalid)
@@ -253,6 +265,9 @@ def analyze_trace(data: dict) -> tuple[dict, list[dict]]:
         ),
         "roots_with_interleaved_long_chain": sum(
             row["long_chain_with_interleaved_independent_work"] for row in rows
+        ),
+        "roots_with_interleaved_work": sum(
+            row["interleaved_independent_work"] for row in rows
         ),
     }
     return summary, rows

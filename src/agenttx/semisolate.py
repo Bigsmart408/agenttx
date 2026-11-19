@@ -8,6 +8,8 @@ from . import bpf_trace
 from .effects import SummaryEntry, diff_summaries, parse_try_summary
 from .ledger import Effect, EffectKind
 from .layers import LayerStore, _remove_overlay_tree
+from .snapshot import _try_reflink
+from .file_index import UpperdirTopology
 from .object_identity import HardlinkGroup
 from .trace import parse_strace_effects
 
@@ -71,77 +73,103 @@ def _kill_session(proc: subprocess.Popen) -> None:
         pass
 
 
-def _iter_upper_entries(directory: Path) -> Iterator[Path]:
+def _iter_upper_entries(
+    directory: Path, *, with_stat: bool = False, raw_paths: bool = False, observer=None
+) -> Iterator:
     """Walk an unmounted upperdir without losing mode-000 descendants."""
-    original_mode = stat.S_IMODE(directory.lstat().st_mode)
+    original_mode = stat.S_IMODE(os.lstat(directory).st_mode)
     access_mode = original_mode | stat.S_IRUSR | stat.S_IXUSR
     changed_mode = access_mode != original_mode
     if changed_mode:
-        directory.chmod(access_mode)
+        os.chmod(directory, access_mode)
     try:
+        if observer is not None:
+            observer(directory, original_mode)
         with os.scandir(directory) as scan:
             entries = list(scan)
         for entry in entries:
-            path = Path(entry.path)
-            mode = entry.stat(follow_symlinks=False).st_mode
-            yield path
+            path = entry.path if raw_paths else Path(entry.path)
+            try:
+                entry_stat = entry.stat(follow_symlinks=False)
+                mode = entry_stat.st_mode
+            except FileNotFoundError:
+                # A background service may unlink a temporary path after
+                # scandir. It is absent from the observed filesystem state.
+                continue
+            yield (path, entry_stat) if with_stat else path
             if stat.S_ISDIR(mode):
-                yield from _iter_upper_entries(path)
+                try:
+                    yield from _iter_upper_entries(
+                        path, with_stat=with_stat, raw_paths=raw_paths, observer=observer
+                    )
+                except FileNotFoundError:
+                    if os.path.lexists(path):
+                        raise
     finally:
         if changed_mode:
-            directory.chmod(original_mode)
+            try:
+                os.chmod(directory, original_mode)
+            except FileNotFoundError:
+                pass
 
 
 def _grant_upper_commit_access(
-    directory: Path, modes: Dict[Path, int]
+    directory: Path, modes: Dict[Path, int], visitor=None
 ) -> None:
-    directory_stat = directory.lstat()
+    directory_stat = os.lstat(directory)
     directory_mode = stat.S_IMODE(directory_stat.st_mode)
-    modes[directory] = directory_mode
     accessible_mode = (
         directory_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
     )
     if accessible_mode != directory_mode:
-        directory.chmod(accessible_mode)
+        modes[directory] = directory_mode
+        os.chmod(directory, accessible_mode)
 
     with os.scandir(directory) as scan:
         entries = list(scan)
     for entry in entries:
-        path = Path(entry.path)
-        entry_mode = entry.stat(follow_symlinks=False).st_mode
+        path = entry.path
+        entry_stat = entry.stat(follow_symlinks=False)
+        entry_mode = entry_stat.st_mode
+        if visitor is not None:
+            visitor(path, entry_stat)
         if stat.S_ISDIR(entry_mode):
-            _grant_upper_commit_access(path, modes)
+            _grant_upper_commit_access(path, modes, visitor)
         elif stat.S_ISREG(entry_mode):
             original_mode = stat.S_IMODE(entry_mode)
-            modes[path] = original_mode
             readable_mode = original_mode | stat.S_IRUSR
             if readable_mode != original_mode:
-                path.chmod(readable_mode)
+                modes[path] = original_mode
+                os.chmod(path, readable_mode)
 
 
 def _restore_upper_modes(modes: Dict[Path, int]) -> None:
     for path, mode in sorted(
         modes.items(),
-        key=lambda item: len(item[0].parts),
+        key=lambda item: os.fspath(item[0]).count("/"),
         reverse=True,
     ):
         try:
-            path.chmod(mode)
+            os.chmod(path, mode)
         except FileNotFoundError:
             continue
 
 
-def _read_regular_preserving_mode(path: Path, mode: int) -> bytes:
+def _hash_regular_preserving_mode(path: Path, mode: int, prefix: bytes) -> str:
     original_mode = stat.S_IMODE(mode)
     readable_mode = original_mode | stat.S_IRUSR
     changed_mode = readable_mode != original_mode
     if changed_mode:
-        path.chmod(readable_mode)
+        os.chmod(path, readable_mode)
     try:
-        return path.read_bytes()
+        digest = hashlib.sha256(prefix)
+        with open(path, "rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
     finally:
         if changed_mode:
-            path.chmod(original_mode)
+            os.chmod(path, original_mode)
 
 
 def _default_try_bin() -> Path:
@@ -246,11 +274,15 @@ class SharedSemisolate:
     _closed: bool = False
     _cached_summary: Dict[str, SummaryEntry] = field(default_factory=dict)
     _cached_digests: Dict[str, str] = field(default_factory=dict)
+    _upper_topology: Optional[UpperdirTopology] = field(default=None, repr=False)
     _cmd_script: Optional[Path] = None
     persistent_worker: bool = True
     tool_user: Optional[str] = None
     _worker_process: Optional[subprocess.Popen] = None
     _worker_script: Optional[Path] = None
+    _worker_strace_path: Optional[Path] = None
+    _worker_strace_offset: int = 0
+    _worker_strace_state: dict = field(default_factory=dict)
     _pending_snapshot_changes: Optional[List[str]] = None
     _worker_crash_once: bool = False
     _worker_failure_count: int = 0
@@ -304,7 +336,7 @@ class SharedSemisolate:
             self.sandbox_dir = Path(tempfile.mkdtemp(prefix="agenttx-sandbox-", dir="/tmp"))
             self._owns_sandbox = True
         if self.layers is None:
-            self.layers = LayerStore(self.sandbox_dir / "layers")
+            self.layers = LayerStore(self.sandbox_dir / "layers", defer_materialization=True)
         else:
             self.sandbox_dir = Path(self.sandbox_dir)
             self.sandbox_dir.mkdir(parents=True, exist_ok=True)
@@ -316,7 +348,7 @@ class SharedSemisolate:
                 f"with root on this host. try probe: {detail}"
             )
         if self.layers is None:
-            self.layers = LayerStore(self.sandbox_dir / "layers")
+            self.layers = LayerStore(self.sandbox_dir / "layers", defer_materialization=True)
 
     @property
     def session_dir(self) -> Path:
@@ -642,6 +674,8 @@ class SharedSemisolate:
     def upperdir_digests(self) -> Dict[str, str]:
         """Fingerprint materialized overlay entries relevant to the ledger.
 
+        Content is hashed on every scan: metadata and file notifications alone
+        cannot detect all writes through persistent writable memory mappings.
         File fingerprints include metadata so repeated chmod/chown/touch calls are
         visible even when content is unchanged. Directories are tracked only below
         the transaction workspace; this excludes try's root-level mount scaffolding
@@ -652,34 +686,36 @@ class SharedSemisolate:
         out: Dict[str, str] = {}
         if not upper.exists():
             return out
-        for entry in _iter_upper_entries(upper):
+        upper_prefix_length = len(os.fspath(upper)) + 1
+        workspace_prefix = os.fspath(self.workspace).rstrip("/") + "/"
+        if self._upper_topology is None:
+            self._upper_topology = UpperdirTopology()
+        for entry, entry_stat in self._upper_topology.entries(upper, _iter_upper_entries):
             try:
-                entry_stat = entry.lstat()
                 mode = entry_stat.st_mode
-                rel = entry.relative_to(upper)
-                logical = Path("/" + rel.as_posix())
+                relative_name = entry[upper_prefix_length:]
+                logical = "/" + relative_name
+                parent, _, name = logical.rpartition("/")
 
                 # Read tracing writes an internal raw log into /tmp inside the
                 # overlay, and the eBPF backend leaves a release marker there.
                 # Ignore crash leftovers and never expose them as effects.
-                if rel.parent == Path("tmp") and (
-                    entry.name.startswith(".agenttx-strace-")
-                    or entry.name.startswith(_BPF_MARKER_PREFIX)
+                if relative_name.startswith("tmp/") and "/" not in relative_name[4:] and (
+                    name.startswith(".agenttx-strace-")
+                    or name.startswith(_BPF_MARKER_PREFIX)
                 ):
                     continue
 
                 # Only character device 0/0 is an OverlayFS whiteout. Task
                 # root filesystems can also contain real device nodes.
-                if entry.name == ".wh..wh..opq":
-                    logical = Path("/" + rel.parent.as_posix())
-                    out[str(logical)] = "<agenttx:opaque-directory>"
+                if name == ".wh..wh..opq":
+                    out[parent or "/"] = "<agenttx:opaque-directory>"
                     continue
-                if entry.name.startswith(".wh."):
-                    logical = logical.with_name(entry.name[4:])
-                    out[str(logical)] = _WHITEOUT_DIGEST
+                if name.startswith(".wh."):
+                    out[parent + "/" + name[4:]] = _WHITEOUT_DIGEST
                     continue
                 if stat.S_ISCHR(mode) and entry_stat.st_rdev == os.makedev(0, 0):
-                    out[str(logical)] = _WHITEOUT_DIGEST
+                    out[logical] = _WHITEOUT_DIGEST
                     continue
 
                 metadata = (
@@ -688,26 +724,22 @@ class SharedSemisolate:
                     f"{entry_stat.st_dev}:{entry_stat.st_ino}:{entry_stat.st_nlink}"
                 ).encode("ascii")
                 if stat.S_ISLNK(mode):
-                    target = os.readlink(str(entry)).encode("utf-8", "surrogateescape")
+                    target = os.readlink(entry).encode("utf-8", "surrogateescape")
                     payload = b"link\0" + metadata + b"\0" + target
                 elif stat.S_ISREG(mode):
-                    payload = (
-                        b"file\0"
-                        + metadata
-                        + b"\0"
-                        + _read_regular_preserving_mode(entry, mode)
+                    out[logical] = _hash_regular_preserving_mode(
+                        entry, mode, b"file\0" + metadata + b"\0"
                     )
+                    continue
                 elif stat.S_ISCHR(mode) or stat.S_ISBLK(mode):
                     node = f"{stat.S_IFMT(mode)}:{entry_stat.st_rdev}".encode("ascii")
                     payload = b"device\0" + metadata + b"\0" + node
                 elif stat.S_ISFIFO(mode):
                     payload = b"fifo\0" + metadata
+                elif stat.S_ISSOCK(mode):
+                    payload = b"socket\0" + metadata
                 elif stat.S_ISDIR(mode):
-                    try:
-                        logical.relative_to(self.workspace)
-                    except ValueError:
-                        continue
-                    if logical == self.workspace:
+                    if not logical.startswith(workspace_prefix):
                         continue
                     # Child creation changes directory mtime, but the child itself
                     # is already an effect. Excluding mtime avoids spurious rewrites.
@@ -717,7 +749,7 @@ class SharedSemisolate:
                     payload = b"directory\0" + directory_metadata
                 else:
                     continue
-                out[str(logical)] = hashlib.sha256(payload).hexdigest()
+                out[logical] = hashlib.sha256(payload).hexdigest()
             except OSError:
                 continue
         return out
@@ -791,28 +823,84 @@ class SharedSemisolate:
         flags = ["-N", str(self.sandbox_dir)]
         if self.hide_network:
             flags.insert(0, "-x")
+        worker_command = [os.environ.get("AGENTTX_WORKER_PYTHON", "python3"), str(self._worker_script)]
+        trace_file = None
+        # Trace the session worker and all its children, rather than waiting
+        # for every daemon forked by each individual command. A daemonized
+        # tracer is not the worker's parent: foreground completion still
+        # returns promptly, while background syscalls remain traced until
+        # the namespace is shut down. The inherited fd targets a host-owned
+        # log outside the overlay, so snapshots never copy their own trace.
+        if self.trace_reads and self._resolve_step_backend()[0] == "strace":
+            self._worker_strace_path = self.session_dir / f"worker-strace-{time.time_ns()}.log"
+            self._worker_strace_offset = 0
+            self._worker_strace_state = {}
+            trace_file = self._worker_strace_path.open("ab")
+            worker_command = [
+                shutil.which("strace"), "-D", "-f", "-qq", "-yy", "-s", "4096",
+                "--trace=%file,process", "-o", f"/proc/self/fd/{trace_file.fileno()}",
+                *worker_command,
+            ]
         # Startup failures otherwise disappear behind the worker framing error.
         # Keep only the worker/namespace diagnostics, not model request data.
-        with (self.session_dir / "worker.stderr.log").open("ab") as worker_stderr:
-            process = subprocess.Popen(
-                [str(self.try_bin), *flags, "--",
-                 os.environ.get("AGENTTX_WORKER_PYTHON", "python3"), str(self._worker_script)],
-                cwd=str(self.workspace),
-                env={**os.environ, "PWD": str(self.workspace)},
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=worker_stderr,
-                bufsize=0,
-            )
+        try:
+            with (self.session_dir / "worker.stderr.log").open("ab") as worker_stderr:
+                process = subprocess.Popen(
+                    [str(self.try_bin), *flags, "--", *worker_command],
+                    cwd=str(self.workspace),
+                    env={**os.environ, "PWD": str(self.workspace)},
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=worker_stderr,
+                    bufsize=0,
+                    start_new_session=True,
+                    pass_fds=(trace_file.fileno(),) if trace_file is not None else (),
+                )
+        finally:
+            if trace_file is not None:
+                trace_file.close()
         self._worker_process = process
         assert process.stdin is not None and process.stdout is not None
         try:
             ready = self._read_worker_frame(process.stdout)
             if ready.get("ready") is not True:
                 raise RuntimeError("try worker did not become ready")
-        except Exception:
+            if self._worker_strace_path is not None and not ready.get("tracer_pid"):
+                raise RuntimeError("session strace did not attach to the worker")
+        except Exception as exc:
+            diagnostics = (self.session_dir / "worker.stderr.log").read_text(errors="replace")[-2000:]
             self._stop_worker()
-            raise
+            raise RuntimeError(f"try worker startup failed: {diagnostics}") from exc
+
+    def _read_worker_strace(self) -> List[Effect]:
+        """Consume complete new records with bounded buffers and deduplication.
+
+        Compilers can emit gigabytes of trace between tool calls. Read only
+        the bytes present on entry, parse batches, and retain unique effects
+        rather than loading the entire log/string/line list into memory.
+        """
+        if self._worker_strace_path is None:
+            return []
+        effects = set()
+        with self._worker_strace_path.open("rb") as stream:
+            stream.seek(self._worker_strace_offset)
+            remaining = os.fstat(stream.fileno()).st_size - stream.tell()
+            pending = b""
+            while remaining > 0:
+                chunk = stream.read(min(256 * 1024, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                pending += chunk
+                end = pending.rfind(b"\n") + 1
+                if end:
+                    effects.update(parse_strace_effects(
+                        pending[:end].decode("utf-8", "replace"), self.workspace,
+                        state=self._worker_strace_state,
+                    ))
+                    self._worker_strace_offset += end
+                    pending = pending[end:]
+        return sorted(effects, key=lambda effect: (effect.path, effect.kind.value))
 
     def inject_worker_crash_once(self) -> None:
         """Inject one persistent-worker failure before its next request.
@@ -862,6 +950,7 @@ class SharedSemisolate:
             "argv": list(command),
             "cwd": str(cwd),
             "timeout_s": timeout_s,
+            "require_tracer": self._worker_strace_path is not None,
         }
         try:
             self._dispatch_worker(request)
@@ -882,6 +971,9 @@ class SharedSemisolate:
         self._ensure_worker()
         assert self._worker_process is not None
         assert self._worker_process.stdin is not None
+        # Startup/restart establishes the tracer; even a first trusted command
+        # must verify it when this session uses persistent strace.
+        request = dict(request, require_tracer=self._worker_strace_path is not None)
         body = json.dumps(request, separators=(",", ":")).encode("utf-8")
         if self._worker_crash_once:
             self._worker_crash_once = False
@@ -929,17 +1021,24 @@ class SharedSemisolate:
         process = self._worker_process
         self._worker_process = None
         self._worker_script = None
+        self._worker_strace_path = None
+        self._worker_strace_offset = 0
+        self._worker_strace_state = {}
         if process is None:
             return
         repair_sandbox = process.poll() is not None
         try:
             if process.poll() is None and process.stdin is not None:
                 request = json.dumps({"op": "shutdown"}, separators=(",", ":")).encode("utf-8")
-                process.stdin.write(struct.pack("!I", len(request)))
-                process.stdin.write(request)
-                process.stdin.flush()
-                if process.stdout is not None:
-                    self._read_worker_frame(process.stdout)
+                # A command interrupted while reading its response may leave
+                # an incomplete frame on stdout. Never read an acknowledgement
+                # here: it can wait forever before reaching the bounded wait.
+                # Likewise, a busy worker must not block shutdown on stdin.
+                frame = struct.pack("!I", len(request)) + request
+                descriptor = process.stdin.fileno()
+                os.set_blocking(descriptor, False)
+                if os.write(descriptor, frame) != len(frame):
+                    raise RuntimeError("incomplete worker shutdown request")
             process.wait(timeout=_WORKER_SHUTDOWN_TIMEOUT_S)
         except Exception:
             repair_sandbox = True
@@ -950,6 +1049,13 @@ class SharedSemisolate:
                 process.kill()
                 process.wait(timeout=5)
         if repair_sandbox:
+            # The try wrapper can die while its unshare/PID namespace is
+            # still alive and owns the protocol pipe. Reap this worker's own
+            # process group before repairing files or starting a replacement.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
             self._repair_worker_sandbox()
 
     def _repair_worker_sandbox(self) -> None:
@@ -1029,6 +1135,7 @@ class SharedSemisolate:
         trace_upper_path: Optional[Path] = None
         tracer: Optional[str] = None
         trace_effects: List[Effect] = []
+        session_strace = False
         if should_trace_reads:
             backend, _detail = self._resolve_step_backend()
             if self.tool_user and backend != 'strace':
@@ -1042,6 +1149,13 @@ class SharedSemisolate:
                 tracer = "strace"
                 strace_bin = shutil.which("strace")
                 assert strace_bin is not None  # validated during initialization
+                if self.persistent_worker:
+                    self._ensure_worker()
+                    session_strace = self._worker_strace_path is not None
+                if session_strace:
+                    # Catch background reads since the preceding command too.
+                    trace_effects.extend(self._read_worker_strace())
+            if backend == "strace" and not session_strace:
                 trace_root = Path(
                     os.environ.get("AGENTTX_TRACE_SPOOL_ROOT", "/home")
                 ).resolve()
@@ -1063,6 +1177,9 @@ class SharedSemisolate:
         if self.tool_user and tracer is None:
             command = ['runuser', '-u', self.tool_user, '--', 'env',
                        *self._task_user_environment(), *command]
+        elif self.tool_user and session_strace:
+            command = ['runuser', '-u', self.tool_user, '--', 'env',
+                       *self._task_user_environment(), *command]
         if tracer != "bpf":
             t0 = time.perf_counter()
             if self.persistent_worker:
@@ -1074,7 +1191,11 @@ class SharedSemisolate:
                     self._worker_failure_count += 1
                     self._stop_worker()
                     self._repair_worker_sandbox()
-                    cp = self._run_try([*flags, "--", *command], cwd=self.workspace, timeout_s=timeout_s)
+                    if session_strace:
+                        self._ensure_worker()
+                        cp = self._run_worker(command, self.workspace, timeout_s)
+                    else:
+                        cp = self._run_try([*flags, "--", *command], cwd=self.workspace, timeout_s=timeout_s)
                 except _WorkerCommandUncertain:
                     self._worker_failure_count += 1
                     self._stop_worker()
@@ -1084,6 +1205,12 @@ class SharedSemisolate:
                 cp = self._run_try([*flags, "--", *command], cwd=self.workspace, timeout_s=timeout_s)
             duration = time.perf_counter() - t0
 
+        if session_strace:
+            trace_effects.extend(self._read_worker_strace())
+        elif self._worker_strace_path is not None:
+            # Trusted/untraced operations must not leak reads into the next
+            # agent step, but still advance cwd/unfinished syscall state.
+            self._read_worker_strace()
         if trace_path is not None:
             assert trace_upper_path is not None
             try:
@@ -1149,7 +1276,7 @@ class SharedSemisolate:
         return sorted(patterns, key=lambda pattern: (pattern.count("/"), pattern))
 
     def _capture_commit_metadata(
-        self, paths: Optional[Sequence[str]]
+        self, paths: Optional[Sequence[str]], *, upper_modes=None
     ) -> Dict[str, tuple[int, int, int, str]]:
         """Capture mode/times before try consumes selected upperdir entries."""
         assert self.sandbox_dir is not None
@@ -1158,19 +1285,16 @@ class SharedSemisolate:
         metadata: Dict[str, tuple[int, int, int, str]] = {}
         if not upper.exists():
             return metadata
-
-        for entry in _iter_upper_entries(upper):
-            rel = entry.relative_to(upper)
-            logical = Path("/" + rel.as_posix())
-            try:
-                logical.relative_to(self.workspace)
-            except ValueError:
-                continue
-            logical_text = str(logical)
+        upper_prefix_length = len(os.fspath(upper)) + 1
+        workspace = os.fspath(self.workspace)
+        workspace_prefix = workspace.rstrip("/") + "/"
+        def capture(entry, entry_stat):
+            logical_text = "/" + entry[upper_prefix_length:]
+            if logical_text != workspace and not logical_text.startswith(workspace_prefix):
+                return
             if wanted is not None and logical_text not in wanted:
-                continue
+                return
 
-            entry_stat = entry.lstat()
             mode = entry_stat.st_mode
             if stat.S_ISREG(mode):
                 kind = "file"
@@ -1179,13 +1303,20 @@ class SharedSemisolate:
             elif stat.S_ISLNK(mode):
                 kind = "symlink"
             else:
-                continue
+                return
             metadata[logical_text] = (
                 stat.S_IMODE(mode),
                 entry_stat.st_atime_ns,
                 entry_stat.st_mtime_ns,
                 kind,
             )
+        if upper_modes is not None:
+            # Capture the original modes while granting commit access in the
+            # same walk. Restrictive files must be recorded before chmod.
+            _grant_upper_commit_access(upper, upper_modes, capture)
+        else:
+            for entry, entry_stat in _iter_upper_entries(upper, with_stat=True, raw_paths=True):
+                capture(entry, entry_stat)
         return metadata
 
     @staticmethod
@@ -1195,28 +1326,31 @@ class SharedSemisolate:
         # Apply child metadata before making a parent directory non-searchable.
         ordered = sorted(
             metadata.items(),
-            key=lambda item: len(Path(item[0]).parts),
+            key=lambda item: item[0].count("/"),
             reverse=True,
         )
         for path_text, (mode, atime_ns, mtime_ns, kind) in ordered:
-            path = Path(path_text)
             try:
-                current_mode = path.lstat().st_mode
+                current = os.lstat(path_text)
+                current_mode = current.st_mode
             except FileNotFoundError:
                 continue
             if kind == "symlink":
                 if stat.S_ISLNK(current_mode):
                     os.utime(
-                        path,
+                        path_text,
                         ns=(atime_ns, mtime_ns),
                         follow_symlinks=False,
                     )
                 continue
             if kind == "file" and stat.S_ISREG(current_mode):
-                os.utime(path, ns=(atime_ns, mtime_ns))
-                path.chmod(mode)
+                if (current.st_atime_ns, current.st_mtime_ns) != (atime_ns, mtime_ns):
+                    os.utime(path_text, ns=(atime_ns, mtime_ns))
+                if stat.S_IMODE(current_mode) != mode:
+                    os.chmod(path_text, mode)
             elif kind == "directory" and stat.S_ISDIR(current_mode):
-                path.chmod(mode)
+                if stat.S_IMODE(current_mode) != mode:
+                    os.chmod(path_text, mode)
 
     def _materialize_hardlink_groups(
         self, groups: Sequence[HardlinkGroup]
@@ -1318,7 +1452,8 @@ class SharedSemisolate:
                             os.close(fd)
                             try:
                                 with source.open("rb") as source_handle, temporary.open("wb") as temporary_handle:
-                                    shutil.copyfileobj(source_handle, temporary_handle)
+                                    if not _try_reflink(source_handle.fileno(), temporary_handle.fileno()):
+                                        shutil.copyfileobj(source_handle, temporary_handle)
                                     temporary_handle.flush()
                                     os.fsync(temporary_handle.fileno())
                                 temporary.chmod(source_mode)
@@ -1328,7 +1463,8 @@ class SharedSemisolate:
                                 temporary.unlink(missing_ok=True)
                         else:
                             with source.open("rb") as source_handle, target.open("wb") as target_handle:
-                                shutil.copyfileobj(source_handle, target_handle)
+                                if not _try_reflink(source_handle.fileno(), target_handle.fileno()):
+                                    shutil.copyfileobj(source_handle, target_handle)
                                 target_handle.flush()
                                 os.fsync(target_handle.fileno())
                             shutil.copystat(source, target, follow_symlinks=False)
@@ -1351,7 +1487,8 @@ class SharedSemisolate:
                         os.close(fd)
                         try:
                             with source.open("rb") as source_handle, temporary.open("wb") as temporary_handle:
-                                shutil.copyfileobj(source_handle, temporary_handle)
+                                if not _try_reflink(source_handle.fileno(), temporary_handle.fileno()):
+                                    shutil.copyfileobj(source_handle, temporary_handle)
                                 temporary_handle.flush()
                                 os.fsync(temporary_handle.fileno())
                             temporary.chmod(source_mode)
@@ -1576,28 +1713,21 @@ class SharedSemisolate:
             if paths is not None
             else paths
         )
-        metadata = self._capture_commit_metadata(ordinary_paths)
         cmd = [str(self.try_bin)]
         if ordinary_paths is not None:
             for pattern in self._include_patterns(ordinary_paths):
                 cmd.extend(["-I", pattern])
         cmd.extend(["commit", str(self.sandbox_dir)])
         upper_modes: Dict[Path, int] = {}
-        upper = self.sandbox_dir / "upperdir"
-        if upper.exists():
-            _grant_upper_commit_access(upper, upper_modes)
+        try:
+            metadata = self._capture_commit_metadata(ordinary_paths, upper_modes=upper_modes)
+        except BaseException:
+            _restore_upper_modes(upper_modes)
+            raise
         if ordinary_paths is None or ordinary_paths:
             try:
                 self._clear_unmounted_temproot()
-                cp = subprocess.run(
-                    cmd,
-                    cwd=str(self.workspace),
-                    text=True,
-                    input="y\n",
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    check=False,
-                )
+                cp = self._run_storage_commit(ordinary_paths)
             finally:
                 _restore_upper_modes(upper_modes)
         else:
@@ -1619,6 +1749,39 @@ class SharedSemisolate:
             self._cached_digests = self.upperdir_digests()
             self._pending_snapshot_changes = None
         return cp
+
+    def _run_storage_commit(self, paths: Optional[Sequence[str]]) -> subprocess.CompletedProcess:
+        """Publish an already stopped upper without starting another sandbox.
+
+        The bundled try command uses this same native helper when installed,
+        but its interactive commit entry point first runs a dummy command in
+        a new mount namespace. Storage publication needs only the helper.
+        Custom try executables and installations without it keep their path.
+        """
+        root = Path(__file__).resolve().parents[2]
+        bundled = {root/'scripts/try-wrapper.sh', root/'third_party/try/try',
+                   root/'third_party/try/scripts/try'}
+        helper = shutil.which('try-commit')
+        use_native = helper is not None and self.try_bin.resolve() in {
+            candidate.resolve() for candidate in bundled if candidate.is_file()}
+        if use_native:
+            with tempfile.TemporaryDirectory(prefix='.storage-commit-',dir=self.sandbox_dir) as directory:
+                filters = Path(directory)
+                exclude, include = filters/'exclude', filters/'include'
+                exclude.write_text('/run/mount\n/run/try_trace.log\n')
+                patterns = self._include_patterns(paths) if paths is not None else []
+                include.write_text(''.join(pattern+'\n' for pattern in patterns))
+                return subprocess.run(
+                    [helper,'-E',str(exclude),'-I',str(include),str(self.sandbox_dir)],
+                    cwd=str(self.workspace),text=True,stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,check=False)
+        command = [str(self.try_bin)]
+        if paths is not None:
+            for pattern in self._include_patterns(paths):
+                command.extend(['-I',pattern])
+        command.extend(['commit',str(self.sandbox_dir)])
+        return subprocess.run(command,cwd=str(self.workspace),text=True,input='y\n',
+                              stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=False)
 
     def _clear_unmounted_temproot(self) -> None:
         """Discard only inactive mount views, preserving versioned upper state."""
@@ -1642,6 +1805,8 @@ class SharedSemisolate:
     def reset(self) -> None:
         """Hard reset overlay (legacy). Prefer rollback_steps for surgical restore."""
         self._stop_worker()
+        if self._upper_topology is not None:
+            self._upper_topology.close()
         assert self.sandbox_dir is not None
         subprocess.run(["chmod", "-R", "u+rwX", str(self.sandbox_dir)], check=False)
         for child in list(self.sandbox_dir.iterdir()):
@@ -1714,6 +1879,8 @@ class SharedSemisolate:
             return
         self._closed = True
         self._stop_worker()
+        if self._upper_topology is not None:
+            self._upper_topology.close()
         if not destroy and self.layers is not None:
             # Blob reachability is unchanged during normal execution; defer
             # this directory scan until the session is explicitly retained.

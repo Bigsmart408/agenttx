@@ -9,11 +9,15 @@ Identify each policy by its ID. Use the Chinese name in Chinese prose and the En
 | 策略 ID / Policy ID | 中文名称 | English name | 语义 / Meaning |
 | --- | --- | --- | --- |
 | `no_recovery` | 不恢复 | No recovery | 不移除任何效果 / Remove no effects |
-| `root_only` | 仅根恢复 | Root only | 只移除故障生产者，不传播到后继 / Remove only the fault producer |
+| `root_only` | 选定效果回滚 | Selected effects | 只移除选定的故障生产者，不传播到后继 / Remove only the selected fault producer, without expanding to dependent calls |
 | `turn_checkpoint_proxy` | 轮次检查点 | Turn checkpoint | 移除包含无效效果的完整轮次；策略代理 / Remove complete turns containing invalid effects; policy proxy |
 | `temporal_step` | 时间步后缀 | Temporal step | 移除从故障根到分支结束的时间后缀 / Remove the chronological suffix from the fault root |
 | `whole_branch` | 整分支回滚 | Whole branch | 移除完整未提交分支 / Remove the complete uncommitted branch |
 | `ideal_oracle` | 理想 oracle | Ideal oracle | 使用真值移除精确无效闭包 / Remove the exact invalid closure using ground truth |
+
+`Selected effects` 原名 `Root only`，保留原始策略 ID `root_only`。该对照只度量不扩展依赖闭包的恢复范围，不代表任何已有系统的完整能力。
+
+`Selected effects` was previously labeled `Root only`; its policy ID remains `root_only`. This control measures a recovery scope without dependency expansion, rather than the full capabilities of an existing system.
 
 ## 端到端实验 / End-to-end experiments
 

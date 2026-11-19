@@ -21,6 +21,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--task', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--policy', choices=('ideal_oracle', 'turn_checkpoint', 'root_only'), default='ideal_oracle')
     args = parser.parse_args()
     assert os.geteuid() == 0
     args.output.mkdir(exist_ok=False, parents=True)
@@ -40,6 +41,7 @@ def main():
     harness = CodingAgentHarness(work, session, trace_backend='strace', ephemeral_roots=(tmp,))
     agent = type('InjectionProbe', (), {'harness': harness})()
     try:
+        original_source = (work/task.faulty_relpath).read_text()
         injection = swe.inject_task_trajectory(agent, task, instance, python)
         records = [dict(step_id=r.step_id, returncode=r.returncode,
                         stdout=r.stdout[-2500:], stderr=r.stderr[-2500:],
@@ -50,13 +52,27 @@ def main():
                       model_calls=0, gold_patch_used=False,
                       semisolate_sha256=hashlib.sha256((ROOT/'src/agenttx/semisolate.py').read_bytes()).hexdigest())
         if result['valid']:
-            targets=harness.tx.rollback_exact(injection['oracle_invalid_steps'])
+            if args.policy in {'turn_checkpoint', 'root_only'}:
+                from experiments.scripts.bench_official_tasks import _apply_blind_policy
+                turns_before = [dict(turn_id=t.turn_id, step_ids=t.step_ids)
+                                for t in harness.tx.conversation.turns]
+                targets, policy_details = _apply_blind_policy(agent, injection, args.policy)
+                result.update(policy=args.policy, policy_details=policy_details,
+                              recorded_turns=turns_before)
+            else:
+                targets=harness.tx.rollback_exact(injection['oracle_invalid_steps'])
             restored=harness.call_tool('read_file',dict(path=task.faulty_relpath))
             result.update(rollback_targets=targets,
-                          original_source_restored=restored.returncode==0 and restored.stdout==(work/task.faulty_relpath).read_text(),
+                          original_source_restored=restored.returncode==0 and restored.stdout==original_source,
                           independent_documents_retained=all(harness.tx.path_exists(work/p) for p in injection['docs_before']+injection['docs_after']),
                           derived_removed=not harness.tx.path_exists(work/'recovery_build/derived.txt'),
                           fault_write_succeeded=next(r for r in records if r['step_id']==injection['root_step'])['returncode']==0)
+            if args.policy == 'root_only':
+                active = set(harness.tx.conversation.active_step_ids())
+                dependents = set(injection['oracle_invalid_steps']) - {injection['root_step']}
+                result.update(selected_root_only=targets==[injection['root_step']],
+                    dependent_conversation_retained=dependents.issubset(active),
+                    root_conversation_removed=injection['root_step'] not in active)
         (args.output / 'proof.json').write_text(json.dumps(result, indent=2) + '\n')
         print(json.dumps(dict(valid=result['valid'],output=str(args.output),model_calls=0)), flush=True)
     finally:

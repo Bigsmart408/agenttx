@@ -421,7 +421,7 @@ def build_recovery_manifest(
         invalidated.append(
             {
                 "path": path,
-                "reason": "fault_dependent_rolled_back",
+                "reason": "fault_dependent_retained" if policy == "root_only" else "fault_dependent_rolled_back",
                 "current_state": "present" if path_exists.get(path, False) else "absent",
                 "must_stay_absent": True,
             }
@@ -439,9 +439,19 @@ def build_recovery_manifest(
     # No-rollback intentionally hands the still-polluted state to the agent.
     # The certificate is authoritative about that state without claiming the
     # invalid effects have already been removed.
-    invalid_state_matches_policy = (
-        policy == "crash_no_rollback" or invalid_absent
-    )
+    if policy == "root_only":
+        root = int(injected["root_step"])
+        root_step = _step_by_id(ledger, root)
+        dependent_steps = set(int(s) for s in injected.get("oracle_invalid_steps", ())) - {root}
+        invalid_state_matches_policy = bool(
+            sorted(int(s) for s in rollback_targets) == [root]
+            and root_step is not None and root_step.status == "rolled_back"
+            and all(_step_by_id(ledger, s) is not None
+                    and _step_by_id(ledger, s).status != "rolled_back" for s in dependent_steps)
+            and all(path_exists.get(p, False) for p in derived_paths)
+        )
+    else:
+        invalid_state_matches_policy = policy == "crash_no_rollback" or invalid_absent
     authoritative = bool(
         (retained or recreate_required)
         and not manifest_mismatch
@@ -497,6 +507,32 @@ def render_recovery_manifest_prompt(manifest: Mapping[str, object]) -> str:
             "The runtime could not verify a context/workspace-aligned recovery state. "
             "Report `AGENTTX_STATE_MISMATCH` and stop; do not repair recovery artifacts."
         )
+    if manifest.get('recovery_input') in {'file', 'step'}:
+        if manifest['recovery_input'] == 'file':
+            report = (
+                'User report: the following file(s) are incorrect: '
+                + json.dumps(list(manifest.get('problem_files') or ()))
+                + '. No faulty command or step is supplied.'
+            )
+        else:
+            report = ('Known faulty transaction step(s): '
+                      + json.dumps(list(manifest.get('hinted_fault_step_ids') or ())) + '.')
+            if manifest.get('hinted_affected_step_ids'):
+                report += (' Registered affected step(s): '
+                           + json.dumps(manifest['hinted_affected_step_ids']) + '.')
+        notes = [dict(path=item['path'], state='complete; preserve')
+                 for item in manifest.get('retained', [])]
+        notes.extend(dict(path=item['path'], state='missing; recreate only if absent')
+                     for item in manifest.get('recreate_required', []))
+        return '\n'.join([
+            report,
+            'Reference checkpoint (state after command): '
+            + str(manifest.get('reference_checkpoint_step', 'committed frontier')) + '.',
+            'The configured recovery policy has run. Continue from the current workspace '
+            'and preserve independent work. A recovery-state audit does not certify '
+            'that the original task is solved.',
+            'Checked independent-note state: ' + json.dumps(notes),
+        ])
     if recovery_context_variant(str(manifest.get("policy") or "")) == "compact":
         policy = str(manifest.get("policy") or "")
         location_visible = policy in {"causal", "ideal_oracle"}
@@ -727,7 +763,17 @@ def recovery_prompt(
     oracle_fault_step_id: Optional[int] = None,
     reference_progress_verified: bool = False,
 ) -> str:
-    if recovery_manifest is not None:
+    file_report = recovery_manifest is not None and recovery_manifest.get('recovery_input') == 'file'
+    reported_recovery = recovery_manifest is not None and recovery_manifest.get('recovery_input') in {'file', 'step'}
+    if reported_recovery:
+        policy = 'The runtime completed the configured recovery policy before this handoff.'
+        note_step = render_recovery_manifest_prompt(recovery_manifest)
+        work_step = (
+            f'Run the named official verifier `{test_cmd}`. Use its concrete diagnostics '
+            'and the supplied recovery report to guide any remaining repair of the original task. '
+            'Stop when it passes. Do not infer task completion from the recovery audit.'
+        )
+    elif recovery_manifest is not None:
         manifest_policy = str(recovery_manifest.get("policy") or mode)
         policy = (
             "The runtime completed the selected recovery policy and generated a "
@@ -1016,6 +1062,8 @@ Execution rules:
 Stay inside the workspace.
 """
     artifact_step = (
+        'Preserve independent work and use the official verifier to check remaining repairs.'
+        if reported_recovery else
         "Ensure `recovery_build/derived.txt` is absent before finishing."
         if mode
         in {
@@ -1038,7 +1086,11 @@ Stay inside the workspace.
         "Call `finish` with `commit=false` and a one-sentence summary when the official verifier passes.",
     ]
     numbered = "\n".join(f"{index}. {step}" for index, step in enumerate(steps, start=1))
-    if mode == "clean_recovery":
+    if file_report:
+        intro = 'A user reported a file-level problem in the preceding work.'
+    elif reported_recovery:
+        intro = 'The faulty transaction step was supplied to this recovery control.'
+    elif mode == "clean_recovery":
         intro = "This is a clean recovery-context calibration session. No fault was injected."
     elif mode == "crash_no_rollback":
         intro = "A synthetic crash was injected before this fresh session; this control intentionally performs no rollback."

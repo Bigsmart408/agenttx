@@ -1,0 +1,24 @@
+\begin{table}[!ht]
+\centering
+\caption{\textbf{Natural release of obsolete state under retention.}
+Percentages measure the fraction of faulty payload objects released,
+including those released before recovery.}
+\label{tab:process-lifetimes}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+& \multicolumn{3}{c}{Released by continuation call} & \shortstack{Correct\\traces} \\
+\cmidrule(lr){2-4}
+State lifecycle & 0 & 4 & 16 & \\
+\midrule
+Request-local buffers & 100.0\% & 100.0\% & 100.0\% & 30/30 \\
+Refresh on query & 0.0\% & 100.0\% & 100.0\% & 30/30 \\
+LRU eviction & 0.0\% & 18.2\% & 61.8\% & 30/30 \\
+Expiry on access & 0.0\% & 100.0\% & 100.0\% & 30/30 \\
+Finite worker job & 0.0\% & 1.8\% & 100.0\% & 30/30 \\
+Unused persistent cache & 0.0\% & 0.0\% & 0.0\% & 30/30 \\
+Reused persistent cache & 0.0\% & 0.0\% & 0.0\% & 0/30 \\
+\bottomrule
+\end{tabular}
+\end{table}

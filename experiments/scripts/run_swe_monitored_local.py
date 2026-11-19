@@ -49,7 +49,7 @@ def context_by_policy(environ=None):
 
 def worker_command(*arguments):
     """Use a data-backed /tmp alias visible through try's subtree overlays."""
-    bwrap='/home/bfq/agenttx-deps/bubblewrap/usr/bin/bwrap'
+    bwrap='/home/bfq/agenttx-workspace/agenttx-deps/bubblewrap/usr/bin/bwrap'
     readonly=[str(CACHE/'swe_bench/venvs'),str(DATA/'tiktoken-cache'),str(VERIFIER_CACHE)]
     return [bwrap,'--bind','/','/','--dev-bind','/dev','/dev','--proc','/proc',
             '--tmpfs','/root','--setenv','HOME','/root','--bind',str(DATA/'tmp'),'/tmp',

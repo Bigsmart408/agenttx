@@ -46,6 +46,10 @@ the host can attach BPF programs and falls back to strace. Experiments that
 intentionally measure the untraced mode can start a session with
 agenttx begin --no-trace-reads.
 
+Ext4 and reflink-enabled XFS are supported as OverlayFS backing filesystems.
+Keep workspace and session storage on the same XFS volume to share file data
+across versions; see [XFS setup and validation](docs/XFS_REFLINK_SUPPORT.md).
+
 ## Recovery from a failure signal
 
 Register a trusted check before the agent works. The recovery caller then

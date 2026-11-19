@@ -1,0 +1,31 @@
+{
+  "file": "AgentTX-Motivation-Rollback-Example.pptx",
+  "editable_objects": 30,
+  "slide_rasters": 0,
+  "fonts": {
+    "Times New Roman": 17
+  },
+  "green_arrows": 0,
+  "gray_backgrounds": 0,
+  "arrow_style_matches_design": true,
+  "affected_calls": [
+    0,
+    3
+  ],
+  "independent_calls": [
+    1,
+    2,
+    4,
+    5
+  ],
+  "rollback_calls": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "text_fit_issues": [],
+  "bounds_issues": []
+}

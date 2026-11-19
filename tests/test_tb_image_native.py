@@ -104,8 +104,10 @@ def test_container_preserves_image_workdir_task_interpreter_and_uses_pinned_id(t
     assert 'AGENTTX_TRACE_SPOOL_ROOT=/var/tmp' in command
     assert '--user' not in command
     assert '--max-turns' not in command
+    assert command[command.index('--recovery-input')+1] == 'legacy'
 
     args.portable_git = tmp_path/'git-bundle'
+    args.recovery_input = 'file'
     (args.portable_git/'root').mkdir(parents=True)
     args.portable_git_wrapper = args.portable_git/'git-private-loader'
     args.portable_git_wrapper.write_text('local git')
@@ -116,6 +118,7 @@ def test_container_preserves_image_workdir_task_interpreter_and_uses_pinned_id(t
     assert any(dst=='/opt/agenttx-prerequisites/git' and ro for _,dst,ro in mounts)
     assert not any(dst in ('/lib/ld-musl-x86_64.so.1','/usr/local/bin/git','/usr/bin/git') for _,dst,_ in mounts)
     assert 'AGENTTX_TB_GIT_FALLBACK=/opt/agenttx-prerequisites/git' in command
+    assert command[command.index('--recovery-input')+1] == 'file'
 
 
 def test_runtime_git_preserves_available_image_git(tmp_path,monkeypatch):
@@ -262,6 +265,26 @@ def test_native_prompt_discloses_cleanup_even_when_fault_location_is_hidden(poli
     assert 'Preserve the protected independent recovery notes' in prompt
     if policy in ('crash_no_rollback','temporal_checkpoint','whole_branch_abort'):
         assert 'secret/fault.py' not in prompt
+
+
+@pytest.mark.parametrize('policy', [p for p in native.POLICIES if p != 'clean_recovery'])
+def test_native_report_prompt_keeps_file_input_exclusive_to_causal(policy):
+    from experiments.workloads.recovery_inject import render_recovery_manifest_prompt
+    manifest = dict(authoritative=True, policy=policy,
+        recovery_input='file' if policy == 'causal' else 'step',
+        problem_files=['src/parser.py'], hinted_fault_step_ids=[246813579],
+        localized_fault_step_ids=[987654321], oracle_fault_step_id=987654321,
+        invalidated=[dict(path='secret/derived.txt')], retained=[], recreate_required=[])
+    prompt = native.completion_prompt(
+        render_recovery_manifest_prompt(manifest), recovery_input='file')
+    assert '987654321' not in prompt and 'secret/derived.txt' not in prompt
+    assert 'recovery_build/derived.txt' not in prompt
+    assert 'does not certify' in prompt
+    assert native.OFFICIAL_VERIFIER_COMMAND in prompt
+    if policy == 'causal':
+        assert 'src/parser.py' in prompt and '246813579' not in prompt
+    else:
+        assert '246813579' in prompt and 'src/parser.py' not in prompt
 
 
 def test_six_arm_context_projection_preserves_full_control_history():

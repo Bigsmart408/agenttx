@@ -1,0 +1,168 @@
+\subsection{RQ2: Real-World Workloads}
+\label{sec:eval-agent}
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\linewidth]{FIG-SWEagent-SWEbench-Results.pdf}
+  \caption{\textbf{Recovery outcomes and cumulative model cost on real-world tasks.}
+  \small\emph{Columns show SWE-Bench Lite/SWE-agent, Terminal-Bench/SWE-agent,
+  and Terminal-Bench/Codex. Top: full-contract success rates over 300 SWE or
+  241 TB tasks per policy. SWE uses one attempt; TB uses latest outcomes after
+  registered retries and repairs. Bottom: AgentTX token savings on matched
+  successful tasks with complete costs and 95\% paired bootstrap intervals.
+  TB pairs share a compatible configuration and include every recorded attempt;
+  positive savings favor AgentTX.}}
+  \label{fig:sweagent-full}
+\end{figure*}
+
+Each non-clean run begins with a scripted recovery trajectory inside the
+benchmark workspace. A faulty producer and dependent artifact are interleaved
+with independent notes, followed by an injected-fault guard.
+This guard detects the seeded fault before the original task begins.
+Each policy determines the retained state, lost notes are replayed when needed,
+and the live model then attempts the original task.
+Clean starts without this trajectory.
+
+Checkpoints receive the registered pre-fault boundary.
+Causal ranks candidates through failed-step dependencies and checks them with
+an injection-specific marker verifier.
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\linewidth]{FIG-Realworld-Token-Ratios.pdf}
+  \caption{\textbf{Per-task changes in cumulative model cost.}
+  \small\emph{Each point is one matched successful task; panels compare
+  AgentTX with the four controls. Token change is
+  $100(T_{\mathrm{AgentTX}}/T_{\mathrm{control}}-1)$; negative values favor
+  AgentTX. Horizontal jitter separates tasks within each workload/harness
+  group. The percentage axis is linear from $-100\%$ to $+100\%$ and
+  logarithmic beyond that range, retaining every outlier.
+  All pairs from Figure~\ref{fig:sweagent-full} are included.}}
+  \label{fig:realworld-ratios}
+\end{figure*}
+
+\textbf{Workloads and success.}
+We evaluated all 300 SWE-Bench Lite tasks~\cite{swebench} with SWE-agent and
+five recovery policies, using GPT-5.6 Luna.
+Each task--policy cell has one attempt; 1,499 of 1,500 cells have complete
+results.
+The clean-reference timeout incurs 1,958,229 known tokens; final in-flight
+usage is unknown.
+
+Success requires the target \texttt{FAIL\_TO\_PASS} tests and applicable
+recovery-state, completion, and commit checks.
+We report target-test recovery success. Fault injection selects source paths
+from gold-patch file metadata, and the compact recovery handoff can include
+these paths.
+
+Terminal-Bench~\cite{tbench} covers all 241 tasks with SWE-agent and Codex under the same
+five policies and model.
+Its 2,410 unique task--harness--policy cells contain 3,121 recorded original,
+retry, and repair attempts.
+We report each cell's latest attempted outcome after one authorized ordinary
+failure retry and separately audited environment/provider repairs.
+The final model-session and verifier limits are 3,600\,s and 1,800\,s;
+historical configuration revisions remain separate in cost pairing.
+Full recovery success requires official tests and the recovery-state/context
+checks; 2,154 cells pass this contract, versus 2,156 official verifier passes.
+
+\textbf{Comparison and accounting.}
+AgentTX and the clean reference use compact context;
+no rollback, temporal checkpoints, and whole-branch rollback use full context.
+Tokens use API-reported usage and include main execution and replay.
+For TB, each cell's cost sums all recorded original, failed, retry, and repair
+attempts, including attempts preceding the latest outcome.
+We retain all known spend, totaling 4.804 billion TB tokens; 235 historical
+attempts have incomplete usage, which we leave unknown.
+
+Cost pairs contain tasks whose two latest outcomes satisfy the full
+contract and whose cells have complete accounting.
+TB pairs share a compatible configuration across their entire histories;
+mixed configurations and documented environment exclusions are recorded
+separately.
+We aggregate disjoint pairs across compatible strata and report
+$1-\sum T_{\mathrm{AgentTX}}/\sum T_{\mathrm{control}}$.
+The 95\% intervals use 20,000 paired task bootstrap samples, resampling within
+observed configuration strata for TB.
+
+\begin{table}[t]
+\centering
+\caption{\textbf{Full-contract successes on the three workload/harness combinations.}
+\small\emph{All planned tasks remain in each denominator, including incomplete
+cells. SWE uses single attempts; TB reports latest registered attempts.}}
+\label{tab:swe-full-results}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrr}
+\toprule
+ & SWE & TB & TB \\
+Policy & SWE-agent & SWE-agent & Codex \\
+ & /300 & /241 & /241 \\
+\midrule
+AgentTX & 285 & 208 & 223 \\
+Clean reference & 273 & 206 & 225 \\
+No rollback & 282 & 203 & 224 \\
+Temporal checkpoint & 284 & 206 & 224 \\
+Whole-branch rollback & 243 & 208 & 227 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Task outcomes.}
+Figure~\ref{fig:sweagent-full} and Table~\ref{tab:swe-full-results} show that
+success differences depend on workload and harness.
+On SWE, AgentTX succeeds on 285 tasks, compared with 282 for no rollback,
+284 for checkpoints, and 243 for whole-branch rollback.
+On TB/SWE-agent, AgentTX and whole-branch rollback both succeed on 208 tasks;
+the other policies succeed on 203--206.
+On TB/Codex, AgentTX succeeds on 223 tasks, below whole-branch rollback's 227
+and the clean reference's 225.
+
+\begin{table}[t]
+\centering
+\caption{\textbf{Cumulative API token savings on matched successful tasks.}
+\small\emph{Each cell gives total savings and paired task count in parentheses.
+The matched task set differs by control.
+All recorded retry and replay costs are included.}}
+\label{tab:swe-paired-savings}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrr}
+\toprule
+ & SWE & TB & TB \\
+Control & SWE-agent & SWE-agent & Codex \\
+\midrule
+No rollback & 58.43\% (275) & 24.70\% (176) & 26.47\% (200) \\
+Temporal checkpoint & 17.55\% (278) & 44.69\% (175) & 25.39\% (197) \\
+Whole-branch rollback & 27.86\% (239) & 35.91\% (177) & 28.43\% (200) \\
+Clean reference & 14.38\% (264) & 36.57\% (172) & 17.90\% (198) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Model cost.}
+On SWE's jointly successful pairs, AgentTX reduces cumulative tokens by
+58.43\%, 17.55\%, and 27.86\% against no rollback, checkpoints, and
+whole-branch rollback, respectively (Table~\ref{tab:swe-paired-savings}).
+The corresponding TB reductions are 24.70\%, 44.69\%, and 35.91\% with
+SWE-agent, and 26.47\%, 25.39\%, and 28.43\% with Codex.
+All three operational-control comparisons have positive lower confidence
+bounds in each cohort.
+
+For scale, the 176 TB/SWE-agent pairs against no rollback consume 41.38
+million AgentTX tokens versus 54.95 million control tokens.
+The corresponding 200 Codex pairs consume 425.41 million versus 578.58
+million tokens, including their full attempt histories.
+Across complete SWE runs, including failures, AgentTX averages 135,004 tokens
+versus 311,673 for no rollback.
+
+\textbf{Per-task variation.}
+Figure~\ref{fig:realworld-ratios} separates tasks with lower and higher
+token costs. Against temporal checkpoints, AgentTX uses fewer tokens on
+188/278 SWE tasks (67.6\%), 100/175 TB/SWE-agent tasks (57.1\%), and
+138/197 TB/Codex tasks (70.1\%). It uses more tokens on the remaining
+32.4\%, 42.9\%, and 29.9\%, respectively.
+On TB/Codex machine-learning/training tasks,
+AgentTX costs 10.54\% more than no rollback (19 pairs) and 6.48\% more than
+checkpoints (20 pairs).
+

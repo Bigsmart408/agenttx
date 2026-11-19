@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import os
+import pwd
 import signal
 import shlex
 import shutil
@@ -204,11 +205,19 @@ def _cleanup_sweagent_runtime() -> None:
     Path("/root/.swe-agent-env").unlink(missing_ok=True)
 
 
-def _initialize_workspace_repo(workspace: Path) -> None:
+def _initialize_workspace_repo(workspace: Path, *, task_user: str | None = None) -> None:
     if (workspace / ".git").exists():
         return
-    subprocess.run(["git", "init", "--quiet"], cwd=workspace, check=True)
-    subprocess.run(["git", "add", "-A"], cwd=workspace, check=True)
+    options = dict(cwd=workspace, check=True)
+    if task_user:
+        account = pwd.getpwnam(task_user)
+        # The namespace coordinator is root, but the image workspace and its
+        # repository must retain the original task account and ownership.
+        options.update(user=account.pw_uid, group=account.pw_gid, extra_groups=[],
+                       env=dict(os.environ, HOME=account.pw_dir,
+                                USER=account.pw_name, LOGNAME=account.pw_name))
+    subprocess.run(["git", "init", "--quiet"], **options)
+    subprocess.run(["git", "add", "-A"], **options)
     subprocess.run(
         [
             "git",
@@ -222,8 +231,7 @@ def _initialize_workspace_repo(workspace: Path) -> None:
             "-m",
             "M3 recovery baseline",
         ],
-        cwd=workspace,
-        check=True,
+        **options,
     )
 
 
@@ -533,7 +541,9 @@ class SWEAgentNativeWorkloadHarness:
             signal.setitimer(signal.ITIMER_REAL, self.timeout_s)
         _cleanup_sweagent_runtime()
         try:
-            _initialize_workspace_repo(workdir)
+            task_pool = getattr(getattr(transaction_harness, "tx", None), "pool", None)
+            _initialize_workspace_repo(
+                workdir, task_user=getattr(task_pool, "tool_user", None))
             base_prompt = (
                 str(native_context["original_task"])
                 if native_context is not None else native_base_task or task
@@ -647,13 +657,23 @@ class SWEAgentNativeWorkloadHarness:
                 result = adapter.finish(commit=commit)
             else:
                 native_messages = []
-                result = adapter.run(
-                    swe_env,
-                    problem,
-                    cell_output,
-                    max_steps=1 if clean_baseline else self.max_steps,
-                    commit=commit,
-                )
+                # Clean runs need the same outer deadline checks as recovery
+                # runs: the upstream step loop can catch the one-shot alarm.
+                adapter.setup(swe_env, problem, cell_output)
+                completed = 0
+                step_output = None
+                step_limit = 1 if clean_baseline else self.max_steps
+                while step_output is None or not bool(getattr(step_output, "done", False)):
+                    enforce_deadline()
+                    if step_limit is not None and completed >= step_limit:
+                        raise SWEAgentIntegrationError(
+                            f"SWE-agent exceeded AgentTX max_steps={step_limit}"
+                        )
+                    step_output = adapter.step()
+                    enforce_deadline()
+                    completed += 1
+                    agent.save_trajectory()
+                result = adapter.finish(commit=commit)
             # SWE-agent also auto-submits on internal errors and budget exits.
             # Those preserve a patch for grading, but are not normal completion.
             submitted = str(result.summary) == "submitted"
@@ -752,6 +772,9 @@ class SWEAgentNativeWorkloadHarness:
             if adapter is not None and transaction_harness is None:
                 with suppress(Exception):
                     adapter.close(destroy=True)
+            elif adapter is not None and getattr(adapter, 'environment', None) is not None:
+                with suppress(Exception):
+                    adapter.environment.deactivate()
             if swe_env is not None:
                 deployment = swe_env.deployment
                 with suppress(Exception):

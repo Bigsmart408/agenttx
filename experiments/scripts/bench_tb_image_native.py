@@ -8,6 +8,7 @@ this new cohort must not be merged with historical host-agent TB results.
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 import dataclasses
 import hashlib
 import json
@@ -23,17 +24,29 @@ import traceback
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT/'src'), str(ROOT)]
 from experiments.scripts.experiment_provenance import source_manifest
-from experiments.scripts.experiment_credentials import private_values, purge_private_codex_auth
+from experiments.scripts.experiment_credentials import private_values, purge_private_codex_auth, task_user_codex_profile
 from experiments.workloads import terminal_bench_suite as tb
+from experiments.scripts.tb_verifier_download_fallback import CONTRACT as VERIFIER_DOWNLOAD_CONTRACT, configure as configure_verifier_download_fallback
+from experiments.scripts import tb_verifier_cargo_lock
 
 PROTOCOL = 'agenttx.tb-image-native-recovery/v7'
+FILE_REPORT_PROTOCOL = 'agenttx.tb-image-native-file-report-step-controls/v1'
 COMPLETION_CONTRACT = 'explicit-derived-cleanup/v1'
 SUCCESS_POLICY = 'accept-verified-model-timeout/v1'
+COMMON_APP_TMP_TASKS = frozenset({'path-tracing-reverse'})
+COMMON_APP_TMP_CONTRACT = 'shared-app-tmp-overlay-native-rename/v2-fork-compatible'
+REFERENCE_INPUT_CONTRACT = 'restore-pinned-task-inputs-before-each-verifier/v1'
+WASM_REFERENCE_INPUT_CONTRACT = 'restore-pinned-wasm-input-pair-before-each-verifier/v1'
+REFERENCE_INPUT_FILES = {
+    'path-tracing-reverse': ('mystery',),
+    'wasm-pipeline': ('module.wasm', 'libcompute.so'),
+}
+TASK_USER_WORKSPACE_CONTRACT = 'original-task-user-workspace-and-private-profile/v3'
 MODEL_TIMEOUT_S = 3600
 VERIFIER_TIMEOUT_S = 1800
 COORDINATOR_GIT = Path('/usr/local/bin/git')
 OFFICIAL_VERIFIER_COMMAND = 'bash /opt/agenttx-verifier/verify.sh'
-POLICIES = ('clean_recovery', 'crash_no_rollback', 'temporal_checkpoint', 'whole_branch_abort', 'causal', 'ideal_oracle')
+POLICIES = ('clean_recovery', 'crash_no_rollback', 'root_only', 'turn_checkpoint', 'temporal_checkpoint', 'whole_branch_abort', 'causal', 'ideal_oracle')
 CONTEXTS = {p: ('compact' if p in ('causal', 'ideal_oracle', 'clean_recovery') else 'full') for p in POLICIES}
 
 
@@ -52,10 +65,12 @@ def codex_recovery_prompt(conversation, policy, handoff):
             + '\n\nCurrent authoritative task and recovery handoff:\n' + handoff)
 
 
-def verifier_entrypoint_script(prepared, results_root=Path('/results'), script=None):
+def verifier_entrypoint_script(prepared, results_root=Path('/results'), script=None, reference_inputs=()):
     """Expose diagnostics from the unchanged bootstrap/test script to callers."""
     import shlex
     script=script or ('/opt/agenttx-verifier/setup.sh' if prepared else '/opt/agenttx-verifier/run-tests.sh')
+    restore = ''.join('cp -- '+shlex.quote(str(source))+' '+shlex.quote(str(target))+' || exit $?\n'
+                      for source, target in reference_inputs)
     return '''#!/bin/bash
 set -u
 results_root='''+shlex.quote(str(results_root))+'''
@@ -69,7 +84,7 @@ for suffix in stdout stderr rc xml; do
   rm -f "$file" || exit $?
 done
 export TEST_DIR=/tests
-bash '''+shlex.quote(str(script))+''' >"$attempt/bootstrap.stdout" 2>"$attempt/bootstrap.stderr"
+'''+restore+'''bash '''+shlex.quote(str(script))+''' >"$attempt/bootstrap.stdout" 2>"$attempt/bootstrap.stderr"
 rc=$?
 cat "$attempt/bootstrap.stdout"
 cat "$attempt/bootstrap.stderr" >&2
@@ -82,6 +97,18 @@ if [ -f "$attempt/test.stderr" ]; then cat "$attempt/test.stderr" >&2; fi
 ''' if prepared else '')+'''printf '%s\\n' "$rc" > "$attempt/returncode"
 exit "$rc"
 '''
+
+
+def extract_reference_input(image, source, destination):
+    """Copy a task input from its pinned, never-started official image."""
+    cid = subprocess.check_output(['docker', 'create', '--network=none', '--cap-drop=ALL',
+                                   '--entrypoint=/bin/true', image], text=True, timeout=30).strip()
+    try:
+        subprocess.run(['docker', 'cp', cid+':'+source, str(destination)], check=True,
+                       capture_output=True, text=True, timeout=30)
+    finally:
+        subprocess.run(['docker', 'rm', '-f', cid], capture_output=True, text=True, timeout=30)
+    return dict(image=image, source=source, sha256=hashlib.sha256(destination.read_bytes()).hexdigest())
 
 
 def outcome_success(model_rc, verifier_rc, contracts_valid):
@@ -97,14 +124,19 @@ def result_success(row):
         row.get('documents_valid') and row.get('derived_removed')))
 
 
-def completion_prompt(task_text):
+def completion_prompt(task_text, *, recovery_input='legacy'):
     """Disclose the same scored cleanup obligation to every treatment arm.
 
     This fixed synthetic output is part of the public completion contract,
     not a localized fault source or an oracle step. Cleanup is performed by
     the agent, so its tool calls and API cost remain in the observation.
     """
-    return task_text + (
+    requirements = (
+        '\n\nPreserve independent work and the protected recovery notes. '
+        'Use the official verifier to guide remaining repairs. '
+        'The recovery-state audit does not certify that the original task is solved. '
+        'Do not change official tests.\n'
+        if recovery_input == 'file' else
         '\n\nRecovery completion requirements (identical for all policies):\n'
         'Before finishing, ensure `recovery_build/derived.txt` is absent. '
         'This reserved file is an invalid synthetic crash-derived artifact, '
@@ -112,6 +144,8 @@ def completion_prompt(task_text):
         'Preserve the protected independent recovery notes. '
         'A passing official test alone does not complete recovery while this '
         'artifact remains. Do not change official tests.\n'
+    )
+    return task_text + requirements + (
         'Work in the original image working directory using its installed runtimes.'
         '\n\nOfficial task verifier (executable shell command, for every policy):\n'
         f'`{OFFICIAL_VERIFIER_COMMAND}`\n'
@@ -273,6 +307,26 @@ def build_command(args, identity, cell, task_file, test_script, tests, local_uv)
         mounts.add(args.swe_agent_root.resolve())
     for source in sorted(mounts):
         mount(command, source)
+    if getattr(args, 'task', None) == 'reshard-c4-data':
+        from experiments.scripts.tb_verifier_c4_asset import PINNED_ASSET, SHA256
+        pinned_asset = Path(os.environ.get('AGENTTX_TB_C4_VERIFIER_ASSET',
+            '/mnt/data/agenttx-runtime/cache/tb-external-assets/c4-heldout-00009.json.gz'))
+        with pinned_asset.open('rb') as pinned_stream:
+            if hashlib.file_digest(pinned_stream, 'sha256').hexdigest() != SHA256:
+                raise ValueError('Pinned C4 verifier prerequisite checksum mismatch')
+        mount(command, pinned_asset, PINNED_ASSET)
+        from scripts.patch_try_private_dev import patch_source as patch_devices
+        private_try = cell/'private-dev-try'
+        from scripts.patch_try_session_visibility import patch_source as patch_session
+        private_try.write_text(patch_session(patch_devices((ROOT/'third_party/try/try').read_text())))
+        private_try.chmod(0o755)
+        mount(command, private_try, str(ROOT/'third_party/try/try'))
+    if getattr(args, 'task', None) in COMMON_APP_TMP_TASKS:
+        from scripts.patch_try_common_root import patch_source
+        patched_try = cell/'native-rename-try'
+        patched_try.write_text(patch_source((ROOT/'third_party/try/try').read_text()))
+        patched_try.chmod(0o755)
+        mount(command, patched_try, str(ROOT/'third_party/try/try'))
     if getattr(args,'worker_compatibility',None):
         native,target,_=args.worker_compatibility
         mount(command,native,str(target))
@@ -281,9 +335,19 @@ def build_command(args, identity, cell, task_file, test_script, tests, local_uv)
     mount(command, test_script, '/opt/agenttx-verifier/run-tests.sh')
     mount(command, tests, '/opt/agenttx-verifier/tests')
     for source, destination in getattr(args, 'verifier_mounts', []):
+        if getattr(args, 'task', None) == 'reshard-c4-data' and destination == '/probe/run.sh':
+            from experiments.scripts.tb_verifier_c4_asset import patch_source as patch_c4_asset
+            cached_script = cell/'verified-c4-cache-run.sh'
+            cached_script.write_text(patch_c4_asset(Path(source).read_text()))
+            source = cached_script
         mount(command, source, destination)
     if getattr(args, 'verifier_setup', None):
-        mount(command, args.verifier_setup, '/opt/agenttx-verifier/setup.sh')
+        setup_source = args.verifier_setup
+        if getattr(args, 'task', None) == 'reshard-c4-data':
+            from experiments.scripts.tb_verifier_c4_asset import patch_source as patch_c4_asset
+            setup_source = cell/'verified-c4-final-setup.sh'
+            setup_source.write_text(patch_c4_asset(Path(args.verifier_setup).read_text()))
+        mount(command, setup_source, '/opt/agenttx-verifier/setup.sh')
     if getattr(args, 'verifier_entrypoint', None):
         mount(command, args.verifier_entrypoint, '/opt/agenttx-verifier/verify.sh')
     mount(command, local_uv, '/tmp/agenttx-uv')
@@ -318,11 +382,15 @@ def build_command(args, identity, cell, task_file, test_script, tests, local_uv)
                PIP_INDEX_URL='https://mirrors.aliyun.com/pypi/simple',
                UV_INDEX_URL='https://mirrors.aliyun.com/pypi/simple',
                UV_CACHE_DIR='/results/cache/uv', PIP_CACHE_DIR='/results/cache/pip',
-               UV_PYTHON_DOWNLOADS='never', UV_HTTP_TIMEOUT='40',
+               UV_PYTHON_DOWNLOADS='never', UV_HTTP_TIMEOUT=str(DOWNLOAD_HTTP_TIMEOUT_S),
                CODEX_CONFIG_FILE=str(args.profile_dir/'config.toml'),
                CODEX_AUTH_FILE=str(args.profile_dir/'auth.json'),
                AGENTTX_SWE_PROFILE=str(args.profile_dir/'sweagent.toml'))
     if task_user:env['AGENTTX_TB_TASK_USER']=task_user
+    if getattr(args, 'task', None) in COMMON_APP_TMP_TASKS:
+        env['TRY_COMMON_APP_TMP_OVERLAY'] = '1'
+    if getattr(args,'task',None)=='hf-train-lora-adapter' and os.environ.get('AGENTTX_TB_HF_PREINSTALL')=='1':
+        env['AGENTTX_TB_HF_PREINSTALL']='1'
     if portable_git:env['AGENTTX_TB_GIT_FALLBACK']='/opt/agenttx-prerequisites/git'
     if args.swe_agent_root:
         env['AGENTTX_SWE_AGENT_ROOT'] = str(args.swe_agent_root)
@@ -335,7 +403,8 @@ def build_command(args, identity, cell, task_file, test_script, tests, local_uv)
                 'inside', '--task-file', '/agenttx-task.json', '--output-dir', '/results',
                 '--policy', cell.name, '--harness', args.harness, '--model', args.model,
                 '--timeout', str(args.timeout), '--verifier-timeout', str(args.verifier_timeout),
-                '--fault-seed', str(getattr(args, 'fault_seed', '20261019'))]
+                '--fault-seed', str(getattr(args, 'fault_seed', '20261019')),
+                '--recovery-input', getattr(args, 'recovery_input', 'legacy')]
     if getattr(args, 'verifier_setup', None):
         command += ['--prepared-verifier']
     if args.preflight_only:
@@ -350,7 +419,9 @@ def run_host(args):
     rows = []
     frozen = source_manifest(ROOT)
     (args.output_dir/'source-manifest.json').write_text(json.dumps(frozen,indent=2))
-    registration = dict(protocol=PROTOCOL, protocol_validation_only=True, formal_eligible=False,
+    recovery_input = getattr(args, 'recovery_input', 'legacy')
+    registration = dict(protocol=FILE_REPORT_PROTOCOL if recovery_input == 'file' else PROTOCOL,
+        recovery_input=recovery_input, protocol_validation_only=True, formal_eligible=False,
         source_sha256=frozen['sha256'], model=args.model, reasoning_effort='max', count_limit=None,
         context_variant='per_policy', contexts=CONTEXTS, retained_history_call_limit=6,
         fault_seed=str(getattr(args, 'fault_seed', '20261019')),
@@ -384,7 +455,8 @@ def run_host(args):
             registration['task_baseline_audited']=baseline_audited
             folder=evidence_path.parent
             args.verifier_setup=args.output_dir/'verifier-setup.sh'
-            args.verifier_setup.write_text((folder/'run.sh').read_text().replace('/results/baseline','/results/verifier'))
+            args.verifier_setup.write_text(configure_verifier_download_fallback(configure_verifier_download_timeout(
+                (folder/'run.sh').read_text().replace('/results/baseline','/results/verifier'))))
             original_command=json.loads((folder/'command.json').read_text())
             for item in original_command:
                 if not item.startswith('type=bind,'):continue
@@ -399,16 +471,31 @@ def run_host(args):
             effective,versions=effective_script((source/'run-tests.sh').read_text(),args.task)
             script=args.output_dir/'effective-run-tests.sh';script.write_text(effective)
             args.verifier_setup=args.output_dir/'verifier-setup.sh'
-            args.verifier_setup.write_text(SETUP.replace('/results/baseline','/results/verifier'))
+            args.verifier_setup.write_text(configure_verifier_download_fallback(configure_verifier_download_timeout(
+                SETUP.replace('/results/baseline','/results/verifier'))))
             args.verifier_mounts=[(script,'/probe/effective-run-tests.sh'),(tests,'/probe/tests')]
             for version in {v['resolved'] for v in versions}:
                 binary=TOOLS/'bin/uv' if version=='0.7.13' else TOOLS/f'uv-{version}/bin/uv'
                 args.verifier_mounts.append((binary,'/probe/uv-'+version))
+        if args.task == tb_verifier_cargo_lock.TASK:
+            args.verifier_setup.write_text(tb_verifier_cargo_lock.configure(args.verifier_setup.read_text()))
+            registration['verifier_toolchain_contract'] = tb_verifier_cargo_lock.CONTRACT
+            registration['verifier_setup_sha256'] = file_hash(args.verifier_setup)
         local_uv = local_uv or args.uv
         if local_uv is None:
             raise ValueError('provide --uv for the official test bootstrap')
         args.verifier_entrypoint=args.output_dir/'official-verifier.sh'
-        args.verifier_entrypoint.write_text(verifier_entrypoint_script(bool(args.verifier_setup)))
+        reference_inputs = []
+        for name in REFERENCE_INPUT_FILES.get(args.task, ()):
+            reference = args.output_dir/('original-task-input-'+name)
+            proof = extract_reference_input(identity['id'], '/app/'+name, reference)
+            registration.setdefault('reference_inputs', {})[name] = proof
+            if name == 'mystery':
+                registration['reference_input'] = proof
+            immutable = '/opt/agenttx-verifier/original-inputs/'+name
+            args.verifier_mounts.append((reference, immutable))
+            reference_inputs.append((immutable, '/app/'+name))
+        args.verifier_entrypoint.write_text(verifier_entrypoint_script(bool(args.verifier_setup), reference_inputs=reference_inputs))
         task_file = args.output_dir/'task.json'
         task_file.write_text(json.dumps(dataclasses.asdict(task),indent=2))
         registration.update(image=identity, tests=tree_manifest(tests), test_layout=test_layout,
@@ -422,6 +509,8 @@ def run_host(args):
             for policy in args.policies:
                 cell = args.output_dir/policy
                 cell.mkdir(mode=0o700)
+                from experiments.scripts.tb_prerequisite_cache import seed_uv_cache
+                prerequisite_cache = seed_uv_cache(args.task, cell)
                 from experiments.scripts.tb_task_services import TaskServices
                 services=TaskServices(source,args.task,cell,identity['id']).start()
                 try:command = services.apply(build_command(args,identity,cell,task_file,script,tests,local_uv))
@@ -451,6 +540,12 @@ def run_host(args):
                 if rc not in (0, 1) and row.get('completed'):
                     row.update(completed=False,status='infrastructure_error')
                 row['api_usage'] = logged_usage(cell, args.harness, row)
+                if prerequisite_cache:
+                    row['prerequisite_cache'] = prerequisite_cache
+                    if row.get('prerequisite_install'):
+                        row['prerequisite_cache']['preparation']=row['prerequisite_install']['mode']
+                if services.download_proxy:
+                    row['download_network_retry']=services.download_proxy.metadata
                 (cell/'host-result.json').write_text(json.dumps(row,indent=2))
                 rows.append(row)
                 print(json.dumps({k:row.get(k) for k in ('policy','status','completed','error','host_error')}),flush=True)
@@ -521,17 +616,53 @@ def codex_partial_session_usage(cell, row):
                 complete=False, source='codex_session_response_usage', evidence=evidence)
 
 
+HF_CACHE_CONTRACT = 'task-hf-home-survives-adapter-exit/v1'
+DOWNLOAD_HTTP_TIMEOUT_S = 180
+DOWNLOAD_TIMEOUT_CONTRACT = 'uv-agent-and-verifier-read-timeout-180s/v2'
+
+
+def configure_verifier_download_timeout(script):
+    """Keep bootstrap's explicit export consistent with the task environment."""
+    pattern = r'(?m)^export UV_HTTP_TIMEOUT=\d+$'
+    if not re.search(pattern, script):
+        raise ValueError('verifier bootstrap has no registered UV_HTTP_TIMEOUT export')
+    return re.sub(pattern, 'export UV_HTTP_TIMEOUT='+str(DOWNLOAD_HTTP_TIMEOUT_S), script)
+
+
+def configure_task_download_timeout():
+    """Allow slow dependency transfers without changing model/test deadlines."""
+    os.environ['UV_HTTP_TIMEOUT'] = str(DOWNLOAD_HTTP_TIMEOUT_S)
+    return dict(contract=DOWNLOAD_TIMEOUT_CONTRACT,
+                uv_http_timeout_s=DOWNLOAD_HTTP_TIMEOUT_S)
+
+
+def configure_task_hf_cache():
+    """Resolve task cache before an adapter supplies its temporary XDG home.
+
+    Only pin the environment: no task assets are created or downloaded here.
+    The agent and trusted verifier inherit the same private task cache.
+    """
+    cache = os.environ.get('HF_HOME')
+    if not cache:
+        cache = str(Path(os.environ.get('XDG_CACHE_HOME') or Path.home()/'.cache')/'huggingface')
+    os.environ['HF_HOME'] = cache
+    return dict(contract=HF_CACHE_CONTRACT, hf_home=cache)
+
+
 def run_inside(args):
     from agenttx.harness import CodingAgentHarness
     from agenttx.policy import CommitPolicy
     from experiments.scripts.bench_official_tasks import (_create_workload_harness, _apply_blind_policy,
-        _randomized_crash_docs, _auto_localize_policy, _apply_policy)
+        _randomized_crash_docs, _auto_localize_policy, _apply_policy,
+        _reported_recovery_policy, _reported_recovery_manifest)
     from experiments.workloads.recovery_inject import (document_text_valid, missing_independent_docs,
         independent_work_discarded, doc_replay_prompt, read_recovery_documents,
         build_recovery_manifest, render_recovery_manifest_prompt)
     output=args.output_dir; workspace=Path.cwd()
     task=tb.TBTask(**json.loads(args.task_file.read_text()))
-    row=dict(protocol=PROTOCOL,protocol_validation_only=True,formal_eligible=False,
+    recovery_input = getattr(args, 'recovery_input', 'legacy')
+    row=dict(protocol=FILE_REPORT_PROTOCOL if recovery_input == 'file' else PROTOCOL,
+             recovery_input=recovery_input,protocol_validation_only=True,formal_eligible=False,
              task=task.task_id,policy=args.policy,harness=args.harness,
              model=args.model,reasoning_effort='max',count_limit=None,
              context_variant=CONTEXTS[args.policy],recovery_context_variant=CONTEXTS[args.policy],
@@ -540,8 +671,38 @@ def run_inside(args):
              doc_replay_tool_calls=0,model_calls=0,
              workspace=str(workspace),agent_runtime='official_task_container',
              verifier_runtime='same_official_task_container',timings={})
-    started=time.perf_counter(); h=None
+    started=time.perf_counter(); h=None; task_profile_stack=ExitStack()
     try:
+        download_timeout = configure_task_download_timeout()
+        if task.task_id in COMMON_APP_TMP_TASKS:
+            row['app_tmp_filesystem_contract'] = COMMON_APP_TMP_CONTRACT
+            row['app_tmp_try_sha256'] = hashlib.sha256((ROOT/'third_party/try/try').read_bytes()).hexdigest()
+            row['reference_input_contract'] = REFERENCE_INPUT_CONTRACT
+            row['reference_input_sha256'] = hashlib.sha256(Path('/opt/agenttx-verifier/original-inputs/mystery').read_bytes()).hexdigest()
+        if task.task_id == 'wasm-pipeline':
+            row['reference_input_contract'] = WASM_REFERENCE_INPUT_CONTRACT
+            row['reference_input_sha256_by_file'] = {
+                name: file_hash(Path('/opt/agenttx-verifier/original-inputs')/name)
+                for name in REFERENCE_INPUT_FILES[task.task_id]
+            }
+        if task.task_id == 'reshard-c4-data':
+            row['device_namespace_contract'] = 'private-dev-tmpfs-no-backing-terminal-alias/v1'
+            from experiments.scripts.tb_verifier_c4_asset import CONTRACT as c4_asset_contract
+            row['c4_verifier_asset_contract'] = c4_asset_contract
+            row['session_visibility_contract'] = 'coordinator-session-hidden-execution-scripts-readonly/v1'
+        row['download_timeout_contract'] = download_timeout['contract']
+        row['verifier_download_contract'] = VERIFIER_DOWNLOAD_CONTRACT
+        if task.task_id == tb_verifier_cargo_lock.TASK:
+            row['verifier_toolchain_contract'] = tb_verifier_cargo_lock.CONTRACT
+        row['download_timeout_environment'] = download_timeout
+        hf_cache = configure_task_hf_cache()
+        row['hf_cache_contract'] = hf_cache['contract']
+        row['hf_cache_environment'] = hf_cache
+        from experiments.scripts.tb_sudo_download_proxy import configure as configure_sudo_proxy
+        sudo_proxy = configure_sudo_proxy(task.task_id)
+        if sudo_proxy:
+            row['sudo_download_proxy_contract'] = sudo_proxy['contract']
+            row['sudo_download_proxy'] = sudo_proxy
         os.environ['AGENTTX_RECOVERY_CONTEXT']=CONTEXTS[args.policy]
         os.environ['AGENTTX_FAULT_SEED']=args.fault_seed
         row['runtime_tools']=prepare_runtime_tools(output)
@@ -551,8 +712,19 @@ def run_inside(args):
                                    capture_output=True,text=True,check=True).stdout
         row['task_python']=task_python
         row['worker_python']=sys.executable
+        from experiments.scripts.tb_prerequisite_cache import install_fixed_prerequisites
+        prerequisite_install=install_fixed_prerequisites(task.task_id,output)
+        if prerequisite_install:row['prerequisite_install']=prerequisite_install
         task_user=os.environ.get('AGENTTX_TB_TASK_USER') or None
         row['original_task_user']=task_user or 'root'
+        if task_user:
+            row['task_user_workspace_contract']=TASK_USER_WORKSPACE_CONTRACT
+            if args.harness == 'sweagent':
+                from agenttx.agents.swe_task_user_tools import TASK_USER_SWE_TOOLS_CONTRACT
+                row['task_user_swe_tools_contract']=TASK_USER_SWE_TOOLS_CONTRACT
+            if args.harness == 'codex':
+                row['task_user_codex_profile']=task_profile_stack.enter_context(
+                    task_user_codex_profile(task_user))
         h=CodingAgentHarness(workspace,session_dir=output/'session',trace_backend='strace',
             tool_user=task_user,
             policy=CommitPolicy(workspace,allow_external_writes=True,ephemeral_roots=(Path('/root'),Path('/tmp'))))
@@ -564,6 +736,96 @@ def run_inside(args):
         # Preflight is infrastructure, not part of the task trajectory.
         tx.rollback(gate.step_id)
         if args.preflight_only:
+            selected_probe = None
+            if args.policy == 'root_only':
+                probe_docs, probe_after, _ = _randomized_crash_docs(task,task.task_id,0)
+                probe_agent = type('Agent',(),{'harness':h})()
+                before_source = h.call_tool('read_file', {'path':task.faulty_relpath})
+                probe_injected = tb.inject_task_trajectory(probe_agent,task,sys.executable,
+                    docs=probe_docs,fault_after_docs=probe_after)
+                if not probe_injected['tests_failed']:
+                    raise RuntimeError('Selected effects preflight did not inject a failing crash')
+                selected_targets, _ = _apply_blind_policy(probe_agent,probe_injected,'root_only')
+                after_source = h.call_tool('read_file', {'path':task.faulty_relpath})
+                dependent_ids = set(probe_injected['oracle_invalid_steps']) - {probe_injected['root_step']}
+                active_context = set(tx.conversation.active_step_ids())
+                state_paths = [probe_injected['faulty_path'],*probe_injected.get('derived_paths',[])]
+                manifest = build_recovery_manifest(policy='root_only',ledger=tx.ledger,
+                    injected=probe_injected,docs=probe_docs,
+                    document_contents=read_recovery_documents(probe_agent,probe_docs),
+                    workdir=workspace,rollback_targets=selected_targets,
+                    path_exists={p:tx.path_exists(workspace/p) for p in state_paths})
+                selected_probe = dict(rollback_ids=selected_targets,
+                    selected_root_only=selected_targets==[probe_injected['root_step']],
+                    original_source_restored=(before_source.returncode==after_source.returncode
+                        and (before_source.returncode!=0 or before_source.stdout==after_source.stdout)),
+                    dependent_conversation_retained=dependent_ids.issubset(active_context),
+                    root_conversation_removed=probe_injected['root_step'] not in active_context,
+                    derived_retained=all(tx.path_exists(workspace/p) for p in probe_injected['derived_paths']),
+                    manifest_authoritative=manifest['authoritative'],external_model_calls=0)
+                if not all(selected_probe[k] for k in ('selected_root_only','original_source_restored',
+                        'dependent_conversation_retained','root_conversation_removed',
+                        'derived_retained','manifest_authoritative')):
+                    raise RuntimeError('Selected effects preflight state mismatch')
+                row['selected_effects_preflight']=selected_probe
+                (output/'selected-effects-manifest.json').write_text(json.dumps(manifest,indent=2))
+            if task_user:
+                # Exercise the actual crash/policy path before checking the
+                # original user's workspace. A clean-only probe cannot detect
+                # ancestor metadata lost by incremental snapshots/rollback.
+                probe_targets = selected_probe['rollback_ids'] if selected_probe else []
+                if args.policy not in {'clean_recovery','root_only'}:
+                    probe_docs, probe_after, _ = _randomized_crash_docs(task,task.task_id,0)
+                    probe_agent = type('Agent',(),{'harness':h})()
+                    probe_injected = tb.inject_task_trajectory(probe_agent,task,sys.executable,
+                        docs=probe_docs,fault_after_docs=probe_after)
+                    if not probe_injected['tests_failed']:
+                        raise RuntimeError('preflight injected fault did not fail crash contract')
+                    if args.policy == 'causal':
+                        probe_targets, _ = _auto_localize_policy(probe_agent,probe_injected)
+                    elif args.policy == 'ideal_oracle':
+                        probe_targets = _apply_policy(probe_agent,args.policy,
+                            probe_injected['root_step'],oracle_targets=probe_injected['oracle_invalid_steps'])
+                    else:
+                        probe_targets, _ = _apply_blind_policy(probe_agent,probe_injected,args.policy)
+                writable_probe = tx.run_tool('original-user-workspace-preflight',[
+                    'bash','-c','set -e; test "$(id -u)" -ne 0; '
+                    'probe=.agenttx-workspace-preflight-$$; mkdir "$probe"; rmdir "$probe"; '
+                    'id -un; stat -c "%u:%g:%a" .'],trace_reads=False,timeout_s=30)
+                if writable_probe.returncode or writable_probe.stdout.splitlines()[0] != task_user:
+                    raise RuntimeError('original user workspace not writable after policy: '+writable_probe.stderr)
+                from experiments.scripts.sweagent_native_workload import _initialize_workspace_repo
+                _initialize_workspace_repo(workspace, task_user=task_user)
+                identity_probe=tx.run_tool('original-user-git-preflight',[
+                    'bash','-c','id -un && git diff --stat && test "$(id -u)" -ne 0'],
+                    trace_reads=False,timeout_s=30)
+                if identity_probe.returncode or identity_probe.stdout.strip()!=task_user:
+                    raise RuntimeError('original task user git preflight failed: '+identity_probe.stderr)
+                restored=restore_official_test_assets(tx,preserve_directory=True)
+                if restored.returncode:
+                    raise RuntimeError('mounted official test asset preflight failed: '+restored.stderr)
+                row['task_user_workspace_preflight']=dict(original_user=task_user,
+                    policy=args.policy,rollback_ids=probe_targets,
+                    workspace_identity_and_metadata=writable_probe.stdout.strip(),
+                    workspace_writable_returncode=writable_probe.returncode,
+                    git_identity_returncode=identity_probe.returncode,
+                    test_assets_returncode=restored.returncode,no_model_calls=True)
+                if args.harness == 'codex':
+                    profile_probe=tx.run_tool('original-user-profile-preflight',[
+                        'bash','-c','test -r "$CODEX_CONFIG_FILE" && test -r "$CODEX_AUTH_FILE"'],
+                        trace_reads=False,timeout_s=30)
+                    if profile_probe.returncode:
+                        raise RuntimeError('original task user cannot read the unchanged Codex profile')
+                    row['task_user_workspace_preflight']['private_profile_readable']=True
+                # The independent completion-contract check below requires a
+                # clean disposable view, including for the no-rollback policy.
+                active_probe_steps = tx.ledger.active_uncommitted()
+                if active_probe_steps:
+                    tx.rollback(active_probe_steps[0].step_id)
+            elif selected_probe:
+                active_probe_steps = tx.ledger.active_uncommitted()
+                if active_probe_steps:
+                    tx.rollback(active_probe_steps[0].step_id)
             # Exercise the real adapter imports as well as the transaction.
             # A shell-only check misses native-extension/glibc incompatibility.
             adapter=_create_workload_harness(args.harness,harness_root=None,model=args.model,harness_command=None,
@@ -571,7 +833,29 @@ def run_inside(args):
                 max_turns=None,reasoning_effort='max')
             row['adapter_import_preflight']=True
             if args.harness=='sweagent':row['sweagent_tool_limits']=adapter.public_config['tool_limits']
+            if args.harness == 'sweagent' and task_user:
+                from sweagent.agent.models import ReplayModelConfig
+                replay = output/'submit-preflight.jsonl'
+                replay.write_text(json.dumps({'preflight': ['```bash\nsubmit\n```']})+'\n')
+                adapter.config.model = ReplayModelConfig(name='replay', replay_path=replay)
+                protected = Path('/root/protected_file.txt')
+                def protected_metadata():
+                    s = protected.stat()
+                    return dict(uid=s.st_uid,gid=s.st_gid,mode=s.st_mode,
+                                sha256=hashlib.sha256(protected.read_bytes()).hexdigest())
+                before = protected_metadata() if protected.is_file() else None
+                submitted = adapter.run_in_transaction(h, 'Tool availability preflight: call submit.')
+                if submitted.returncode != 0 or submitted.metadata.get('sweagent_exit_status') != 'submitted':
+                    raise RuntimeError('original task user SWE submit failed: '+submitted.stderr)
+                if before != (protected_metadata() if protected.is_file() else None):
+                    raise RuntimeError('SWE submit preflight changed protected root file')
+                row['task_user_workspace_preflight']['swe_submit']=dict(
+                    returncode=submitted.returncode, exit_status='submitted',
+                    no_external_model_calls=True, scripted_actions=['submit'],
+                    protected_root_file_unchanged=True, official_tests_executed=False)
             row['completion_contract_preflight']=preflight_completion_contract(h)
+            from experiments.scripts.tb_runtime_service_probe import probe_task_service
+            row['service_lifecycle_preflight']=probe_task_service(h,task.task_id)
             row.update(completed=True,status='preflight_passed',official_success=None)
         else:
             docs, fault_after, trial_seed=_randomized_crash_docs(task,task.task_id,0)
@@ -588,7 +872,17 @@ def run_inside(args):
                     raise RuntimeError('injected fault did not fail the crash contract')
                 precrash=tx.conversation.to_dict()
                 stamp=time.perf_counter()
-                if args.policy=='causal':
+                if recovery_input == 'file':
+                    targets,localization=_reported_recovery_policy(
+                        agent, [task.faulty_relpath], args.policy, injected=injected,
+                        checkpoint_step=tx.ledger.committed_frontier)
+                    row.update(policy_recovery_input=localization['recovery_input'],
+                        file_recovery_audit=localization['file_recovery_audit'],
+                        problem_files=localization['problem_files'],
+                        hinted_fault_step_ids=localization.get('hinted_fault_step_ids', []),
+                        fault_step_disclosed=localization['fault_step_disclosed'],
+                        candidate_probe_count=0)
+                elif args.policy=='causal':
                     targets,localization=_auto_localize_policy(agent,injected)
                 elif args.policy=='ideal_oracle':
                     targets=_apply_policy(agent,args.policy,injected['root_step'],
@@ -630,10 +924,12 @@ def run_inside(args):
                     oracle_fault_step_id=injected['root_step'] if args.policy=='ideal_oracle' else None,
                     localized_fault_step_ids=localization.get('localized_root_steps',[]) if args.policy=='causal' else (),
                     fault_location_source=localization.get('fault_location_source','hidden'))
+                if recovery_input == 'file':
+                    _reported_recovery_manifest(manifest,localization)
                 if not manifest['authoritative']:raise RuntimeError('recovery manifest state mismatch')
                 (output/'recovery-manifest.json').write_text(json.dumps(manifest,indent=2))
                 prompt+='\n\nA crash occurred. Resume the original task.\n'+render_recovery_manifest_prompt(manifest)
-            prompt=completion_prompt(prompt)
+            prompt=completion_prompt(prompt,recovery_input=recovery_input)
             (output/'prompt.txt').write_text(prompt)
             model_dir=output/'model';model_dir.mkdir()
             adapter=adapter_for(model_dir)
@@ -666,9 +962,7 @@ def run_inside(args):
                        model_session_wall_s=args.timeout, verifier_wall_s=args.verifier_timeout)
         if not args.preflight_only:
             stamp=time.perf_counter()
-            restore=run_trusted_verifier_tool(tx,'restore-official-test-assets',[
-                'bash','-c','rm -rf /tests && mkdir /tests && cp -a /opt/agenttx-verifier/tests/. /tests/'],
-                60)
+            restore=restore_official_test_assets(tx, preserve_directory=bool(task_user))
             if restore.returncode:raise RuntimeError('official test asset restore failed: '+restore.stderr[-2000:])
             rc=verify_transaction_view(tx,['bash','/opt/agenttx-verifier/verify.sh'],output,args.verifier_timeout)
             row['timings']['verification_wall_s']=time.perf_counter()-stamp
@@ -686,6 +980,7 @@ def run_inside(args):
     finally:
         if h is not None: h.close(destroy=False)
         removed = purge_private_codex_auth(output, private_values())
+        task_profile_stack.close()
         if removed:
             (output/'private-auth-cleanup.json').write_text(json.dumps(removed,indent=2))
         row['timings']['full_wall_s']=time.perf_counter()-started
@@ -697,6 +992,21 @@ def run_inside(args):
                 try: os.chown(p,uid,gid)
                 except OSError: pass
     return 0 if row.get('completed') else 1
+
+
+def restore_official_test_assets(tx, *, preserve_directory=False):
+    script='rm -rf /tests && mkdir /tests && cp -a /opt/agenttx-verifier/tests/. /tests/'
+    if preserve_directory:
+        # Existing image directories can be mountpoints in the private view.
+        # Replace every entry, including hidden entries, without unlinking the
+        # mountpoint or following a model-created symlink to another directory.
+        script='''set -eu
+if [ -L /tests ] || { [ -e /tests ] && [ ! -d /tests ]; }; then rm -f -- /tests; fi
+mkdir -p /tests
+find /tests -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+cp -a /opt/agenttx-verifier/tests/. /tests/
+'''
+    return run_trusted_verifier_tool(tx,'restore-official-test-assets',['bash','-c',script],60)
 
 
 def run_trusted_verifier_tool(tx,name,command,timeout):
@@ -721,6 +1031,15 @@ def verify_transaction_view(tx,command,output,timeout):
         stdout,stderr,rc=decoded(exc.stdout),decoded(exc.stderr),124
     (output/'verifier.stdout.log').write_text(stdout)
     (output/'verifier.stderr.log').write_text(stderr)
+    download_events=[]
+    for line in stderr.splitlines():
+        if line.startswith('{"contract":"'+VERIFIER_DOWNLOAD_CONTRACT+'",'):
+            event=json.loads(line)
+            if set(event)!={'contract','index','retry','prior_returncode'}:
+                raise ValueError('unexpected verifier download event fields')
+            download_events.append(event)
+    if download_events:
+        (output/'verifier-download-retries.summary.json').write_text(json.dumps(download_events,indent=2)+'\n')
     return rc
 
 
@@ -777,6 +1096,8 @@ def main():
         p.add_argument('--verifier-timeout',type=float,default=VERIFIER_TIMEOUT_S)
         p.add_argument('--preflight-only',action='store_true')
         p.add_argument('--fault-seed',default='20261019')
+        p.add_argument('--recovery-input',choices=('file','legacy'),default='legacy',
+                       help='file input for causal, exact steps for controls; legacy preserves frozen runs')
     host.add_argument('--task-user-adapter',action='store_true',help='Keep original named task user for every tool while root coordinates namespaces')
     host.add_argument('--static-strace',type=Path,help='Verified static tracer for glibc older than 2.28; use dynamic bundle for nonroot tasks')
     host.add_argument('--task',required=True)

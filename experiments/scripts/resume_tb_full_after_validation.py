@@ -57,7 +57,7 @@ def main():
          '--inventory',str(DATA/'validation/tb-usability-inventory-20261021-r14.json')]
     launch=['systemd-run','--user','--unit=agenttx-tb-dual-full-20261021-r15',
             '--property=WorkingDirectory='+str(ROOT),'/bin/bash','-c',
-            'source scripts/agenttx-local-env.sh; export PYTHONPATH=/home/bfq/agenttx/src:/home/bfq/agenttx; exec '+shlex.join(cmd)]
+            'source scripts/agenttx-local-env.sh; export PYTHONPATH=/home/bfq/agenttx-workspace/agenttx/src:/home/bfq/agenttx-workspace/agenttx; exec '+shlex.join(cmd)]
     try:subprocess.run(launch,cwd=ROOT,check=True,timeout=30)
     except BaseException:
         if not hold.exists():hold.write_bytes(old_hold)

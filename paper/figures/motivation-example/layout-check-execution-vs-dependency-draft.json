@@ -1,0 +1,92 @@
+{
+  "title": "Whole-execution rollback discards independent work",
+  "calls": [
+    "write A",
+    "write B",
+    "write C",
+    "read A",
+    "write D",
+    "write E"
+  ],
+  "turns": [
+    [
+      0,
+      1
+    ],
+    [
+      2,
+      3
+    ],
+    [
+      4,
+      5
+    ]
+  ],
+  "faulty_calls": [
+    0
+  ],
+  "affected_calls": [
+    0,
+    3
+  ],
+  "independent_calls": [
+    1,
+    2,
+    4,
+    5
+  ],
+  "rollback_calls": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "filesystem_edges": [
+    [
+      0,
+      3
+    ]
+  ],
+  "shared_style": "../design-workflow/generate_diagrams.py",
+  "native_shapes": 30,
+  "text_fit_issues": [],
+  "bounds_issues": [],
+  "canvas_inches": [
+    8.6,
+    3.2
+  ],
+  "font": "Times New Roman",
+  "preview_font": "Times New Roman",
+  "reference": {
+    "paper": "Don't Let AI Agents YOLO Your Files: Information and Control in Agent-Native Filesystems",
+    "venue": "SOSP 2026",
+    "version": "arXiv:2604.13536v5",
+    "figures": [
+      1,
+      2,
+      7
+    ],
+    "url": "https://arxiv.org/pdf/2604.13536v5",
+    "use": "Thin black structure, compact aligned blocks, circled operations, semantic red/green/blue accents."
+  },
+  "palette": {
+    "blue": "0066CC",
+    "pale": "F3F7FC",
+    "purple": "000000",
+    "purpale": "F5F5F5",
+    "red": "8C0000",
+    "redpale": "FFEBEB",
+    "green": "008000",
+    "greenpale": "E6FFE6",
+    "black": "000000",
+    "gray": "707070",
+    "light": "B0B0B0",
+    "white": "FFFFFF"
+  },
+  "paper_width_inches": 3.35,
+  "body_font_at_paper_width_pt": 7.4,
+  "text_words": 33,
+  "text_characters": 139
+}

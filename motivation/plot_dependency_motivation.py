@@ -64,11 +64,11 @@ def assert_paired_baselines(rows: list[dict[str, str]]) -> None:
         turn = policies.get("turn_checkpoint_proxy")
         whole = policies.get("whole_branch")
         if turn is None or whole is None:
-            raise ValueError(f"{trace_id}: missing turn or whole-branch baseline")
+            raise ValueError(f"{trace_id}: missing turn or Whole branch baseline")
         for metric in ("useful_tokens_wasted", "valid_retention"):
             if float(turn[metric]) != float(whole[metric]):
                 raise ValueError(
-                    f"{trace_id}: turn and whole branch differ for {metric}"
+                    f"{trace_id}: turn and Whole branch differ for {metric}"
                 )
 
 

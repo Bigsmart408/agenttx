@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Seven-policy protocol validation on canonical artifact DAGs.
+"""Recovery-policy protocol validation on canonical artifact DAGs.
 
 Preserves the canonical concatenate-parents-then-own-payload semantics. New
 outputs and registrations are required; this does not relabel diagnostic runs
@@ -31,7 +31,7 @@ from experiments.scripts.experiment_credentials import private_values, redact_cr
 
 PROTOCOL = "agenttx.runtime-canonical-seven/v1"
 POLICIES = ("clean_recovery", "crash_no_rollback", "turn_checkpoint",
-            "temporal_checkpoint", "whole_branch_abort", "causal", "ideal_oracle")
+            "temporal_checkpoint", "whole_branch_abort", "causal", "ideal_oracle", "root_only")
 
 
 def workload_spec(plan):
@@ -255,10 +255,21 @@ def run_cell(args, plan, policy, adapter, output):
                                      trace_reads=True, timeout_s=30)
             if failed.returncode != 1:
                 raise RuntimeError("causal localization requires a failing contract verifier")
+            from agenttx.faults import FailureObservation
+            from agenttx.localizer import FaultLocalizer
+            candidates = FaultLocalizer(max_candidates=None).candidates(
+                tx.ledger, FailureObservation.from_record(failed))
+            row["candidate_ranking"] = [dataclasses.asdict(c) for c in candidates]
+            search_started = time.perf_counter()
             recovery = tx.plan_recovery(failed, max_candidates=None, max_probes=args.max_probes,
                                         allow_fallback=False, verifier_timeout_s=30,
                                         verifier_trace_reads=True)
             row["localization"] = dataclasses.asdict(recovery)
+            row["timings"]["localization_search_wall_s"] = time.perf_counter() - search_started
+            row["localization_probe_count"] = len(recovery.attempts)
+            row["localized_root_steps"] = list(recovery.root_step_ids)
+            row["injected_root_steps_for_scoring"] = list(plan.fault_roots)
+            row["localization_matches_injected_roots"] = set(recovery.root_step_ids) == set(plan.fault_roots)
             if recovery.validation != "passed" or recovery.mode != "causal":
                 raise RuntimeError("causal localization exhausted its registered probe budget")
             targets = tx.rollback_causal_many(recovery.root_step_ids)
@@ -266,6 +277,10 @@ def run_cell(args, plan, policy, adapter, output):
             targets, probes = apply_coarse_policy(tx, plan, policy)
             row["checkpoint_probes"] = probes
             row["boundary_source"] = "public_contract_checks" if probes else "branch_start"
+        elif policy == "root_only":
+            # Scope control: exact faulty roots, with no dependency expansion.
+            targets = tx.rollback_exact(sorted(plan.fault_roots))
+            row["boundary_source"] = "injected_roots_without_dependency_expansion"
         elif policy == "ideal_oracle":
             targets = tx.rollback_exact(sorted(truth))
         row["timings"]["policy_wall_s"] = time.perf_counter() - stamp
@@ -276,6 +291,13 @@ def run_cell(args, plan, policy, adapter, output):
                    useful_discarded=sorted(removed - truth),
                    conversation_matches_rollback=set(tx.conversation.active_step_ids()).intersection(range(len(spec))) == expected_active,
                    retained_bytes_unchanged=all(after.get(i) == before.get(i) for i in expected_active))
+        valid = set(range(len(spec))) - truth
+        row.update(operation_count=len(spec), invalid_count=len(truth), valid_count=len(valid),
+                   invalid_removal=len(truth & removed) / len(truth) if truth else 1.0,
+                   valid_retention=len(valid - removed) / len(valid) if valid else 1.0,
+                   selection_precision=len(truth & removed) / len(removed) if removed else (1.0 if not truth else 0.0),
+                   recovery_safe=not bool(truth - removed),
+                   exact_selective_state=removed == truth)
         if not row["conversation_matches_rollback"] or not row["retained_bytes_unchanged"]:
             raise RuntimeError("rollback workspace/context consistency gate failed")
         (output / "precrash-conversation.json").write_text(json.dumps(precrash, indent=2))
@@ -294,8 +316,12 @@ def run_cell(args, plan, policy, adapter, output):
                 note="Billed model usage below includes harness templates and replay; these counts describe the handoff only.")
             (output / "prompt.txt").write_text(prompt)
             if args.harness == "sweagent":
-                result = adapter.run_in_transaction(h, task, native_context=dict(
-                    original_task=task, precrash_conversation=precrash, context_variant="full"))
+                from experiments.scripts.micro_model_usage import model_usage
+                with model_usage(output / "api-usage.json", getattr(args, "token_budget", None)) as usage:
+                    result = adapter.run_in_transaction(h, task, native_context=dict(
+                        original_task=task, precrash_conversation=precrash, context_variant="full"))
+                row["api_usage"] = usage
+                row["model_calls"] = result.metadata.get("sweagent_model_calls")
             else:
                 result = adapter.run_in_transaction(h, prompt)
             row["timings"]["model_wall_s"] = time.perf_counter() - stamp
@@ -306,6 +332,10 @@ def run_cell(args, plan, policy, adapter, output):
             row.update(model_returncode=result.returncode, prompt_tokens=result.prompt_tokens,
                        completion_tokens=result.completion_tokens, total_tokens=result.total_tokens,
                        usage_source=result.usage_source, tool_calls=result.tool_calls)
+            if args.harness == "sweagent":
+                row["harness_estimated_tokens"] = row["total_tokens"]
+                row["total_tokens"] = usage["total_tokens"]
+                row["usage_source"] = usage["source"]
             stamp = time.perf_counter()
             check = tx.run_verifier([sys.executable, "workload.py", "check"], trace_reads=True, timeout_s=30)
             # Independent evaluator reads actual bytes. A modified public checker cannot pass this.
@@ -350,6 +380,7 @@ def main():
     parser.add_argument("--timeout", type=float, default=240)
     parser.add_argument("--max-probes", type=int, default=24)
     parser.add_argument("--runtime-only", action="store_true")
+    parser.add_argument("--token-budget", type=int)
     args = parser.parse_args()
     if len(args.policies) != len(set(args.policies)):
         parser.error("duplicate policies are not allowed")
@@ -380,8 +411,8 @@ def main():
                         args={k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()})
     registration["python"] = sys.version
     registration["count_limit"] = None
-    registration["token_budget"] = None
-    registration["formal_remaining_gate"] = "shared token-budget enforcement and token-matched policy payload accounting"
+    registration["token_budget"] = args.token_budget
+    registration["formal_remaining_gate"] = "Campaign qualification is separate from this legacy single-case entry point."
     registration["packages"] = {}
     for package in ("sweagent", "swe-rex", "litellm", "openai", "tiktoken"):
         try:

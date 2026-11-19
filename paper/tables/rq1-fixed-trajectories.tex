@@ -1,0 +1,20 @@
+\begin{table}[!ht]
+\centering
+\caption{\textbf{Error removal and valid-work retention.}
+\small\emph{Each method has 1,200 fixed-trajectory runs. Percentages and
+call counts are averaged over runs.}}
+\label{tab:controlled-policy-results}
+\footnotesize
+\setlength{\tabcolsep}{2pt}
+\begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}lrrrr@{}}
+\toprule
+Method & \shortstack{Affected\\removed} & \shortstack{Valid\\retained} & \shortstack{Valid\\discarded} & \shortstack{Calls\\withdrawn} \\
+\midrule
+\system & 100\% & 100\% & 0.00 & 17.93 \\
+try & 17.03\% & 100\% & 0.00 & 1.00 \\
+Crab & 100\% & 45.98\% & 38.12 & 56.04 \\
+DeltaBox & 100\% & 43.10\% & 48.18 & 66.10 \\
+BranchFS & 100\% & 0\% & 82.08 & 100.00 \\
+\bottomrule
+\end{tabular*}
+\end{table}

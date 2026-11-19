@@ -53,10 +53,10 @@ REPLAY_POLICIES = (
 POLICY_LABELS = {
     "clean_recovery": "Clean recovery",
     "crash_no_rollback": "Crash, no rollback",
-    "no_recovery": "No recovery",
-    "root_only": "Root only",
+    "no_recovery": "No rollback",
+    "root_only": "Selected effects",
     "turn_checkpoint_proxy": "Turn checkpoint",
-    "temporal_step": "Temporal step",
+    "temporal_step": "Temporal checkpoint",
     "whole_branch": "Whole branch",
     "agenttx_causal": "AgentTX causal",
     "ideal_oracle": "Ideal oracle",

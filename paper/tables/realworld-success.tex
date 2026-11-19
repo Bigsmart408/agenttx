@@ -1,0 +1,22 @@
+\begin{table}[!ht]
+\centering
+\caption{\textbf{Task successes on real-world tasks.}
+\small\emph{Successful tasks pass the target SWE tests or official TB verifier.
+Counts cover 300 SWE
+and 241 TB tasks.}}
+\label{tab:swe-full-results}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}lrrrr@{}}
+\toprule
+ & SWE & SWE & TB & TB \\
+Method & SWE-agent & Codex & SWE-agent & Codex \\
+\midrule
+\system & 285 & 288 & 208 & 223 \\
+Crab & 272 & 284 & 188 & 206 \\
+DeltaBox & 288 & 290 & 206 & 224 \\
+BranchFS & 248 & 282 & 209 & 227 \\
+\trycmd & 187 & 229 & 202 & 220 \\
+\bottomrule
+\end{tabular*}
+\end{table}

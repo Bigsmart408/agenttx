@@ -1,6 +1,6 @@
 from pathlib import Path
 import os,signal,json,subprocess,time,datetime,sys,hashlib
-sys.path[:0]=['/home/bfq/agenttx','/home/bfq/agenttx/src']
+sys.path[:0]=['/home/bfq/agenttx-workspace/agenttx','/home/bfq/agenttx-workspace/agenttx/src']
 from experiments.scripts.bench_tb_image_native import logged_usage
 D=Path('/mnt/data/agenttx-runtime');pointer=json.loads((D/'validation/active-tb-dual-native.json').read_text());assert pointer['cohort']=='tb-dual-native-full-20261023-r19-hosts-resume'
 root=Path(pointer['root']);p=json.loads((root/'progress.json').read_text());audit=D/'validation/tb-original-service-resume-20261023';audit.mkdir(exist_ok=True)

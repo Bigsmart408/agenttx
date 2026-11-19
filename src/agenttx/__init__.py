@@ -13,6 +13,7 @@ from .faults import (
     VerifierSpec,
 )
 from .harness import CodingAgentHarness, TrajectoryStep
+from .file_recovery import FileRecoveryAudit, FileRecoveryOutcome, FileRecoveryPlan
 from .ledger import Effect, EffectKind, Ledger, Step
 from .localizer import FaultLocalizer
 from .policy import CommitPolicy
@@ -31,6 +32,9 @@ __all__ = [
     "FailureObservation",
     "FaultCandidate",
     "FaultLocalizer",
+    "FileRecoveryAudit",
+    "FileRecoveryOutcome",
+    "FileRecoveryPlan",
     "Ledger",
     "RecoveryAttempt",
     "RecoveryOutcome",

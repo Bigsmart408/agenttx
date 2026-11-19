@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -113,7 +114,9 @@ def test_commit_discards_external_private_tmp_but_materializes_workspace(
     tmp_path: Path,
 ) -> None:
     ws, tx = _begin(tmp_path, "private-tmp")
-    external = tmp_path / "astropy-test-venv" / "bin" / "python"
+    # tmp_path may be on a dedicated filesystem, outside the private /tmp.
+    external_tmp = tempfile.TemporaryDirectory(prefix='agenttx-private-tmp-', dir='/tmp')
+    external = Path(external_tmp.name) / "astropy-test-venv" / "bin" / "python"
     try:
         record = tx.run_tool(
             "mixed-temp",
@@ -130,6 +133,7 @@ def test_commit_discards_external_private_tmp_but_materializes_workspace(
         assert not external.exists()
     finally:
         tx.close(destroy=True)
+        external_tmp.cleanup()
 
 
 def test_cli_commit_cannot_bypass_default_policy(tmp_path: Path) -> None:

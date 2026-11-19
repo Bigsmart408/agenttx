@@ -21,10 +21,10 @@ fi
 if [ "${AGENTTX_VERIFY_TB_NATIVE:-0}" = 1 ]; then
   timeout "${AGENTTX_AGENT_TIMEOUT_S}" \
     /home/bfq/miniconda3/envs/agenttx/bin/python3.11 \
-    "/home/bfq/agenttx/experiments/scripts/$capture_script" "$@"
+    "/home/bfq/agenttx-workspace/agenttx/experiments/scripts/$capture_script" "$@"
 else
   /home/bfq/miniconda3/envs/agenttx/bin/python3.11 \
-    "/home/bfq/agenttx/experiments/scripts/$capture_script" "$@"
+    "/home/bfq/agenttx-workspace/agenttx/experiments/scripts/$capture_script" "$@"
 fi
 status=$?
 set -e

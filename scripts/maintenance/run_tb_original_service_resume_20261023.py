@@ -2,14 +2,14 @@
 """Resume immutable TB results; repair attempts follow network failures, never best-of."""
 import collections,copy,datetime,fcntl,hashlib,json,os,re,shutil,signal,subprocess,sys,time,tomllib,urllib.request
 from pathlib import Path
-sys.path[:0]=['/home/bfq/agenttx','/home/bfq/agenttx/src','/home/bfq/agenttx-maintenance']
+sys.path[:0]=['/home/bfq/agenttx-workspace/agenttx','/home/bfq/agenttx-workspace/agenttx/src','/home/bfq/agenttx-workspace/agenttx/scripts/maintenance']
 import run_tb_retry_queue_20261022 as old
 from experiments.scripts.run_tb_dual_local import cell_command,infrastructure_issue,effects,experiment_configuration,CELL_TIMEOUT_S
 from experiments.scripts.experiment_provenance import source_manifest
 D=Path('/mnt/data/agenttx-runtime');NAME='tb-dual-native-full-20261023-r20-original-service-resume';ROOT=D/'results'/NAME
 PREVIOUS=D/'results/tb-dual-native-full-20261023-r19-hosts-resume'
 AUDIT=D/'validation/tb-original-service-resume-20261023'
-FROZEN=Path('/home/bfq/agenttx-executions')/NAME/'project'
+FROZEN=Path('/home/bfq/agenttx-workspace/agenttx-executions')/NAME/'project'
 WINDOW='2026-10-22T20:56:00+00:00'
 PROFILE=Path('/home/bfq/.config/agenttx/experiment-20261017')
 now=old.now;save=old.save;sha=old.sha;state=old.state;key=old.key
@@ -112,7 +112,7 @@ def prepare_source(reg):
     for entry in manifest['files']:
         src=prior/entry['path'];assert sha(src)==entry['sha256'];dst=FROZEN/entry['path'];dst.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(src,dst)
     for relative in ('experiments/scripts/bench_tb_image_native.py','experiments/scripts/tb_task_services.py'):
-        shutil.copy2(Path('/home/bfq/agenttx')/relative,FROZEN/relative)
+        shutil.copy2(Path('/home/bfq/agenttx-workspace/agenttx')/relative,FROZEN/relative)
     return source_manifest(FROZEN)
 
 def main():

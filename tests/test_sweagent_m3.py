@@ -540,9 +540,8 @@ def test_sweagent_workload_suffix_allows_only_self_diagnosis_to_inspect() -> Non
     assert "original task" in replay
 
 
-def test_sweagent_clean_baseline_has_single_step_guard() -> None:
+def test_sweagent_clean_baseline_has_submission_prompt() -> None:
     source = Path(sweagent_native_workload.__file__).read_text(encoding="utf-8")
-    assert "max_steps=1 if clean_baseline else self.max_steps" in source
     assert "Return exactly one bash code block containing only: submit" in source
 
 

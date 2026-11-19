@@ -1,0 +1,616 @@
+{
+  "typography": {
+    "family": "Times New Roman",
+    "node_pt": 21,
+    "annotation_pt": 18,
+    "heading_pt": 21,
+    "bold_headings_only": true,
+    "math_symbol_font": "Cambria Math",
+    "labels": [
+      {
+        "text": "1",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Object history via changed entries",
+        "size_pt": 21,
+        "bold": true,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Base",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "L",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "f0, g0, h0",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "E3",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "D3",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "f1",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "E4",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "D4",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "f2",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "E5",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "D5",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "g1",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "E6",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "D6",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "WH(h)",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "2",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Explicit checkpoints via retained mounts",
+        "size_pt": 21,
+        "bold": true,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "After E5",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "U0: f2, g1",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Lower L",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "RO + pin",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Detach + mount",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Continue in merged view",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "U1: empty (RW)",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "U0: f2, g1 (RO)",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Lower L",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Checkpoint C1",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Release retained mounts at commit / close",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      }
+    ]
+  },
+  "connectors": {
+    "shaft_pt": 1.6,
+    "head_length_pt": 9.0,
+    "head_width_pt": 7.2,
+    "routed_geometry": "smooth cubic Bezier",
+    "gap_inches": 0,
+    "arrows": [
+      {
+        "role": "file",
+        "color": "black",
+        "dash": true,
+        "points": [
+          [
+            0.98,
+            1.54
+          ],
+          [
+            0.98,
+            1.88
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "file",
+        "color": "black",
+        "dash": true,
+        "points": [
+          [
+            2.6399999999999997,
+            1.54
+          ],
+          [
+            2.6399999999999997,
+            1.88
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "file",
+        "color": "black",
+        "dash": true,
+        "points": [
+          [
+            4.3,
+            1.54
+          ],
+          [
+            4.3,
+            1.88
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "file",
+        "color": "black",
+        "dash": true,
+        "points": [
+          [
+            5.96,
+            1.54
+          ],
+          [
+            5.96,
+            1.88
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "file",
+        "color": "black",
+        "dash": true,
+        "points": [
+          [
+            7.62,
+            1.54
+          ],
+          [
+            7.62,
+            1.88
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "flow",
+        "color": "black",
+        "dash": false,
+        "points": [
+          [
+            1.6400000000000001,
+            1.34
+          ],
+          [
+            1.98,
+            1.34
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "flow",
+        "color": "black",
+        "dash": false,
+        "points": [
+          [
+            3.3,
+            1.34
+          ],
+          [
+            3.64,
+            1.34
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "flow",
+        "color": "black",
+        "dash": false,
+        "points": [
+          [
+            4.96,
+            1.34
+          ],
+          [
+            5.3,
+            1.34
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "flow",
+        "color": "black",
+        "dash": false,
+        "points": [
+          [
+            6.62,
+            1.34
+          ],
+          [
+            6.96,
+            1.34
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "flow",
+        "color": "black",
+        "dash": false,
+        "points": [
+          [
+            2.81,
+            3.965
+          ],
+          [
+            4.91,
+            3.965
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      },
+      {
+        "role": "file",
+        "color": "black",
+        "dash": true,
+        "points": [
+          [
+            2.81,
+            5.14
+          ],
+          [
+            3.54,
+            5.14
+          ],
+          [
+            3.54,
+            4.615
+          ],
+          [
+            4.91,
+            4.615
+          ]
+        ],
+        "shaft_pt": 1.6,
+        "head_length_pt": 9.0,
+        "head_width_pt": 7.2
+      }
+    ]
+  },
+  "line_styles": {
+    "flow": {
+      "color": "black",
+      "lw": 1.6,
+      "dash": false
+    },
+    "file": {
+      "color": "black",
+      "lw": 1.6,
+      "dash": true
+    },
+    "result": {
+      "color": "red",
+      "lw": 1.6,
+      "dash": false
+    }
+  },
+  "line_semantics": {
+    "solid_black_arrow": "workflow",
+    "dashed_black_arrow": "file dependency",
+    "solid_red_arrow": "tool-result reuse",
+    "dashed_red_node": "selected effect or context to withdraw",
+    "dashed_frame": "isolated validation trial",
+    "solid_frame": "normal stage or live application",
+    "empty_node": "absence symbol with a solid gray outline"
+  },
+  "paper_include_width_fraction": 1.0,
+  "primary_font_at_actual_paper_width_pt": 8.18,
+  "title": "Incremental object history and retained-mount checkpoints",
+  "history": [
+    "base L",
+    "D3=f1",
+    "D4=f2",
+    "D5=g1",
+    "D6=WH(h)"
+  ],
+  "native_checkpoints_per_call": false,
+  "explicit_checkpoint": "freeze U0, retain RO mount, continue with empty U1",
+  "release": "commit or close",
+  "kernel_changes": false,
+  "routing_clearance": {
+    "history_to_value_inches": 0.34,
+    "history_column_gap_inches": 0.34,
+    "checkpoint_to_lower_inches": 0.18,
+    "mount_annotations_separate_from_association": true
+  },
+  "native_shapes": 74,
+  "text_fit_issues": [],
+  "bounds_issues": [],
+  "canvas_inches": [
+    8.6,
+    6.1
+  ],
+  "font": "Times New Roman",
+  "preview_font": "Times New Roman",
+  "reference": {
+    "paper": "Don't Let AI Agents YOLO Your Files: Information and Control in Agent-Native Filesystems",
+    "venue": "SOSP 2026",
+    "version": "arXiv:2604.13536v5",
+    "figures": [
+      1,
+      2,
+      7
+    ],
+    "url": "https://arxiv.org/pdf/2604.13536v5",
+    "use": "Thin black structure, compact aligned blocks, circled operations, semantic red/green/blue accents."
+  },
+  "palette": {
+    "blue": "0066CC",
+    "pale": "F3F7FC",
+    "purple": "000000",
+    "purpale": "F5F5F5",
+    "red": "8C0000",
+    "redpale": "FFEBEB",
+    "green": "008000",
+    "greenpale": "E6FFE6",
+    "black": "000000",
+    "gray": "707070",
+    "light": "B0B0B0",
+    "white": "FFFFFF"
+  },
+  "running_example": {
+    "name": "shared-eight-call-trajectory",
+    "steps": {
+      "E1": "inspect the baseline",
+      "E2": "inspect the baseline",
+      "E3": "write f1 and return report.json",
+      "E4": "read f1 and overwrite f with f2",
+      "E5": "independently write g1 between affected calls",
+      "E6": "read f2 and delete h",
+      "E7": "reuse report.json and create p1 at that path",
+      "E8": "read p1"
+    },
+    "candidate": [
+      "E3"
+    ],
+    "selected_steps": [
+      "E3",
+      "E4",
+      "E6",
+      "E7",
+      "E8"
+    ],
+    "retained_steps": [
+      "E1",
+      "E2",
+      "E5"
+    ],
+    "filesystem_edges": [
+      [
+        "E3",
+        "E4"
+      ],
+      [
+        "E4",
+        "E6"
+      ],
+      [
+        "E7",
+        "E8"
+      ],
+      [
+        "E3",
+        "E6"
+      ]
+    ],
+    "file_edge_objects": [
+      "f1",
+      "f2",
+      "p1",
+      "f history"
+    ],
+    "message_edges": [
+      [
+        "E3",
+        "E7"
+      ]
+    ],
+    "objects": [
+      "f",
+      "g",
+      "h",
+      "p"
+    ],
+    "lower": [
+      "f0",
+      "g0",
+      "h0",
+      "\u2205"
+    ],
+    "upper_before": [
+      "f2",
+      "g1",
+      "WH",
+      "p1"
+    ],
+    "upper_after": [
+      "\u2205",
+      "g1",
+      "\u2205",
+      "\u2205"
+    ],
+    "merged_before": [
+      "f2",
+      "g1",
+      "\u2205",
+      "p1"
+    ],
+    "merged_after": [
+      "f0",
+      "g1",
+      "h0",
+      "\u2205"
+    ],
+    "before_images": [
+      [
+        "f",
+        "E3"
+      ],
+      [
+        "h",
+        "E6"
+      ],
+      [
+        "p",
+        "E7"
+      ]
+    ],
+    "turns": [
+      [
+        "E1",
+        "E2",
+        "E3"
+      ],
+      [
+        "E4"
+      ],
+      [
+        "E5",
+        "E6",
+        "E7",
+        "E8"
+      ]
+    ]
+  },
+  "paper_width_inches": 3.35,
+  "body_font_at_paper_width_pt": 8.18,
+  "text_words": 64,
+  "text_characters": 278
+}

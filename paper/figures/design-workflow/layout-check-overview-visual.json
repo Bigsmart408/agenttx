@@ -1,0 +1,849 @@
+{
+  "title": "AgentTX additions to an OverlayFS execution view",
+  "diagram_scope": "existing OverlayFS versus added dependency, version and recovery capabilities",
+  "shown_call_example": false,
+  "execution_filesystem": {
+    "type": "OverlayFS",
+    "tool_process_view": "merged",
+    "upper": "writable U",
+    "lower": "read-only L"
+  },
+  "layer_relationship": "U and L jointly provide the merged view",
+  "filesystem_application": "restore selected upper entries; preserve lower baseline",
+  "recovery_steps": [
+    "1 Record",
+    "2 Select S",
+    "3 Apply S"
+  ],
+  "step_details": {
+    "1": "dependency-closure-visual",
+    "2": [
+      "dependency-closure-visual",
+      "design-visual"
+    ],
+    "3": "design-visual"
+  },
+  "synchronized_outputs": [
+    "upper state",
+    "agent context"
+  ],
+  "verification_details": "Select S includes isolated plan validation; expanded in detailed figures",
+  "added_capabilities": [
+    "file dependency capture",
+    "tool-result dependency capture",
+    "historical object versions",
+    "dependency-closed plan selection and validation",
+    "selective object restoration",
+    "synchronized agent context"
+  ],
+  "extension_boundary": "dashed blue AgentTX additions frame",
+  "overlayfs_kernel_modified": false,
+  "history_is_mounted_layer": false,
+  "legend_required": false,
+  "alignment_grid": {
+    "row_tops": [
+      1.2,
+      2.3,
+      3.4
+    ],
+    "node_height": 0.7,
+    "left_edges": [
+      0.62,
+      3.93,
+      6.35
+    ],
+    "left_node_width": 2.6,
+    "control_node_width": 2.0,
+    "record_right_edge": 8.35,
+    "apply_right_edge": 8.35,
+    "context_right_edge": 8.35,
+    "shared_text_baselines": true
+  },
+  "overview_colors": {
+    "overlayfs": "black and gray",
+    "extension_boundary": "blue dashed",
+    "applied_recovery": "blue"
+  },
+  "typography": {
+    "family": "Times New Roman",
+    "node_pt": 21,
+    "annotation_pt": 18,
+    "heading_pt": 21,
+    "bold_headings_only": true,
+    "labels": [
+      {
+        "text": "AgentTX additions",
+        "size_pt": 21,
+        "bold": true,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "OverlayFS",
+        "size_pt": 21,
+        "bold": true,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Tool calls",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Merged view",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Upper U (RW)",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Lower L (RO)",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "1",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Record",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "File",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "edges",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Result",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "edges",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Object",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "versions",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "2",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Select S",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "3",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Apply S",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Selective restore",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Sync",
+        "size_pt": 18,
+        "bold": false,
+        "family": "Times New Roman"
+      },
+      {
+        "text": "Agent context",
+        "size_pt": 21,
+        "bold": false,
+        "family": "Times New Roman"
+      }
+    ]
+  },
+  "connectors": {
+    "shaft_pt": 1.6,
+    "head_length_pt": 9.0,
+    "head_width_pt": 7.2,
+    "routed_geometry": "smooth cubic Bezier",
+    "gap_inches": 0,
+    "head_geometry": "explicit matching native PPT and SVG triangles",
+    "ports": {
+      "tool-bottom": [
+        1.92,
+        0.6
+      ],
+      "merged-top": [
+        1.92,
+        1.2
+      ],
+      "merged-left-upper": [
+        0.62,
+        1.6799999999999997
+      ],
+      "merged-left-lower": [
+        0.62,
+        1.42
+      ],
+      "merged-right": [
+        3.22,
+        1.5499999999999998
+      ],
+      "upper-left": [
+        0.69,
+        2.65
+      ],
+      "upper-right": [
+        3.1500000000000004,
+        2.65
+      ],
+      "lower-left": [
+        0.69,
+        3.75
+      ],
+      "record-left": [
+        3.93,
+        1.5499999999999998
+      ],
+      "record-bottom": [
+        4.93,
+        1.9
+      ],
+      "select-top": [
+        4.93,
+        2.3
+      ],
+      "select-right": [
+        5.93,
+        2.65
+      ],
+      "apply-left": [
+        6.35,
+        2.65
+      ],
+      "apply-bottom": [
+        7.35,
+        3.0
+      ],
+      "apply-restore": [
+        6.79,
+        3.0
+      ],
+      "context-top": [
+        7.35,
+        3.4
+      ]
+    },
+    "connections": [
+      {
+        "source": "tool-bottom",
+        "target": "merged-top",
+        "points": [
+          [
+            1.92,
+            0.6
+          ],
+          [
+            1.92,
+            1.2
+          ]
+        ],
+        "arrow": true,
+        "color": "black",
+        "shaft_pt": 1.6
+      },
+      {
+        "source": "upper-left",
+        "target": "merged-left-upper",
+        "points": [
+          [
+            0.69,
+            2.65
+          ],
+          [
+            0.4,
+            2.65
+          ],
+          [
+            0.4,
+            1.6799999999999997
+          ],
+          [
+            0.62,
+            1.6799999999999997
+          ]
+        ],
+        "arrow": true,
+        "color": "gray",
+        "shaft_pt": 1.6
+      },
+      {
+        "source": "lower-left",
+        "target": "merged-left-lower",
+        "points": [
+          [
+            0.69,
+            3.75
+          ],
+          [
+            0.27,
+            3.75
+          ],
+          [
+            0.27,
+            1.42
+          ],
+          [
+            0.62,
+            1.42
+          ]
+        ],
+        "arrow": true,
+        "color": "gray",
+        "shaft_pt": 1.6
+      },
+      {
+        "source": "merged-right",
+        "target": "record-left",
+        "points": [
+          [
+            3.22,
+            1.5499999999999998
+          ],
+          [
+            3.93,
+            1.5499999999999998
+          ]
+        ],
+        "arrow": true,
+        "color": "black",
+        "shaft_pt": 1.6
+      },
+      {
+        "source": "record-bottom",
+        "target": "select-top",
+        "points": [
+          [
+            4.93,
+            1.9
+          ],
+          [
+            4.93,
+            2.3
+          ]
+        ],
+        "arrow": true,
+        "color": "black",
+        "shaft_pt": 1.6
+      },
+      {
+        "source": "select-right",
+        "target": "apply-left",
+        "points": [
+          [
+            5.93,
+            2.65
+          ],
+          [
+            6.35,
+            2.65
+          ]
+        ],
+        "arrow": true,
+        "color": "black",
+        "shaft_pt": 1.6
+      },
+      {
+        "source": "apply-bottom",
+        "target": "context-top",
+        "points": [
+          [
+            7.35,
+            3.0
+          ],
+          [
+            7.35,
+            3.4
+          ]
+        ],
+        "arrow": true,
+        "color": "blue",
+        "shaft_pt": 1.6
+      },
+      {
+        "source": "apply-restore",
+        "target": "upper-right",
+        "points": [
+          [
+            6.79,
+            3.0
+          ],
+          [
+            6.79,
+            3.18
+          ],
+          [
+            3.6,
+            3.18
+          ],
+          [
+            3.6,
+            2.65
+          ],
+          [
+            3.1500000000000004,
+            2.65
+          ]
+        ],
+        "arrow": true,
+        "color": "blue",
+        "shaft_pt": 1.6
+      }
+    ],
+    "arrows": [
+      {
+        "source": "tool-bottom",
+        "target": "merged-top",
+        "tail": [
+          1.92,
+          0.6
+        ],
+        "color": "black",
+        "tip": [
+          1.92,
+          1.2
+        ],
+        "base": [
+          1.92,
+          1.075
+        ],
+        "length_pt": 9.0,
+        "width_pt": 7.2,
+        "shaft_pt": 1.6
+      },
+      {
+        "source": "upper-left",
+        "target": "merged-left-upper",
+        "tail": [
+          0.69,
+          2.65
+        ],
+        "color": "gray",
+        "tip": [
+          0.62,
+          1.6799999999999997
+        ],
+        "base": [
+          0.495,
+          1.6799999999999997
+        ],
+        "length_pt": 9.0,
+        "width_pt": 7.2,
+        "shaft_pt": 1.6
+      },
+      {
+        "source": "lower-left",
+        "target": "merged-left-lower",
+        "tail": [
+          0.69,
+          3.75
+        ],
+        "color": "gray",
+        "tip": [
+          0.62,
+          1.42
+        ],
+        "base": [
+          0.495,
+          1.42
+        ],
+        "length_pt": 9.0,
+        "width_pt": 7.2,
+        "shaft_pt": 1.6
+      },
+      {
+        "source": "merged-right",
+        "target": "record-left",
+        "tail": [
+          3.22,
+          1.5499999999999998
+        ],
+        "color": "black",
+        "tip": [
+          3.93,
+          1.5499999999999998
+        ],
+        "base": [
+          3.805,
+          1.5499999999999998
+        ],
+        "length_pt": 9.0,
+        "width_pt": 7.2,
+        "shaft_pt": 1.6
+      },
+      {
+        "source": "record-bottom",
+        "target": "select-top",
+        "tail": [
+          4.93,
+          1.9
+        ],
+        "color": "black",
+        "tip": [
+          4.93,
+          2.3
+        ],
+        "base": [
+          4.93,
+          2.175
+        ],
+        "length_pt": 9.0,
+        "width_pt": 7.2,
+        "shaft_pt": 1.6
+      },
+      {
+        "source": "select-right",
+        "target": "apply-left",
+        "tail": [
+          5.93,
+          2.65
+        ],
+        "color": "black",
+        "tip": [
+          6.35,
+          2.65
+        ],
+        "base": [
+          6.225,
+          2.65
+        ],
+        "length_pt": 9.0,
+        "width_pt": 7.2,
+        "shaft_pt": 1.6
+      },
+      {
+        "source": "apply-bottom",
+        "target": "context-top",
+        "tail": [
+          7.35,
+          3.0
+        ],
+        "color": "blue",
+        "tip": [
+          7.35,
+          3.4
+        ],
+        "base": [
+          7.35,
+          3.275
+        ],
+        "length_pt": 9.0,
+        "width_pt": 7.2,
+        "shaft_pt": 1.6
+      },
+      {
+        "source": "apply-restore",
+        "target": "upper-right",
+        "tail": [
+          6.79,
+          3.0
+        ],
+        "color": "blue",
+        "tip": [
+          3.1500000000000004,
+          2.65
+        ],
+        "base": [
+          3.2750000000000004,
+          2.65
+        ],
+        "length_pt": 9.0,
+        "width_pt": 7.2,
+        "shaft_pt": 1.6
+      }
+    ],
+    "group_boundary_openings": [
+      {
+        "color": "gray",
+        "side": "top",
+        "center": [
+          1.92,
+          0.74
+        ],
+        "width_inches": 0.2
+      },
+      {
+        "color": "gray",
+        "side": "right",
+        "center": [
+          3.4499999999999997,
+          1.55
+        ],
+        "width_inches": 0.2
+      },
+      {
+        "color": "gray",
+        "side": "right",
+        "center": [
+          3.4499999999999997,
+          2.65
+        ],
+        "width_inches": 0.2
+      },
+      {
+        "color": "blue",
+        "side": "left",
+        "center": [
+          3.75,
+          1.55
+        ],
+        "width_inches": 0.2
+      },
+      {
+        "color": "blue",
+        "side": "left",
+        "center": [
+          3.75,
+          3.18
+        ],
+        "width_inches": 0.2
+      }
+    ],
+    "shared_connector_segments": false
+  },
+  "paper_include_width_fraction": 1.0,
+  "primary_font_at_actual_paper_width_pt": 8.18,
+  "native_shapes": 66,
+  "text_fit_issues": [],
+  "bounds_issues": [],
+  "canvas_inches": [
+    8.6,
+    4.48
+  ],
+  "font": "Times New Roman",
+  "preview_font": "Times New Roman",
+  "reference": {
+    "paper": "Don't Let AI Agents YOLO Your Files: Information and Control in Agent-Native Filesystems",
+    "venue": "SOSP 2026",
+    "version": "arXiv:2604.13536v5",
+    "figures": [
+      1,
+      2,
+      7
+    ],
+    "url": "https://arxiv.org/pdf/2604.13536v5",
+    "use": "Thin black structure, compact aligned blocks, circled operations, semantic red/green/blue accents."
+  },
+  "palette": {
+    "blue": "0066CC",
+    "pale": "F3F7FC",
+    "purple": "000000",
+    "purpale": "F5F5F5",
+    "red": "8C0000",
+    "redpale": "FFEBEB",
+    "green": "008000",
+    "greenpale": "E6FFE6",
+    "black": "000000",
+    "gray": "707070",
+    "light": "B0B0B0",
+    "white": "FFFFFF"
+  },
+  "line_styles": {
+    "flow": {
+      "color": "black",
+      "lw": 1.35,
+      "dash": false
+    },
+    "file": {
+      "color": "black",
+      "lw": 1.35,
+      "dash": true
+    },
+    "result": {
+      "color": "red",
+      "lw": 1.35,
+      "dash": false
+    },
+    "mapping": {
+      "color": "gray",
+      "lw": 0.6,
+      "dash": false
+    },
+    "divider": {
+      "color": "gray",
+      "lw": 0.4,
+      "dash": false
+    }
+  },
+  "running_example": {
+    "name": "shared-eight-call-trajectory",
+    "steps": {
+      "E1": "inspect the baseline",
+      "E2": "inspect the baseline",
+      "E3": "write f1 and return report.json",
+      "E4": "read f1 and overwrite f with f2",
+      "E5": "independently write g1 between affected calls",
+      "E6": "read f2 and delete h",
+      "E7": "reuse report.json and create p1 at that path",
+      "E8": "read p1"
+    },
+    "reported_files": [
+      "f"
+    ],
+    "reference_checkpoint": "C0 before E3",
+    "file_roots": [
+      "E3",
+      "E4"
+    ],
+    "selected_steps": [
+      "E3",
+      "E4",
+      "E6",
+      "E7",
+      "E8"
+    ],
+    "retained_steps": [
+      "E1",
+      "E2",
+      "E5"
+    ],
+    "filesystem_edges": [
+      [
+        "E3",
+        "E4"
+      ],
+      [
+        "E4",
+        "E6"
+      ],
+      [
+        "E7",
+        "E8"
+      ],
+      [
+        "E3",
+        "E6"
+      ]
+    ],
+    "file_edge_objects": [
+      "f1",
+      "f2",
+      "p1",
+      "f history"
+    ],
+    "message_edges": [
+      [
+        "E3",
+        "E7"
+      ]
+    ],
+    "objects": [
+      "f",
+      "g",
+      "h",
+      "p"
+    ],
+    "lower": [
+      "f0",
+      "g0",
+      "h0",
+      "\u2205"
+    ],
+    "upper_before": [
+      "f2",
+      "g1",
+      "WH",
+      "p1"
+    ],
+    "upper_after": [
+      "\u2205",
+      "g1",
+      "\u2205",
+      "\u2205"
+    ],
+    "merged_before": [
+      "f2",
+      "g1",
+      "\u2205",
+      "p1"
+    ],
+    "merged_after": [
+      "f0",
+      "g1",
+      "h0",
+      "\u2205"
+    ],
+    "before_images": [
+      [
+        "f",
+        "E3"
+      ],
+      [
+        "h",
+        "E6"
+      ],
+      [
+        "p",
+        "E7"
+      ]
+    ],
+    "turns": [
+      [
+        "E1",
+        "E2",
+        "E3"
+      ],
+      [
+        "E4"
+      ],
+      [
+        "E5",
+        "E6",
+        "E7",
+        "E8"
+      ]
+    ]
+  },
+  "paper_width_inches": 3.35,
+  "body_font_at_paper_width_pt": 8.18,
+  "text_words": 32,
+  "text_characters": 163
+}

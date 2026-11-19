@@ -22,11 +22,56 @@ def remove(path):
 def tail(path,limit=65536):
  if not path.is_file():return ''
  with path.open('rb') as f:f.seek(max(0,path.stat().st_size-limit));return f.read().decode(errors='replace')
+def diagnostic_excerpt(value,limit):
+ text=str(value)
+ text=re.sub(r'sk-[A-Za-z0-9_-]{12,}','[redacted key]',text)
+ text=re.sub(r'(?i)Bearer\s+[A-Za-z0-9._-]+','Bearer [redacted]',text)
+ return text[-limit:]
+def bounded_lean_download_observations(text):
+ """Keep at most two real dependency-error/redirect observations, not a trace."""
+ selected=[]
+ for block in re.findall(r'<observation>(.*?)</observation>',text,re.S):
+  compact=re.sub(r'\s+','',block)
+  error=all(s in compact for s in ('error:couldnotdownloadfilefrom',
+   'https://releases.lean-lang.org/lean4/v4.21.0/lean-4.21.0-linux.tar.zst',
+   'info:causedby:[28]Timeoutwasreached(Operationtooslow.'))
+  redirect='location:https://github.com/leanprover/lean4/releases/download/v4.21.0/lean-4.21.0-linux.tar.zst' in compact
+  if (error or redirect) and len(block)<=1800:
+   kind='error' if error else 'redirect'
+   selected=[(k,v) for k,v in selected if k!=kind]
+   selected.append((kind,'<observation>'+diagnostic_excerpt(block,1800)+'</observation>'))
+ return '\n'.join(value for _,value in selected)
+def bounded_model_diagnostics(data):
+ events=list(data.get('events') or [])
+ for line in str(data.get('stdout','')).splitlines():
+  try:event=json.loads(line)
+  except ValueError:continue
+  if isinstance(event,dict):events.append(event)
+ seen=set();tools=[];assistant='';counts={}
+ for event in events:
+  if not isinstance(event,dict):continue
+  encoded=json.dumps(event,sort_keys=True);digest=hashlib.sha256(encoded.encode()).hexdigest()
+  if digest in seen:continue
+  seen.add(digest)
+  item=event.get('item',{}) if event.get('type')=='item.completed' else {}
+  if item.get('type')=='agent_message':assistant=item.get('text','')
+  if item.get('type')=='command_execution':
+   rc=item.get('exit_code');label=str(rc);counts[label]=counts.get(label,0)+1
+   command=str(item.get('command',''))
+   tools.append(dict(exit_code=rc,status=item.get('status'),command_sha256=hashlib.sha256(command.encode()).hexdigest(),
+                     output_excerpt=diagnostic_excerpt(item.get('aggregated_output',''),400)))
+  payload=event.get('payload') or {}
+  if event.get('type')=='event_msg' and payload.get('type')=='agent_message':assistant=payload.get('message','')
+ return dict(schema='agenttx.bounded-model-diagnostics/v1',observed_command_results=sum(counts.values()),
+             command_exit_counts=counts,last_tool_results=tools[-3:],
+             final_assistant_excerpt=diagnostic_excerpt(assistant,1200),
+             bounded_summary_only=True,full_trajectory_retained=False)
 def model_summary(path):
  if not path.is_file():return None
  data=json.loads(path.read_text());summary={k:v for k,v in data.items() if k not in ('stdout','stderr','events')}
  summary['original_sha256']=sha(path)
  summary['stderr_excerpt']=str(data.get('stderr',''))[-16000:]
+ summary['bounded_diagnostics']=bounded_model_diagnostics(data)
  summary['usage_and_terminal_events']=[]
  for event in data.get('events',[]):
   if not isinstance(event,dict):continue
@@ -105,7 +150,11 @@ def retain(cell,policy,harness,worker_log=None,allow_test=False):
    f.unlink();removed.append(name)
  if not clean:
   # Preserve essential failure diagnostics, without retaining agent trajectories.
+  download_observations=''
+  if harness=='sweagent' and result.get('task')=='lean4-proof' and (cell/'container.stdout.log').is_file():
+   download_observations=bounded_lean_download_observations((cell/'container.stdout.log').read_text(errors='replace'))
   diagnostic={name:tail(cell/name) for name in ('verifier.stdout.log','verifier.stderr.log')}
+  if download_observations:diagnostic['bounded_dependency_download_observations']=download_observations
   if not result.get('success') or not result.get('api_usage',{}).get('complete'):
    text=tail(cell/'container.stderr.log')+'\n'+tail(cell/'container.stdout.log')
    diagnostic['model_error_lines']=[line for line in text.splitlines() if re.search(r'Error|Exception|ERROR|WARN|Traceback|exit_status|timed.out|FAILED|Connection',line)][-100:]
@@ -115,6 +164,7 @@ def retain(cell,policy,harness,worker_log=None,allow_test=False):
    if f.is_file():f.unlink();removed.append(name)
   # Leave exact numeric usage records where the frozen SWE parser reads them.
   lines=['usage=Usage(completion_tokens={completion_tokens},prompt_tokens={prompt_tokens},total_tokens={total_tokens})'.format(**x) for x in record['per_call_usage_records']]
+  if download_observations:lines.append(download_observations)
   (cell/'container.stdout.log').write_text('\n'.join(lines)+'\n' if lines else '')
   (cell/'container.stderr.log').write_text('Full model log removed by user-authorized summary retention; see failure-diagnostics.json.\n')
   if worker_log and worker_log.is_file():worker_log.write_text('Full worker log removed; see cell accounting-summary.json and failure-diagnostics.json.\n')

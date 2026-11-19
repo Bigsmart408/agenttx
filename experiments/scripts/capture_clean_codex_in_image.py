@@ -17,7 +17,10 @@ import re
 import signal
 import subprocess
 import sys
+import tempfile
+import threading
 import time
+import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -183,6 +186,7 @@ def main() -> int:
     parser.add_argument("--reasoning-effort", default="max")
     parser.add_argument("--max-steps", type=int, default=80)
     parser.add_argument("--max-model-calls", type=int, default=80)
+    parser.add_argument("--timeout-s", type=float, default=3600)
     args = parser.parse_args()
     if os.environ.get("AGENTTX_MOTIVATION_BWRAP") != "1":
         raise SystemExit("native image capture must run in the disposable task container")
@@ -192,12 +196,13 @@ def main() -> int:
         check=True,
     )
     profile = load_codex_gpt_profile(
+        Path(os.environ.get("CODEX_CONFIG_FILE", "/home/bfq/.codex/config.toml")),
+        Path(os.environ.get("CODEX_AUTH_FILE", "/home/bfq/.codex/auth.json")),
         model_override=args.model, reasoning_effort_override=args.reasoning_effort,
     )
-    codex_home = Path("/root/.codex")
-    codex_home.mkdir(exist_ok=True)
-    for name in ("config.toml", "auth.json"):
-        source = Path("/home/bfq/.codex") / name
+    codex_home = Path(tempfile.mkdtemp(prefix="native-clean-codex-"))
+    for name, variable in (("config.toml", "CODEX_CONFIG_FILE"), ("auth.json", "CODEX_AUTH_FILE")):
+        source = Path(os.environ.get(variable, str(Path("/home/bfq/.codex") / name)))
         (codex_home / name).write_bytes(source.read_bytes())
     os.chmod(codex_home / "auth.json", 0o600)
     env = dict(os.environ)
@@ -222,12 +227,31 @@ def main() -> int:
         stdout=subprocess.PIPE, stderr=stderr_log, text=True, bufsize=1,
         start_new_session=True,
     )
+    timed_out = threading.Event()
+    def kill_session():
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    hard_deadline = threading.Timer(args.timeout_s + 15, kill_session)
+    hard_deadline.daemon = True
+    def end_session():
+        timed_out.set()
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    deadline = threading.Timer(args.timeout_s, end_session)
+    deadline.daemon = True
+    deadline.start()
+    hard_deadline.start()
     events = []
     windows = []
     snapshots = [workspace_snapshot(workspace)]
     active = {}
     invalid = []
     assert process.stdout is not None
+    event_log = (args.output_dir / "codex.events.jsonl").open("w", encoding="utf-8")
     for line in process.stdout:
         stamp = time.time()
         try:
@@ -235,6 +259,8 @@ def main() -> int:
         except json.JSONDecodeError:
             continue
         events.append(event)
+        event_log.write(json.dumps(event) + "\n")
+        event_log.flush()
         item = event.get("item") or {}
         event_type = event.get("type")
         if event_type == "item.started" and item.get("type") in TOOL_TYPES:
@@ -246,7 +272,7 @@ def main() -> int:
                 start = stamp
             windows.append({"start": start, "end": stamp, "item": item})
             snapshots.append(workspace_snapshot(workspace))
-            if len(windows) >= args.max_steps:
+            if args.max_steps > 0 and len(windows) >= args.max_steps:
                 invalid.append("step_limit")
                 os.killpg(process.pid, signal.SIGTERM)
                 break
@@ -259,6 +285,11 @@ def main() -> int:
     except subprocess.TimeoutExpired:
         os.killpg(process.pid, signal.SIGKILL)
         returncode = process.wait(timeout=15)
+    deadline.cancel()
+    hard_deadline.cancel()
+    event_log.close()
+    if timed_out.is_set():
+        returncode = 124
     stderr_log.flush()
     stderr_log.seek(0)
     stderr = stderr_log.read()
@@ -288,12 +319,18 @@ def main() -> int:
     ]
     record["source_completed"] = record["source_completed"] and not invalid
     record["codex_stderr_tail"] = stderr[-2000:]
+    record["model_timed_out"] = timed_out.is_set()
+    record["model_session_wall_s"] = args.timeout_s
+    sessions = codex_home / "sessions"
+    if sessions.exists():
+        shutil.copytree(sessions, args.output_dir / "codex-sessions", dirs_exist_ok=True)
     (args.output_dir / "codex.events.jsonl").write_text(
         "".join(json.dumps(event) + "\n" for event in events), encoding="utf-8",
     )
     path = args.output_dir / "native_traces" / f"codex__{args.suite}__{args.task}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    shutil.rmtree(codex_home)
     print(f"codex image-native done {args.task}: steps={len(windows)} valid={not invalid}", flush=True)
     return 0
 

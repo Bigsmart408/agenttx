@@ -1,6 +1,6 @@
 from pathlib import Path
 import json,sys,subprocess,datetime
-sys.path[:0]=['/home/bfq/agenttx','/home/bfq/agenttx/src']
+sys.path[:0]=['/home/bfq/agenttx-workspace/agenttx','/home/bfq/agenttx-workspace/agenttx/src']
 from experiments.scripts.tb_task_services import TaskServices
 A=Path('/mnt/data/agenttx-runtime/validation/tb-api-connection-repair-20261023');folder=A/('original-localstack-'+datetime.datetime.now(datetime.timezone.utc).strftime('%H%M%S'));folder.mkdir()
 source=Path('/mnt/data/agenttx-runtime/cache/terminal_bench/terminal-bench-1/original-tasks/create-bucket')

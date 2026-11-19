@@ -62,7 +62,7 @@ def causal_retention() -> None:
     data = rows(RESULTS / "causal_retention.csv")
     styles = {
         "causal": ("AgentTX causal", LINES["agenttx"]),
-        "temporal": ("Temporal step", LINES["temporal"]),
+        "temporal": ("Temporal checkpoint", LINES["temporal"]),
         "whole_session": ("Whole branch", LINES["whole"]),
         "causal_without_dependencies": ("No dependencies", LINES["neutral"]),
     }

@@ -103,7 +103,7 @@ def main():
     service='agenttx-'+args.to_cohort.replace('tb-dual-native-','tb-dual-')
     command=['systemd-run','--user','--unit='+service,'--property=WorkingDirectory='+str(ROOT),
         '/bin/bash','-c',
-        'source scripts/agenttx-local-env.sh; export PYTHONPATH=/home/bfq/agenttx/src:/home/bfq/agenttx; exec '+str(PYTHON)+
+        'source scripts/agenttx-local-env.sh; export PYTHONPATH=/home/bfq/agenttx-workspace/agenttx/src:/home/bfq/agenttx-workspace/agenttx; exec '+str(PYTHON)+
         ' -u experiments/scripts/run_tb_dual_local.py --name '+shlex.quote(args.to_cohort)+' --resume-from '+shlex.quote(str(old))+
         ' --inventory '+shlex.quote(str(args.inventory_output))+
         (' --allow-protocol-update' if args.allow_protocol_update else '')]
