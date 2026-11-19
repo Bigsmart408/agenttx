@@ -10,7 +10,7 @@ import generate_diagrams as g
 def main():
     s = g.canvas('implementation-visual', 2.42)
     v = g.DetailStyle(s)
-    v.node(.24, .08, 8.12, .50, 'Shared user-space recovery controller',
+    v.node(.24, .08, 8.12, .50, 'Lancet',
            state='restored')
     v.node(.24, .94, 8.12, .50, 'Linux OverlayFS')
     v.arrow([(4.30, .58), (4.30, .94)])

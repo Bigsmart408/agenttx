@@ -8,7 +8,7 @@
     "math_symbol_font": "Cambria Math",
     "labels": [
       {
-        "text": "Shared user-space recovery controller",
+        "text": "Lancet",
         "size_pt": 21,
         "bold": false,
         "family": "Times New Roman"
@@ -295,6 +295,6 @@
   },
   "paper_width_inches": 3.35,
   "body_font_at_paper_width_pt": 8.18,
-  "text_words": 11,
-  "text_characters": 79
+  "text_words": 8,
+  "text_characters": 48
 }
