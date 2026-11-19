@@ -21,18 +21,14 @@ restoration~\cite{rollbacksurvey,dmtcp,waypoint,deltabox}. Building on
 these mechanisms, recent agent runtimes select checkpoint state from turn effects~\cite{crab}, restore
 consistent environment versions~\cite{planarian}, or recover aligned
 filesystem and agent-context checkpoints while retaining lessons~\cite{agentrewind}.
-In practice, developers frequently revise AI output: 66\% of respondents
-($n=31{,}476$) to the AI-frustrations question in the 2025 Stack Overflow
-Developer Survey reported solutions that were ``almost right, but not
-quite''~\cite{stackoverflow-survey-2025}.
-A study of 567 Claude Code-assisted pull requests across 157 projects found
-that 45.1\% of merged requests underwent revision~\cite{watanabe-agentic-prs}.
-Agent interfaces already expose file-level keep/undo
-controls~\cite{vscode-review-edits}: a user reviewing changes may want to
-roll back one or more files while retaining the rest. Checkpoint and
-whole-branch recovery can discard independent changes outside that selection,
-while file-level undo alone does not remove dependent calls and
-observations from agent context.
+In the 2025 Stack Overflow survey, 66\% of respondents ($n=31{,}476$)
+reported ``almost right, but not quite'' AI solutions~\cite{stackoverflow-survey-2025};
+45.1\% of merged requests in a study of 567 Claude Code-assisted pull
+requests underwent revision~\cite{watanabe-agentic-prs}.
+Users may want to roll back selected files while retaining other work,
+as reflected in file-level keep/undo controls~\cite{vscode-review-edits}.
+Checkpoint and branch rollback can discard that work; file-level undo
+alone does not remove dependent effects or agent observations.
 
 Our motivational experiments (Section~\ref{sec:motivation}) show that
 the DeltaBox recovery scope discards 56.90\% of valid work on average across 400
