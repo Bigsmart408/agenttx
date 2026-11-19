@@ -25,21 +25,20 @@ SOURCES = {
     'try': ROOT/'review/rq5-try-20261117/summary.json',
 }
 OUTPUT = ROOT/'paper/figures/rq5-storage'
-RQ5_PALETTE = {'gray': '#b7bdc5', 'blue': '#6b8ba4', 'teal': BAR_PALETTE['teal'],
-               'orange': BAR_PALETTE['orange'], 'red': BAR_PALETTE['red'],
-               'gold': '#b8a05d'}
-VARIANTS = {'native': ('Native FS', 'gray', ''),
-            'overlay-sync': ('OverlayFS', 'blue', ''),
-            'deltafs': ('DeltaBox', 'orange', ''),
-            'branchfs': ('BranchFS', 'teal', ''),
-            'try': ('try', 'gold', ''),
-            'agenttx-overlay': ('Lancet', 'red', '//')}
+RQ5_PALETTE = {'native': '#737373', 'overlay': '#575757', 'delta': '#3d3d3d',
+               'branch': '#666666', 'try': '#242424', 'lancet': BAR_PALETTE['red']}
+VARIANTS = {'native': ('Native FS', 'native', ''),
+            'overlay-sync': ('OverlayFS', 'overlay', '..'),
+            'deltafs': ('DeltaBox', 'delta', 'xx'),
+            'branchfs': ('BranchFS', 'branch', 'oo'),
+            'try': ('try', 'try', '++'),
+            'agenttx-overlay': ('Lancet', 'lancet', '//')}
 LAYERED = ('overlay-sync', 'deltafs', 'branchfs', 'try', 'agenttx-overlay')
 
 
 def main():
     configure_style()
-    plt.rcParams['hatch.linewidth'] = .45
+    plt.rcParams['hatch.linewidth'] = .5
     summaries = {key: json.loads(path.read_text()) for key, path in SOURCES.items()}
     assert summaries['storage']['counts']['measured'] == 1040
     assert summaries['partial']['counts']['measured'] == 2700
@@ -95,7 +94,9 @@ def main():
                 lows = np.array([g['ci95'][0] for g in groups])/divisor
                 highs = np.array([g['ci95'][1] for g in groups])/divisor
                 bars = ax.bar(x+(offset-(len(variants)-1)/2)*width, means, width=width*.94,
-                    color=RQ5_PALETTE[color], hatch=hatch, edgecolor='#3f3f3f', linewidth=.3,
+                    color=RQ5_PALETTE[color], hatch=hatch,
+                    edgecolor='#3f3f3f' if variant == 'agenttx-overlay' else '#f0f0f0',
+                    linewidth=.3,
                     yerr=np.maximum(0, [means-lows, highs-means]), zorder=3,
                     error_kw=dict(ecolor='#343434', elinewidth=.5, capsize=1.2, capthick=.5))
                 handles[variant] = bars
@@ -139,7 +140,7 @@ def main():
             ax.axhline(0, color='#737373', linewidth=.35)
     fig.legend([handles[v] for v in VARIANTS], [VARIANTS[v][0] for v in VARIANTS],
         loc='upper center', bbox_to_anchor=(.53, .998), ncol=6, fontsize=7.7,
-        handlelength=1.25, handleheight=.85, handletextpad=.45, columnspacing=1.15, borderaxespad=0)
+        handlelength=1.65, handleheight=1.0, handletextpad=.45, columnspacing=1.0, borderaxespad=0)
     fig.subplots_adjust(left=.075, right=.995, bottom=.16, top=.885)
     OUTPUT.mkdir(parents=True, exist_ok=True)
     for suffix in ('pdf', 'png'):

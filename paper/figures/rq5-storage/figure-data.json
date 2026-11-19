@@ -1488,42 +1488,42 @@
     }
   },
   "palette": {
-    "gray": "#b7bdc5",
-    "blue": "#6b8ba4",
-    "teal": "#16837a",
-    "orange": "#d97706",
-    "red": "#b42318",
-    "gold": "#b8a05d"
+    "native": "#737373",
+    "overlay": "#575757",
+    "delta": "#3d3d3d",
+    "branch": "#666666",
+    "try": "#242424",
+    "lancet": "#b42318"
   },
   "variants": {
     "native": [
       "Native FS",
-      "gray",
+      "native",
       ""
     ],
     "overlay-sync": [
       "OverlayFS",
-      "blue",
-      ""
+      "overlay",
+      ".."
     ],
     "deltafs": [
       "DeltaBox",
-      "orange",
-      ""
+      "delta",
+      "xx"
     ],
     "branchfs": [
       "BranchFS",
-      "teal",
-      ""
+      "branch",
+      "oo"
     ],
     "try": [
       "try",
-      "gold",
-      ""
+      "try",
+      "++"
     ],
     "agenttx-overlay": [
       "Lancet",
-      "red",
+      "lancet",
       "//"
     ]
   },
