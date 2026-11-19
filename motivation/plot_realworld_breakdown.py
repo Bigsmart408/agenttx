@@ -21,7 +21,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from motivation.plot_motivation_four import CM, configure_style
 from motivation.paper_labels import WORK_LABELS
-from motivation.paper_palette import BAR_PALETTE
 
 TIME = ROOT / "review/realworld-overlapped-search-20261118/time-analysis.json"
 BASELINE = Path("/mnt/data/agenttx-runtime/results/rq2-turn-checkpoint-20261111-r2/comparison-monitor/baseline.json")
@@ -31,10 +30,11 @@ TRY_ANALYSIS = ROOT / "review/try-realworld-paper-20261118/analysis.json"
 COHORTS = ("swe_sweagent", "swe_codex", "tb_sweagent", "tb_codex")
 HEADINGS = ("SWE / SWE-agent", "SWE / Codex", "TB / SWE-agent", "TB / Codex")
 CONTROLS = ("turn_checkpoint", "temporal_checkpoint", "whole_branch_abort")
+LANCET_COLOR = "#ed1c24"
 STAGES = (
-    ("preparation_replay_s", "Setup / replay", BAR_PALETTE["red"]),
-    ("agent_execution_s", "Agent execution", BAR_PALETTE["orange"]),
-    ("verification_s", "Verification", BAR_PALETTE["teal"]),
+    ("preparation_replay_s", "Setup / replay", "#eeeeee"),
+    ("agent_execution_s", "Agent execution", "#a3a3a3"),
+    ("verification_s", "Verification", "#505050"),
 )
 
 
@@ -174,7 +174,9 @@ def plot(data):
                 left = 0.0
                 for field, _, color in STAGES:
                     ax.barh(y+offset, values[field], left=left, height=.28,
-                            color=color, edgecolor="#3f3f3f", linewidth=.25,
+                            color=color,
+                            edgecolor=LANCET_COLOR if side == "causal" else "#3f3f3f",
+                            linewidth=.35 if side == "causal" else .25,
                             hatch=hatch, zorder=3)
                     left += values[field]
                 assert np.isclose(left, values["total_s"], rtol=0, atol=1e-5)
@@ -188,8 +190,9 @@ def plot(data):
         ax.tick_params(axis="y", length=0, pad=3)
         ax.grid(axis="x", color="#dddddd", linewidth=.4)
         ax.set_axisbelow(True)
-    handles = [Patch(facecolor=color, edgecolor="none", label=label) for _, label, color in STAGES]
-    handles.append(Patch(facecolor="white", edgecolor="#3f3f3f", linewidth=.4,
+    handles = [Patch(facecolor=color, edgecolor="#3f3f3f", linewidth=.35,
+                     label=label) for _, label, color in STAGES]
+    handles.append(Patch(facecolor="white", edgecolor=LANCET_COLOR, linewidth=.4,
                          hatch="///", label="Lancet"))
     fig.legend(handles=handles, loc="upper center", bbox_to_anchor=(.54, 1.005),
                ncol=2, fontsize=6.8, handlelength=1.25, handletextpad=.45,
@@ -209,6 +212,9 @@ def plot(data):
         outputs=outputs, group_by=["benchmark", "agent", "competitor"],
         layout="Single column; 2 by 2; paired horizontal stacked bars; Lancet hatched.",
         colors={key: color for key, _, color in STAGES},
+        method_styles={"causal": {"label": "Lancet", "edgecolor": LANCET_COLOR,
+                                  "hatch": "///"},
+                       "control": {"edgecolor": "#3f3f3f", "hatch": ""}},
         analysis_sha256=hashlib.sha256((OUT / "analysis.json").read_bytes()).hexdigest(),
     ), indent=2) + "\n")
 
